@@ -49,64 +49,46 @@ logging.basicConfig(
 logger = logging.getLogger("agent-Dakota")
 load_dotenv()
 
-class DefaultAgent(Agent):
-    def __init__(self, room_name: str) -> None:
-        self.server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
-        
+class DynamicAgent(Agent):
+    def __init__(self, room_name: str, server_url: str) -> None:
+        self.server_url = server_url
         try:
             self.survey_id = room_name.split('_')[-1]
         except:
             self.survey_id = "0"
+            
+        # Default fallback config
+        self.agent_config = {
+            "name": "Dakota",
+            "instructions": "Eres un asistente útil.",
+            "greeting": "Hola."
+        }
+        
+        # Load dynamic config
+        self._load_config()
 
         super().__init__(
-            instructions=f"""Eres Dakota, operadora de voz de Ausarta, una empresa de Telecomunicaciones. Estás hablando por teléfono con un cliente real.
-
-            DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
-            - SALA ACTUAL: '{room_name}'
-            - ID DE LA ENCUESTA: {self.survey_id}
-
-            REGLAS DE ORO (¡MUY IMPORTANTE!):
-            1. PROHIBIDO NARRAR ACCIONES: NUNCA digas en voz alta que vas a guardar un dato, NUNCA menciones el "ID de la encuesta", y NUNCA leas comandos de sistema. Habla SOLO como una persona normal.
-            2. PRONUNCIACIÓN: Di siempre "UNO" (ej: "del UNO al diez"), nunca "un".
-            3. PARA COLGAR: Siempre despídete primero diciendo el texto y LUEGO usa la herramienta 'finalizar_llamada'.
-
-            GUION ESTRICTO (SIGUE EL ORDEN):
-            
-            PASO 1: SALUDO
-            - Di: "Buenas, llamo de Ausarta para una encuesta rápida de calidad. ¿Tiene un momento?"
-            - Si dice NO: 
-              - Di: "Entendido, gracias. Que tenga buen día."
-              - Usa la herramienta 'finalizar_llamada'.
-            - Si dice SÍ: Ve INMEDIATAMENTE al PASO 2.
-
-            PASO 2: NOTA COMERCIAL
-            - Pregunta: "¿Qué nota del UNO al 10 le da al comercial que le atendió?"
-            - Si responde con un NÚMERO: Usa 'guardar_encuesta' (solo nota_comercial). Luego ve al PASO 3.
-            
-            PASO 3: NOTA INSTALADOR
-            - Pregunta: "¿Qué nota del UNO al 10 le da al instalador?"
-            - Si responde con un NÚMERO: Usa 'guardar_encuesta' (solo nota_instalador). Luego ve al PASO 4.
-
-            PASO 4: NOTA RAPIDEZ
-            - Pregunta: "¿Y qué nota del UNO al 10 le da a la rapidez del servicio?"
-            - Si responde con un NÚMERO: Usa 'guardar_encuesta' (solo nota_rapidez). Luego ve OBLIGATORIAMENTE al PASO 5.
-            
-            PASO 5: CIERRE Y COMENTARIOS
-            - Pregunta: "¿Algún comentario final antes de terminar?"
-            - Escucha la respuesta. Usa 'guardar_encuesta' (solo comentarios).
-            - Di: "Muchas gracias por su tiempo, que tenga buen día."
-            - Usa la herramienta 'finalizar_llamada'.
-
-            EXCEPCIÓN: SI EL USUARIO PIDE COLGAR A MITAD DE LA ENCUESTA (ej: "no tengo tiempo", "cuelga"):
-            - Si te dio una nota en su última frase, usa 'guardar_encuesta'.
-            - Di exactamente: "De acuerdo, disculpe las molestias. Adiós."
-            - Usa la herramienta 'finalizar_llamada'.
-            """,
+            instructions=self.agent_config["instructions"],
         )
 
+    def _load_config(self):
+        try:
+            # Synchronous request to get config before initializing parent
+            import requests
+            url = f"{self.server_url}/api/calls/{self.survey_id}/config"
+            resp = requests.get(url, timeout=3)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data:
+                    self.agent_config.update(data)
+                    logger.info(f"✅ Configuración cargada para agente: {self.agent_config['name']}")
+        except Exception as e:
+            logger.error(f"⚠️ Error cargando config dinámica, usando default: {e}")
+
     async def on_enter(self):
+        greeting = self.agent_config.get("greeting", "Hola.")
         await self.session.generate_reply(
-            instructions="Di exactamente: 'Buenas, llamo de Ausarta para una encuesta rápida de calidad. ¿Tiene un momento?' y espera.",
+            instructions=f"Di exactamente: '{greeting}' y espera.",
             allow_interruptions=False
         )
 
@@ -146,54 +128,59 @@ class DefaultAgent(Agent):
     async def _http_tool_finalizar_llamada(
         self, context: RunContext, nombre_sala: str
     ) -> str | None:
-        """
-        Herramienta para colgar la llamada telefónica.
-        Úsala siempre que la conversación deba terminar.
-        """
-        # (Al simplificar el texto de esta función, la IA no se vuelve loca)
-        
         context.disallow_interruptions()
-        
-        logger.info("⏳ Esperando 4s para colgar (permitiendo audio despedida)...")
+        logger.info("⏳ Esperando 4s para colgar...")
         await asyncio.sleep(4) 
         
         url = f"{self.server_url}/colgar"
         payload = {"nombre_sala": nombre_sala}
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, timeout=5, json=payload) as resp:
-                    logger.info(f"✂️ COLGANDO: {nombre_sala}")
-                    return await resp.text()
+                async with session.post(url, timeout=5, json=payload):
+                    pass
+            return "Llamada finalizada."
         except Exception as e:
             raise ToolError(f"Error Colgar: {e}")
 
 server = AgentServer()
 
-@server.rtc_session(agent_name="Dakota-1ef9")
+@server.rtc_session(agent_name="Ausarta-Agent")
 async def entrypoint(ctx: JobContext):
     
     vad_model = silero.VAD.load()
+    server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
     
-    def handle_error(error):
-        msg = str(error)
-        if "429" in msg: 
-            logger.error("\n\n🚨🚨🚨 ALERTA GROQ: Límite Alcanzado 🚨🚨🚨\n")
-        else:
-            logger.error(f"\n⚠️ ERROR DEL AGENTE: {error}\n")
+    # 1. Fetch AI Config (Global for now)
+    # Ideally this runs once or cached, but per-call is safer for updates
+    ai_config = {
+        "llm_model": "llama-3.3-70b-versatile",
+        "stt_model": "nova-2", 
+        "tts_model": "sonic-multilingual",
+        "tts_voice": "fb926b21-4d92-411a-85d0-9d06859e2171"
+    }
+    
+    try:
+        import requests
+        resp = requests.get(f"{server_url}/api/ai/config", timeout=2)
+        if resp.status_code == 200:
+            remote_conf = resp.json()
+            if remote_conf: ai_config.update(remote_conf)
+    except: pass
 
     try:
         session = AgentSession(
-            stt=inference.STT(model="deepgram/nova-3", language="es"),
+            stt=inference.STT(model=f"deepgram/{ai_config['stt_model']}", language="es"),
             llm=openai.LLM(
-                model="llama-3.3-70b-versatile", 
-                base_url="https://api.groq.com/openai/v1",
-                api_key=os.getenv("GROQ_API_KEY"),
+                model=ai_config['llm_model'], 
+                base_url="https://api.groq.com/openai/v1" if "llama" in ai_config['llm_model'] or "mixtral" in ai_config['llm_model'] else None,
+                api_key=os.getenv("GROQ_API_KEY") if "llama" in ai_config['llm_model'] else os.getenv("OPENAI_API_KEY"),
                 temperature=0.1
             ),
             tts=inference.TTS(
-                model="cartesia/sonic-3",
-                voice="6511153f-72f9-4314-a204-8d8d8afd646a",
-                language="es"
+                model=f"cartesia/{ai_config['tts_model']}",
+                voice=ai_config['tts_voice'],
+                language="es",
+                api_key=os.getenv("CARTESIA_API_KEY")
             ),
             vad=vad_model,
             preemptive_generation=True, 
@@ -201,18 +188,15 @@ async def entrypoint(ctx: JobContext):
 
         @session.on("user_speech_committed")
         def on_user_speech(msg: stt.SpeechEvent):
-            print(f"\n🗣️  USUARIO DICE: {msg.alternatives[0].text}\n")
             logger.info(f"TRANSCRIPCIÓN: {msg.alternatives[0].text}")
 
-        # Configuración de cancelación de ruido opcional
+        # Configuración de cancelación de ruido
         noise_canceller = None
         if HAS_NOISE_CANCELLATION:
             noise_canceller = lambda params: noise_cancellation.BVCTelephony() if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP else noise_cancellation.BVC()
-        else:
-            logger.warning("⚠️ Noise cancellation plugin not found. Running without noise cancellation.")
 
         await session.start(
-            agent=DefaultAgent(room_name=ctx.room.name),
+            agent=DynamicAgent(room_name=ctx.room.name, server_url=server_url),
             room=ctx.room,
             room_options=room_io.RoomOptions(
                 audio_input=room_io.AudioInputOptions(
@@ -227,7 +211,7 @@ async def entrypoint(ctx: JobContext):
         await background_audio.start(room=ctx.room, agent_session=session)
     
     except Exception as e:
-        handle_error(e)
+        logger.error(f"⚠️ ERROR DEL AGENTE: {e}")
 
 if __name__ == "__main__":
     cli.run_app(server)

@@ -263,19 +263,28 @@ async def make_outbound_call(request: dict):
     print(f"📞 Iniciando llamada de prueba a {phone}...")
     
     try:
-        # 1. Crear registro en BD (aunque sea de prueba)
         if supabase:
+            try: 
+                 agent_id_int = int(agent_id) 
+            except: 
+                 # Fetch default if invalid
+                 try:
+                     res = supabase.table("agent_config").select("id").limit(1).execute()
+                     agent_id_int = res.data[0]['id'] if res.data else None
+                 except: agent_id_int = None
+
             encuesta_data = {
                 "telefono": phone,
                 "nombre_cliente": "Prueba Dashboard",
                 "fecha": datetime.utcnow().isoformat(),
                 "status": "initiated",
-                "completada": 0
+                "completada": 0,
+                "agent_id": agent_id_int
             }
             res_enc = supabase.table("encuestas").insert(encuesta_data).execute()
             encuesta_id = res_enc.data[0]['id']
         else:
-            encuesta_id = 9999 # Fallback si no hay DB
+            encuesta_id = 9999 # Fallback
             
         # 2. Configurar LiveKit
         sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
@@ -304,50 +313,105 @@ async def make_outbound_call(request: dict):
 @app.get("/api/agents")
 async def get_agents():
     """Endpoint compatible con frontend que espera lista de agentes"""
-    if not supabase: return [{"name": "Dakota", "instructions": "Default"}]
+    if not supabase: return [{"id": "1", "name": "Dakota", "instructions": "Default", "use_case": "Encuesta"}]
     try:
-        res = supabase.table("agent_config").select("*").limit(1).execute()
-        if res.data:
-            # Frontend espera 'instructions' en el objeto principal
-            # Y 'id' como string si es posible
-            agent = res.data[0]
-            agent['id'] = str(agent['id'])
-            return [agent] # Devolvemos lista
-        else:
-            return [{"id": "1", "name": "Dakota", "use_case": "Encuesta", "instructions": "Default"}]
+        res = supabase.table("agent_config").select("*").order("id").execute()
+        agents = res.data or []
+        # Convertir IDs a string para el frontend
+        for a in agents:
+            a['id'] = str(a['id'])
+        return agents
     except Exception as e:
         print(f"Error getting agents: {e}")
         return []
+
+@app.post("/api/agents")
+async def create_agent(agent_data: dict):
+    if not supabase: return {"error": "No DB"}
+    try:
+        new_agent = {
+            "name": agent_data.get("name", "Nuevo Agente"),
+            "use_case": agent_data.get("useCase", "General"),
+            "description": agent_data.get("description", ""),
+            "instructions": agent_data.get("instructions", ""),
+            "greeting": agent_data.get("greeting", "Hola"),
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        res = supabase.table("agent_config").insert(new_agent).execute()
+        return res.data[0] if res.data else {}
+    except Exception as e:
+        print(f"Error creating agent: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.put("/api/agents/{agent_id}")
 async def update_agent(agent_id: str, config: dict):
     if not supabase: return {"error": "No DB"}
     try:
-        # Ignoramos el ID de la URL y actualizamos el ÚNICO agente que tenemos
-        curr = supabase.table("agent_config").select("id").limit(1).execute()
-        
-        # Mapeamos campos si el frontend manda nombres distintos (ej: cammelCase vs snake_case)
-        # El frontend manda: name, useCase, description, instructions, greeting
-        
         db_config = {}
         if "name" in config: db_config["name"] = config["name"]
         if "instructions" in config: db_config["instructions"] = config["instructions"]
         if "greeting" in config: db_config["greeting"] = config["greeting"]
         if "description" in config: db_config["description"] = config["description"]
-        if "useCase" in config: db_config["use_case"] = config["useCase"] # CAMBIO IMPORTANTE
+        if "useCase" in config: db_config["use_case"] = config["useCase"] 
         
         db_config["updated_at"] = datetime.utcnow().isoformat()
         
-        if not curr.data:
-            supabase.table("agent_config").insert(db_config).execute()
-        else:
-            first_id = curr.data[0]['id']
-            supabase.table("agent_config").update(db_config).eq("id", first_id).execute()
+        supabase.table("agent_config").update(db_config).eq("id", agent_id).execute()
             
         return {"status": "ok", "message": "Agente actualizado"}
     except Exception as e:
         print(f"Error updating agent: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.get("/api/calls/{encuesta_id}/config")
+async def get_call_config(encuesta_id: str):
+    """Devuelve la configuración del agente para una llamada específica"""
+    if not supabase: return {}
+    
+    agent_config = {}
+    
+    try:
+        # 1. Intentar buscar en 'encuestas' si tiene agent_id (si agregamos columna)
+        # Por ahora, verificamos si está vinculado a una campaña via campaign_leads
+        
+        # Buscar lead asociado a esta encuesta
+        res_lead = supabase.table("campaign_leads").select("campaign_id").eq("call_id", encuesta_id).execute()
+        
+        agent_id = None
+        
+        if res_lead.data:
+            # Es una llamada de campaña
+            campaign_id = res_lead.data[0]['campaign_id']
+            res_camp = supabase.table("campaigns").select("agent_id").eq("id", campaign_id).execute()
+            if res_camp.data:
+                agent_id = res_camp.data[0]['agent_id']
+        else:
+            # Puede ser llamada manual (test). 
+            # Intentamos ver si 'agent_id' fue guardado en la tabla encuestas (si añadimos la columna)
+            # O... fallback al primer agente
+            try:
+                res_enc = supabase.table("encuestas").select("agent_id").eq("id", encuesta_id).execute()
+                if res_enc.data and res_enc.data[0].get('agent_id'):
+                    agent_id = res_enc.data[0]['agent_id']
+            except: pass
+
+        if not agent_id:
+            # Fallback a agente Dakota Default (o el primero)
+            res_first = supabase.table("agent_config").select("id").limit(1).execute()
+            if res_first.data:
+                agent_id = res_first.data[0]['id']
+
+        if agent_id:
+            res_agent = supabase.table("agent_config").select("*").eq("id", agent_id).execute()
+            if res_agent.data:
+                agent_config = res_agent.data[0]
+
+    except Exception as e:
+        print(f"Error fetching call config: {e}")
+
+    return agent_config
+
 
 # --- CONFIGURACIÓN DE MODELOS (AI) ---
 

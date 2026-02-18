@@ -13,3 +13,4 @@ aiohttp
 mysql-connector-python
 supabase
 postgrest
+python-multipart
