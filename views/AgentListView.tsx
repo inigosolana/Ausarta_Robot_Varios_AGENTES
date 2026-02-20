@@ -32,7 +32,7 @@ const AgentListView: React.FC = () => {
                         .from('ai_config')
                         .select('*')
                         .eq('agent_id', agent.id)
-                        .single();
+                        .maybeSingle();
                     return { ...agent, ai_config: aiData as AIConfig | undefined };
                 })
             );
