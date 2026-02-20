@@ -324,8 +324,10 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                     </>
                                 ) : aiConfig.llm_provider === 'google' ? (
                                     <>
-                                        <option value="models/gemini-2.0-flash">Gemini 2.0 Flash</option>
+                                        <option value="models/gemini-2.0-flash">Gemini 2.0 Flash (Fast)</option>
+                                        <option value="models/gemini-2.0-pro-exp-02-05">Gemini 2.0 Pro (Most Powerful)</option>
                                         <option value="models/gemini-2.0-flash-lite">Gemini 2.0 Flash Lite</option>
+                                        <option value="models/gemini-1.5-pro">Gemini 1.5 Pro</option>
                                         <option value="models/gemini-1.5-flash">Gemini 1.5 Flash</option>
                                     </>
                                 ) : aiConfig.llm_provider === 'deepseek' ? (
