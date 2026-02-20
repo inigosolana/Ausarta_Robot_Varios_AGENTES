@@ -51,7 +51,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                 .from('ai_config')
                 .select('*')
                 .eq('agent_id', agentId)
-                .single();
+                .maybeSingle();
             if (data) setAiConfig(data as AIConfig);
         } catch (err) {
             console.error('Error loading AI config:', err);
@@ -111,11 +111,12 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
             // Upsert AI config
             const aiPayload = { ...aiConfig, agent_id: agentId, updated_at: new Date().toISOString() };
+            delete (aiPayload as any).id;  // Remove id to avoid conflict on insert
             const { data: existingAI } = await supabase
                 .from('ai_config')
                 .select('id')
                 .eq('agent_id', agentId)
-                .single();
+                .maybeSingle();
 
             if (existingAI) {
                 await supabase.from('ai_config').update(aiPayload).eq('agent_id', agentId);
