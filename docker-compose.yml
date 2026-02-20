@@ -49,6 +49,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Variables VITE_ necesarias en tiempo de build
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-${SUPABASE_URL}}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-${SUPABASE_KEY}}
+        VITE_API_URL: ${VITE_API_URL:-}
     container_name: ausarta-frontend
     restart: unless-stopped
     ports:
@@ -57,8 +62,6 @@ services:
       - ausarta-network
     depends_on:
       - backend
-    environment:
-      - VITE_API_URL=http://backend:8001
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost/" ]
       interval: 30s

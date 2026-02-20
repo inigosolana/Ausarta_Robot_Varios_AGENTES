@@ -1,98 +1,106 @@
 # 🐳 Despliegue en Docker con Portainer
 
-Guía completa para desplegar Ausarta Robot en Docker usando Portainer.
+Guía completa para desplegar Ausarta Robot v2.0 en Docker usando Portainer.
 
 ## 📦 Estructura Docker
 
 ```
-ausarta-robot-voice-agent-platform/
+ausarta-robot/
 ├── docker-compose.yml          # Orquestación de servicios
-├── .env.example                # Variables de entorno
+├── .env                        # Variables de entorno
 ├── Dockerfile                  # Frontend (React + Nginx)
 ├── nginx.conf                  # Configuración Nginx
-├── init-db.sql                 # Inicialización MySQL
-└── backend/
-    ├── Dockerfile              # Backend (API + Agent)
-    └── start.sh                # Script de inicio
+├── backend/
+│   ├── Dockerfile              # Backend (API + Agent)
+│   └── start.sh                # Script de inicio
+└── PORTAINER_QUICKSTART.md     # Guía rápida
+```
+
+## 🏗️ Arquitectura
+
+```
+┌────────────────────────────────────────────┐
+│                Docker Host                  │
+│                                             │
+│  ┌─────────────┐      ┌──────────────┐     │
+│  │  Frontend    │      │   Backend    │     │
+│  │  (Nginx)     │─────▶│  (FastAPI)   │     │
+│  │  :80         │ /api │  :8001       │     │
+│  └─────────────┘      └──────┬───────┘     │
+│                               │              │
+│                    ┌──────────▼───────┐      │
+│                    │    Supabase      │      │
+│                    │  (Cloud DB)      │      │
+│                    │  + Auth + RLS    │      │
+│                    └──────────────────┘      │
+└────────────────────────────────────────────┘
 ```
 
 ## 🚀 Opción 1: Despliegue en Portainer (Recomendado)
 
-### Paso 1: Preparar el archivo .env
-
-1. Copia `.env.example` a `.env`:
-```bash
-cp .env.example .env
-```
-
-2. Edita `.env` con tus credenciales:
-```env
-LIVEKIT_URL=wss://tu-proyecto.livekit.cloud
-LIVEKIT_API_KEY=tu_api_key
-LIVEKIT_API_SECRET=tu_api_secret
-SIP_OUTBOUND_TRUNK_ID=ST_tu_trunk_id
-DEEPGRAM_API_KEY=tu_deepgram_key
-CARTESIA_API_KEY=tu_cartesia_key
-GROQ_API_KEY=tu_groq_key
-DB_USER=ausarta_user
-DB_PASSWORD=tu_password_seguro
-DB_NAME=encuestas_ausarta
-MYSQL_ROOT_PASSWORD=root_password_muy_seguro
-```
-
-### Paso 2: En Portainer
+### Paso 1: En Portainer
 
 1. **Accede a Portainer** (ej: http://tu-servidor:9000)
-
 2. **Navega a Stacks** en el menú lateral
-
 3. **Haz clic en "Add Stack"**
-
 4. **Configura el Stack:**
    - **Name**: `ausarta-robot`
    - **Build method**: Selecciona **"Repository"**
-   
+
 5. **Configuración del Repositorio:**
-   - **Repository URL**: `https://github.com/inigosolana/Ausarta_Robot`
-   - **Repository reference**: `refs/heads/master`
+   - **Repository URL**: `https://github.com/inigosolana/Ausarta_Robot_Varios_AGENTES`
+   - **Repository reference**: `refs/heads/main`
    - **Compose path**: `docker-compose.yml`
 
-6. **Variables de Entorno:**
-   
-   Haz clic en "Add environment variable" y añade cada una:
-   
-   | Variable | Valor |
-   |----------|-------|
-   | `LIVEKIT_URL` | `wss://tu-proyecto.livekit.cloud` |
-   | `LIVEKIT_API_KEY` | `tu_api_key` |
-   | `LIVEKIT_API_SECRET` | `tu_api_secret` |
-   | `SIP_OUTBOUND_TRUNK_ID` | `ST_tu_trunk_id` |
-   | `DEEPGRAM_API_KEY` | `tu_deepgram_key` |
-   | `CARTESIA_API_KEY` | `tu_cartesia_key` |
-   | `GROQ_API_KEY` | `tu_groq_key` |
-   | `OPENAI_API_KEY` | `tu_openai_key` |
-   | `DB_HOST` | `mysql` |
-   | `DB_USER` | `ausarta_user` |
-   | `DB_PASSWORD` | `tu_password_seguro` |
-   | `DB_NAME` | `encuestas_ausarta` |
-   | `MYSQL_ROOT_PASSWORD` | `root_password_muy_seguro` |
+### Paso 2: Variables de Entorno
 
-7. **Haz clic en "Deploy the stack"**
+Haz clic en "Add environment variable" y añade cada una:
 
-8. **Espera a que se construyan los contenedores** (puede tardar 5-10 minutos la primera vez)
+| Variable | Descripción | Ejemplo |
+|----------|-------------|---------|
+| `LIVEKIT_URL` | URL de LiveKit Server | `wss://tu-proyecto.livekit.cloud` |
+| `LIVEKIT_API_KEY` | API Key LiveKit | `APIxxxxxxxx` |
+| `LIVEKIT_API_SECRET` | API Secret LiveKit | `xxxxxxxxxxxxx` |
+| `SIP_OUTBOUND_TRUNK_ID` | ID del trunk SIP | `ST_xxxxxxxx` |
+| `DEEPGRAM_API_KEY` | API Key Deepgram (STT) | `xxxxxxxxxxxxx` |
+| `CARTESIA_API_KEY` | API Key Cartesia (TTS) | `xxxxxxxxxxxxx` |
+| `GROQ_API_KEY` | API Key Groq (LLM) | `gsk_xxxxxxxx` |
+| `OPENAI_API_KEY` | API Key OpenAI | `sk-xxxxxxxx` |
+| `GOOGLE_API_KEY` | API Key Google (Gemini) | `AIzaxxxxxxxx` |
+| **`SUPABASE_URL`** | URL de Supabase (backend) | `https://xxx.supabase.co` |
+| **`SUPABASE_KEY`** | Anon Key de Supabase | `eyJhbGci...` |
+| **`VITE_SUPABASE_URL`** | URL de Supabase (frontend) | `https://xxx.supabase.co` |
+| **`VITE_SUPABASE_ANON_KEY`** | Anon Key de Supabase (frontend) | `eyJhbGci...` |
 
-### Paso 3: Verificar el Despliegue
+> ⚠️ **IMPORTANTE**: Las variables `VITE_*` se inyectan en el frontend **en tiempo de build**. Si las cambias, necesitas hacer "Pull and redeploy" para que surtan efecto.
 
-1. En Portainer, ve a "Containers"
-2. Deberías ver 3 contenedores corriendo:
-   - ✅ `ausarta-frontend` (puerto 80)
-   - ✅ `ausarta-backend` (puerto 8001)
-   - ✅ `ausarta-mysql` (puerto 3306)
+> 💡 **Fallback**: Si solo configuras `SUPABASE_URL` y `SUPABASE_KEY`, el docker-compose las usará como fallback para las variables `VITE_*`.
 
-3. **Accede a la aplicación:**
-   - Frontend: http://tu-servidor:80
-   - Backend API: http://tu-servidor:8001
-   - API Docs: http://tu-servidor:8001/docs
+### Paso 3: Deploy
+
+1. **Haz clic en "Deploy the stack"**
+2. **Espera 5-10 minutos** la primera vez (build de Node.js + Python)
+
+### Paso 4: Verificar
+
+En Portainer → Containers, deberías ver:
+
+| Contenedor | Puerto | Estado |
+|------------|--------|--------|
+| ✅ `ausarta-frontend` | 80 | Running |
+| ✅ `ausarta-backend` | 8002 → 8001 | Running |
+
+### Paso 5: Crear Primer Superadmin
+
+1. Ve a **Supabase Dashboard** → **Authentication** → **Users**
+2. **"Add user"** → **"Create new user"**
+3. Introduce email y contraseña
+4. Ve a **Table Editor** → **user_profiles**
+5. Busca el registro recién creado
+6. Cambia el campo `role` de `user` a **`superadmin`**
+7. ¡Listo! Ya puedes iniciar sesión
+
+---
 
 ## 🐳 Opción 2: Despliegue Local con Docker Compose
 
@@ -104,8 +112,8 @@ MYSQL_ROOT_PASSWORD=root_password_muy_seguro
 
 1. **Clonar el repositorio:**
 ```bash
-git clone https://github.com/inigosolana/Ausarta_Robot.git
-cd Ausarta_Robot
+git clone https://github.com/inigosolana/Ausarta_Robot_Varios_AGENTES.git
+cd Ausarta_Robot_Varios_AGENTES
 ```
 
 2. **Crear archivo .env:**
@@ -137,243 +145,132 @@ docker-compose logs -f frontend
 docker-compose down
 ```
 
-6. **Detener y eliminar volúmenes (limpieza completa):**
-```bash
-docker-compose down -v
-```
+---
 
 ## 📊 Servicios y Puertos
 
 | Servicio | Puerto | Descripción |
 |----------|--------|-------------|
-| **Frontend** | 80 | Interfaz web React |
-| **Backend** | 8001 | API FastAPI + LiveKit Agent |
-| **MySQL** | 3306 | Base de datos |
+| **Frontend** | 80 | Interfaz web React + Login |
+| **Backend** | 8002 → 8001 | API FastAPI + LiveKit Agent |
+| **Supabase** | Cloud | Base de datos + Auth + RLS |
 
-## 🔍 Verificación de Health Checks
+---
 
-Los contenedores tienen health checks configurados:
+## 👥 Sistema de Roles (RBAC)
 
-```bash
-# Ver estado de salud
-docker ps
+### Jerarquía
 
-# Detalles del health check
-docker inspect ausarta-backend --format='{{json .State.Health}}' | jq
-docker inspect ausarta-frontend --format='{{json .State.Health}}' | jq
-docker inspect ausarta-mysql --format='{{json .State.Health}}' | jq
+```
+Superadmin ─── puede crear ──▶ Admins
+    │                            │
+    │                            ├── puede crear ──▶ Users
+    │                            └── puede gestionar permisos de Users
+    │
+    └── acceso total a todo
 ```
 
-## 🛠️ Troubleshooting
+### Permisos por Módulo
 
-### Backend no inicia
+Los admins pueden habilitar/deshabilitar módulos individualmente para cada usuario:
 
-**Problema**: El backend muestra errores de conexión
+| Módulo | Descripción |
+|--------|-------------|
+| `overview` | Dashboard general |
+| `create-agents` | Crear y editar agentes |
+| `test-call` | Llamadas de prueba |
+| `campaigns` | Gestión de campañas |
+| `models` | Configuración de modelos AI |
+| `telephony` | Configuración de telefonía |
+| `results` | Resultados de llamadas |
+| `usage` | Uso y estadísticas |
 
-**Solución**:
-```bash
-# Ver logs del backend
-docker logs ausarta-backend -f
-
-# Verificar variables de entorno
-docker exec ausarta-backend env | grep LIVEKIT
-
-# Reiniciar contenedor
-docker restart ausarta-backend
-```
-
-### Frontend no carga
-
-**Problema**: La página web no responde
-
-**Solución**:
-```bash
-# Ver logs del frontend
-docker logs ausarta-frontend -f
-
-# Verificar nginx
-docker exec ausarta-frontend nginx -t
-
-# Reiniciar contenedor
-docker restart ausarta-frontend
-```
-
-### MySQL no conecta
-
-**Problema**: Error de conexión a base de datos
-
-**Solución**:
-```bash
-# Ver logs de MySQL
-docker logs ausarta-mysql -f
-
-# Conectar manualmente
-docker exec -it ausarta-mysql mysql -u root -p
-
-# Verificar base de datos
-docker exec ausarta-mysql mysql -u root -p${MYSQL_ROOT_PASSWORD} -e "SHOW DATABASES;"
-```
-
-### Problemas de red
-
-**Problema**: Los contenedores no se comunican
-
-**Solución**:
-```bash
-# Listar redes
-docker network ls
-
-# Inspeccionar red
-docker network inspect ausarta_ausarta-network
-
-# Recrear la red
-docker-compose down
-docker-compose up -d
-```
+---
 
 ## 🔄 Actualizar el Stack
 
 ### Método 1: Desde Portainer
-
 1. Ve a "Stacks" → "ausarta-robot"
 2. Haz clic en "Pull and redeploy"
-3. Espera a que se actualice
+3. Espera ~5 minutos
 
 ### Método 2: Desde línea de comandos
-
 ```bash
-cd Ausarta_Robot
-git pull origin master
+cd Ausarta_Robot_Varios_AGENTES
+git pull origin main
 docker-compose down
 docker-compose up -d --build
 ```
 
-## 📝 Logs y Monitoreo
+---
 
-### Ver logs en tiempo real
+## 🛠️ Troubleshooting
+
+### Backend no inicia
+```bash
+docker logs ausarta-backend -f
+docker exec ausarta-backend env | grep SUPABASE
+docker restart ausarta-backend
+```
+
+### Frontend no carga / Login falla
+```bash
+docker logs ausarta-frontend -f
+# Si cambiaste variables VITE_*, rebuild:
+docker-compose up -d --build frontend
+```
+
+### Error de autenticación
+- Verifica que el usuario existe en **Supabase Auth**
+- Verifica que `user_profiles` tiene el registro
+- Verifica que el `role` está correctamente asignado
+
+---
+
+## 🔍 Health Checks
 
 ```bash
-# Todos los servicios
-docker-compose logs -f
-
-# Solo errores
-docker-compose logs -f | grep ERROR
-
-# Últimas 100 líneas
-docker-compose logs --tail=100
+docker ps
+docker inspect ausarta-backend --format='{{json .State.Health}}' | jq
+docker inspect ausarta-frontend --format='{{json .State.Health}}' | jq
 ```
 
-### Monitoreo de recursos
-
-```bash
-# Ver uso de recursos
-docker stats
-
-# Ver procesos dentro del contenedor
-docker top ausarta-backend
-docker top ausarta-frontend
-```
-
-## 🧹 Mantenimiento
-
-### Limpiar imágenes antiguas
-
-```bash
-# Eliminar imágenes no utilizadas
-docker image prune -a
-
-# Eliminar volúmenes no utilizados
-docker volume prune
-```
-
-### Backup de la base de datos
-
-```bash
-# Crear backup
-docker exec ausarta-mysql mysqldump -u root -p${MYSQL_ROOT_PASSWORD} encuestas_ausarta > backup.sql
-
-# Restaurar backup
-docker exec -i ausarta-mysql mysql -u root -p${MYSQL_ROOT_PASSWORD} encuestas_ausarta < backup.sql
-```
-
-## 📈 Escalado
-
-### Aumentar recursos
-
-Edita `docker-compose.yml`:
-
-```yaml
-services:
-  backend:
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 4G
-        reservations:
-          cpus: '1'
-          memory: 2G
-```
-
-### Múltiples replicas (con Docker Swarm)
-
-```bash
-# Inicializar swarm
-docker swarm init
-
-# Desplegar stack
-docker stack deploy -c docker-compose.yml ausarta
-
-# Escalar servicio
-docker service scale ausarta_backend=3
-```
+---
 
 ## 🔒 Seguridad
 
-### Variables de entorno en Portainer
+- **RLS habilitado** en todas las tablas de Supabase
+- **Autenticación** obligatoria para acceder al frontend
+- **Permisos por módulo** para usuarios regulares
+- La `SUPABASE_KEY` es la clave **anon** (segura para el frontend)
+- Las credenciales sensibles (service_role) NO se exponen al frontend
 
-**IMPORTANTE**: No expongas las variables de entorno en el repositorio.
-
-En Portainer:
-1. Ve a "Secrets"
-2. Crea secretos para cada credencial sensible
-3. Referéncialos en el stack
-
-### HTTPS con Let's Encrypt
-
-Añade un reverse proxy (Traefik o Nginx Proxy Manager):
-
-```yaml
-services:
-  traefik:
-    image: traefik:v2.9
-    ports:
-      - "443:443"
-      - "80:80"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./traefik.yml:/traefik.yml
-      - ./acme.json:/acme.json
-```
+---
 
 ## ✅ Checklist de Despliegue
 
 - [ ] Archivo `.env` configurado con todas las credenciales
-- [ ] Puertos 80 y 8001 disponibles
+- [ ] Puertos 80 y 8002 disponibles
 - [ ] Docker y Docker Compose instalados
-- [ ] Variables de entorno añadidas en Portainer
+- [ ] Variables de entorno añadidas en Portainer (incluyendo `VITE_*`)
 - [ ] Stack desplegado correctamente
-- [ ] 3 contenedores corriendo (frontend, backend, mysql)
+- [ ] 2 contenedores corriendo (frontend, backend)
 - [ ] Health checks en estado "healthy"
-- [ ] Frontend accesible en http://tu-servidor
-- [ ] Backend API accesible en http://tu-servidor:8001
-- [ ] Base de datos inicializada correctamente
+- [ ] Frontend carga pantalla de Login
+- [ ] Primer Superadmin creado y puede iniciar sesión
+- [ ] Backend API accesible en http://tu-servidor:8002/docs
+
+---
 
 ## 🎉 ¡Listo!
 
-Tu aplicación Ausarta Robot está ahora corriendo en Docker y lista para usar.
+Tu aplicación Ausarta Robot v2.0 está corriendo con:
+- 🔐 **Login y RBAC** (Superadmin → Admin → User)
+- 🤖 **Multi-agente** (crea múltiples agentes de voz)
+- 📞 **Llamadas de prueba** rápidas
+- 📊 **Campañas** masivas
 
 **URLs de acceso:**
 - 🌐 Frontend: http://tu-servidor
-- 🔧 Backend API: http://tu-servidor:8001
-- 📚 API Docs: http://tu-servidor:8001/docs
+- 🔧 Backend API: http://tu-servidor:8002
+- 📚 API Docs: http://tu-servidor:8002/docs

@@ -13,32 +13,72 @@ import {
   ClipboardList,
   PanelLeftClose,
   PanelLeftOpen,
-  Github
+  Users,
+  LogOut,
+  Phone,
+  Loader2
 } from 'lucide-react';
 import { ViewState } from './types';
+import { useAuth } from './contexts/AuthContext';
 import SidebarItem from './components/SidebarItem';
 import TelephonyView from './views/TelephonyView';
 import ModelsView from './views/ModelsView';
 import { CampaignsView } from './views/CampaignsView';
-import VoiceAgentsView from './views/VoiceAgentsView';
+import AgentListView from './views/AgentListView';
+import TestCallView from './views/TestCallView';
 import LiveCallView from './views/LiveCallView';
 import DashboardView from './views/DashboardView';
 import ResultsView from './views/ResultsView';
 import UsageView from './views/UsageView';
+import UserManagementView from './views/UserManagementView';
+import LoginView from './views/LoginView';
 
 const App: React.FC = () => {
+  const { user, profile, loading, signOut, hasPermission, isRole } = useAuth();
   const [currentView, setCurrentView] = useState<ViewState | 'results'>('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isCalling, setIsCalling] = useState(false);
 
+  // Show loading spinner
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="text-center">
+          <Loader2 className="animate-spin mx-auto text-blue-500 mb-4" size={40} />
+          <p className="text-gray-500 text-sm">Cargando...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show login if not authenticated
+  if (!user || !profile) {
+    return <LoginView />;
+  }
+
   const renderContent = () => {
+    // Check permissions for the current view
+    if (!hasPermission(currentView) && currentView !== 'admin') {
+      return (
+        <div className="flex items-center justify-center h-full text-gray-400">
+          <div className="text-center">
+            <BarChart3 size={48} className="mx-auto mb-4 opacity-20" />
+            <p className="text-lg font-medium text-gray-600 mb-1">Acceso Restringido</p>
+            <p className="text-sm">No tienes permisos para acceder a este módulo.</p>
+          </div>
+        </div>
+      );
+    }
+
     switch (currentView) {
       case 'telephony':
         return <TelephonyView />;
       case 'campaigns':
         return <CampaignsView />;
-      case 'voice-agents':
-        return <VoiceAgentsView onStartCall={() => setIsCalling(true)} />;
+      case 'create-agents':
+        return <AgentListView />;
+      case 'test-call':
+        return <TestCallView />;
       case 'overview':
         return <DashboardView />;
       case 'results':
@@ -47,6 +87,11 @@ const App: React.FC = () => {
         return <UsageView />;
       case 'models':
         return <ModelsView />;
+      case 'admin':
+        if (isRole('superadmin', 'admin')) {
+          return <UserManagementView />;
+        }
+        return null;
       case 'automation':
       case 'tools':
       default:
@@ -54,7 +99,7 @@ const App: React.FC = () => {
           <div className="flex items-center justify-center h-full text-gray-400">
             <div className="text-center">
               <BarChart3 size={48} className="mx-auto mb-4 opacity-20" />
-              <p>Módulo "{currentView}" en desarrollo o no implementado aún.</p>
+              <p>Módulo "{currentView}" en desarrollo.</p>
             </div>
           </div>
         );
@@ -78,7 +123,7 @@ const App: React.FC = () => {
     };
 
     fetchAlerts();
-    const interval = setInterval(fetchAlerts, 10000); // Check every 10s
+    const interval = setInterval(fetchAlerts, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -87,6 +132,14 @@ const App: React.FC = () => {
       await fetch(`${API_URL}/api/alerts/${id}/resolve`, { method: 'POST' });
       setAlerts(prev => prev.filter(a => a.id !== id));
     } catch (e) { }
+  };
+
+  const getRoleLabel = () => {
+    switch (profile.role) {
+      case 'superadmin': return 'Superadmin';
+      case 'admin': return 'Admin';
+      default: return 'Usuario';
+    }
   };
 
   return (
@@ -98,7 +151,7 @@ const App: React.FC = () => {
             <img src="/ausarta.png" alt="Ausarta Logo" className="h-8 w-auto object-contain" />
             <div className="flex flex-col">
               <span className="text-lg leading-none tracking-tight">Ausarta</span>
-              <span className="text-[10px] text-gray-400 font-normal">Voice AI v1.14</span>
+              <span className="text-[10px] text-gray-400 font-normal">Voice AI v2.0</span>
             </div>
           </div>
           <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1 hover:bg-gray-50 rounded text-gray-400">
@@ -106,91 +159,124 @@ const App: React.FC = () => {
           </button>
         </div>
 
-        <div className="p-3">
-          <button className="flex items-center gap-2 w-full px-3 py-2 text-sm text-yellow-600 bg-yellow-50/50 hover:bg-yellow-50 rounded-lg font-medium transition-colors">
-            <Github size={16} className="text-yellow-600" />
-            {isSidebarOpen && "Star us on GitHub"}
-          </button>
-        </div>
-
         <nav className="flex-1 overflow-y-auto px-3 py-2 space-y-1">
-          <SidebarItem
-            icon={<LayoutDashboard size={18} />}
-            label="Overview"
-            isActive={currentView === 'overview'}
-            onClick={() => setCurrentView('overview')}
-            collapsed={!isSidebarOpen}
-          />
+          {hasPermission('overview') && (
+            <SidebarItem
+              icon={<LayoutDashboard size={18} />}
+              label="Overview"
+              isActive={currentView === 'overview'}
+              onClick={() => setCurrentView('overview')}
+              collapsed={!isSidebarOpen}
+            />
+          )}
 
           <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
             Build
           </div>
-          <SidebarItem
-            icon={<Mic2 size={18} />}
-            label="Voice Agents"
-            isActive={currentView === 'voice-agents'}
-            onClick={() => setCurrentView('voice-agents')}
-            collapsed={!isSidebarOpen}
-          />
-          <SidebarItem
-            icon={<Megaphone size={18} />}
-            label="Campaigns"
-            isActive={currentView === 'campaigns'}
-            onClick={() => setCurrentView('campaigns')}
-            collapsed={!isSidebarOpen}
-          />
-          <SidebarItem
-            icon={<Zap size={18} />}
-            label="Automation"
-            isActive={currentView === 'automation'}
-            onClick={() => setCurrentView('automation')}
-            collapsed={!isSidebarOpen}
-          />
-          <SidebarItem
-            icon={<Cpu size={18} />}
-            label="AI Models"
-            isActive={currentView === 'models'}
-            onClick={() => setCurrentView('models')}
-            collapsed={!isSidebarOpen}
-          />
-          <SidebarItem
-            icon={<PhoneCall size={18} />}
-            label="Telephony"
-            isActive={currentView === 'telephony'}
-            onClick={() => setCurrentView('telephony')}
-            collapsed={!isSidebarOpen}
-          />
-          <SidebarItem
-            icon={<Wrench size={18} />}
-            label="Tools"
-            isActive={currentView === 'tools'}
-            onClick={() => setCurrentView('tools')}
-            collapsed={!isSidebarOpen}
-          />
+          {hasPermission('create-agents') && (
+            <SidebarItem
+              icon={<Mic2 size={18} />}
+              label="Crear Agentes"
+              isActive={currentView === 'create-agents'}
+              onClick={() => setCurrentView('create-agents')}
+              collapsed={!isSidebarOpen}
+            />
+          )}
+          {hasPermission('test-call') && (
+            <SidebarItem
+              icon={<Phone size={18} />}
+              label="Llamada Prueba"
+              isActive={currentView === 'test-call'}
+              onClick={() => setCurrentView('test-call')}
+              collapsed={!isSidebarOpen}
+            />
+          )}
+          {hasPermission('campaigns') && (
+            <SidebarItem
+              icon={<Megaphone size={18} />}
+              label="Campaigns"
+              isActive={currentView === 'campaigns'}
+              onClick={() => setCurrentView('campaigns')}
+              collapsed={!isSidebarOpen}
+            />
+          )}
+          {hasPermission('models') && (
+            <SidebarItem
+              icon={<Cpu size={18} />}
+              label="AI Models"
+              isActive={currentView === 'models'}
+              onClick={() => setCurrentView('models')}
+              collapsed={!isSidebarOpen}
+            />
+          )}
+          {hasPermission('telephony') && (
+            <SidebarItem
+              icon={<PhoneCall size={18} />}
+              label="Telephony"
+              isActive={currentView === 'telephony'}
+              onClick={() => setCurrentView('telephony')}
+              collapsed={!isSidebarOpen}
+            />
+          )}
 
           <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
             Observe
           </div>
-          <SidebarItem
-            icon={<ClipboardList size={18} />}
-            label="Results"
-            isActive={currentView === 'results'}
-            onClick={() => setCurrentView('results')}
-            collapsed={!isSidebarOpen}
-          />
-          <SidebarItem
-            icon={<BarChart3 size={18} />}
-            label="Usage"
-            isActive={currentView === 'usage'}
-            onClick={() => setCurrentView('usage')}
-            collapsed={!isSidebarOpen}
-          />
+          {hasPermission('results') && (
+            <SidebarItem
+              icon={<ClipboardList size={18} />}
+              label="Results"
+              isActive={currentView === 'results'}
+              onClick={() => setCurrentView('results')}
+              collapsed={!isSidebarOpen}
+            />
+          )}
+          {hasPermission('usage') && (
+            <SidebarItem
+              icon={<BarChart3 size={18} />}
+              label="Usage"
+              isActive={currentView === 'usage'}
+              onClick={() => setCurrentView('usage')}
+              collapsed={!isSidebarOpen}
+            />
+          )}
+
+          {/* Admin section - only for admin and superadmin */}
+          {isRole('superadmin', 'admin') && (
+            <>
+              <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
+                Admin
+              </div>
+              <SidebarItem
+                icon={<Users size={18} />}
+                label="Usuarios"
+                isActive={currentView === 'admin'}
+                onClick={() => setCurrentView('admin')}
+                collapsed={!isSidebarOpen}
+              />
+            </>
+          )}
         </nav>
 
-        <div className="p-4 border-t border-gray-50">
-          <button className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900 w-full px-2 py-1">
-            <MessageSquare size={16} />
-            {isSidebarOpen && "Get Help"}
+        {/* User info + Logout */}
+        <div className="p-4 border-t border-gray-50 space-y-2">
+          <div className={`flex items-center gap-2 text-sm ${!isSidebarOpen && 'justify-center'}`}>
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+              {(profile.full_name || profile.email).charAt(0).toUpperCase()}
+            </div>
+            {isSidebarOpen && (
+              <div className="overflow-hidden">
+                <p className="font-medium text-gray-800 truncate text-xs">{profile.full_name || profile.email}</p>
+                <p className="text-[10px] text-gray-400">{getRoleLabel()}</p>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={signOut}
+            className={`flex items-center gap-2 text-sm text-gray-500 hover:text-red-600 w-full px-2 py-1 hover:bg-red-50 rounded-lg transition-colors ${!isSidebarOpen && 'justify-center'}`}
+          >
+            <LogOut size={16} />
+            {isSidebarOpen && "Cerrar Sesión"}
           </button>
         </div>
       </aside>
@@ -211,22 +297,12 @@ const App: React.FC = () => {
                       <p className="text-sm">{alert.message}</p>
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    {alert.type === 'api_limit' && (
-                      <button
-                        onClick={() => setCurrentView('voice-agents')}
-                        className="px-3 py-1 bg-white border border-red-200 rounded text-xs font-semibold hover:bg-red-50"
-                      >
-                        Manage API Keys
-                      </button>
-                    )}
-                    <button
-                      onClick={() => resolveAlert(alert.id)}
-                      className="px-3 py-1 bg-red-100 rounded text-xs hover:bg-red-200"
-                    >
-                      Dismiss
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => resolveAlert(alert.id)}
+                    className="px-3 py-1 bg-red-100 rounded text-xs hover:bg-red-200"
+                  >
+                    Dismiss
+                  </button>
                 </div>
               ))}
             </div>
