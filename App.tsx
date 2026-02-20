@@ -175,7 +175,7 @@ const App: React.FC = () => {
           {hasPermission('create-agents') && (
             <SidebarItem
               icon={<Mic2 size={18} />}
-              label="Crear Agentes"
+              label="Empresas"
               isActive={currentView === 'create-agents'}
               onClick={() => setCurrentView('create-agents')}
               collapsed={!isSidebarOpen}

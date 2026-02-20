@@ -21,6 +21,7 @@ export interface UserProfile {
   email: string;
   full_name: string;
   role: UserRole;
+  empresa_id?: number | null;
   created_by: string | null;
   is_active: boolean;
   created_at: string;
@@ -106,7 +107,7 @@ export interface ModelConfig {
 // All available modules for permission system
 export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'overview', label: 'Dashboard' },
-  { key: 'create-agents', label: 'Crear Agentes' },
+  { key: 'create-agents', label: 'Empresas' },
   { key: 'test-call', label: 'Llamada Prueba' },
   { key: 'campaigns', label: 'Campañas' },
   { key: 'models', label: 'AI Models' },

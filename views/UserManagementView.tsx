@@ -5,33 +5,38 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import type { UserProfile, UserPermission, UserRole } from '../types';
+import type { UserProfile, UserPermission, UserRole, Empresa } from '../types';
 import { ALL_MODULES } from '../types';
 
 const UserManagementView: React.FC = () => {
     const { profile: currentProfile, isRole } = useAuth();
-    const [users, setUsers] = useState<(UserProfile & { permissions: UserPermission[] })[]>([]);
+    const [users, setUsers] = useState<(UserProfile & { permissions: UserPermission[], empresas?: Empresa | null })[]>([]);
     const [loading, setLoading] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
     const [expandedUser, setExpandedUser] = useState<string | null>(null);
+    const [empresas, setEmpresas] = useState<Empresa[]>([]);
 
     // Create user form
     const [newEmail, setNewEmail] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [newName, setNewName] = useState('');
     const [newRole, setNewRole] = useState<UserRole>('user');
+    const [newEmpresaId, setNewEmpresaId] = useState<number | ''>('');
     const [creating, setCreating] = useState(false);
 
     useEffect(() => {
-        loadUsers();
+        loadUsersAndEmpresas();
     }, []);
 
-    const loadUsers = async () => {
+    const loadUsersAndEmpresas = async () => {
         setLoading(true);
         try {
+            const { data: empData } = await supabase.from('empresas').select('*').order('nombre');
+            if (empData) setEmpresas(empData);
+
             const { data: usersData, error } = await supabase
                 .from('user_profiles')
-                .select('*')
+                .select('*, empresas(*)')
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
@@ -90,6 +95,7 @@ const UserManagementView: React.FC = () => {
                     email: newEmail,
                     full_name: newName,
                     role: newRole,
+                    empresa_id: newEmpresaId || null,
                     created_by: currentProfile?.id
                 });
 
@@ -110,7 +116,8 @@ const UserManagementView: React.FC = () => {
             setNewPassword('');
             setNewName('');
             setNewRole('user');
-            loadUsers();
+            setNewEmpresaId('');
+            loadUsersAndEmpresas();
         } catch (err: any) {
             alert(`Error: ${err.message}`);
         } finally {
@@ -163,7 +170,7 @@ const UserManagementView: React.FC = () => {
             }));
         } catch (err) {
             alert('Error al cambiar permiso');
-            loadUsers();
+            loadUsersAndEmpresas();
         }
     };
 
@@ -266,6 +273,11 @@ const UserManagementView: React.FC = () => {
                                         <div className="flex items-center gap-2">
                                             <h3 className="font-medium text-gray-900">{user.full_name || user.email}</h3>
                                             {getRoleBadge(user.role)}
+                                            {user.empresas && (
+                                                <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs font-medium border border-indigo-100">
+                                                    🏢 {user.empresas.nombre}
+                                                </span>
+                                            )}
                                             {!user.is_active && (
                                                 <span className="px-2 py-0.5 bg-red-50 text-red-600 rounded-full text-xs font-medium">
                                                     Desactivado
@@ -317,8 +329,8 @@ const UserManagementView: React.FC = () => {
                                                     onClick={() => canManageUser(user) && handleTogglePermission(user.id, mod.key, isEnabled)}
                                                     disabled={!canManageUser(user)}
                                                     className={`flex items-center gap-2 p-3 rounded-lg text-sm font-medium transition-all border ${isEnabled
-                                                            ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100'
-                                                            : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'
+                                                        ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100'
+                                                        : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'
                                                         } ${!canManageUser(user) ? 'opacity-50 cursor-default' : 'cursor-pointer'}`}
                                                 >
                                                     {isEnabled ? <ToggleRight size={16} className="text-green-500" /> : <ToggleLeft size={16} />}
@@ -393,6 +405,19 @@ const UserManagementView: React.FC = () => {
                                 >
                                     <option value="user">Usuario</option>
                                     {isRole('superadmin') && <option value="admin">Admin</option>}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label>
+                                <select
+                                    value={newEmpresaId}
+                                    onChange={(e) => setNewEmpresaId(e.target.value === '' ? '' : Number(e.target.value))}
+                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white"
+                                >
+                                    <option value="">-- Ninguna --</option>
+                                    {empresas.map(emp => (
+                                        <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                                    ))}
                                 </select>
                             </div>
                         </div>
