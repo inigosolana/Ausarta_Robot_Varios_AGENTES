@@ -30,6 +30,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
         description: agent?.description || '',
         instructions: agent?.instructions || '',
         greeting: agent?.greeting || '',
+        empresa_id: agent?.empresa_id || null,
     });
 
     const [aiConfig, setAiConfig] = useState<AIConfig>({ ...defaultAIConfig });
@@ -85,6 +86,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                         description: formData.description,
                         instructions: formData.instructions,
                         greeting: formData.greeting,
+                        empresa_id: formData.empresa_id,
                         updated_at: new Date().toISOString()
                     })
                     .eq('id', agent.id);
@@ -101,6 +103,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                         description: formData.description,
                         instructions: formData.instructions,
                         greeting: formData.greeting,
+                        empresa_id: formData.empresa_id,
                     })
                     .select('id')
                     .single();

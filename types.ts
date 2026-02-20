@@ -35,9 +35,17 @@ export interface UserPermission {
   granted_by: string | null;
   created_at: string;
 }
+export interface Empresa {
+  id?: number;
+  nombre: string;
+  responsable: string;
+  created_at?: string;
+  updated_at?: string;
+}
 
 export interface AgentConfig {
   id?: number;
+  empresa_id?: number | null;
   name: string;
   use_case: string;
   description: string;
