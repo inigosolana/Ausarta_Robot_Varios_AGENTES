@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   LayoutDashboard,
   Mic2,
@@ -38,6 +38,26 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState | 'results'>('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isCalling, setIsCalling] = useState(false);
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+
+  useEffect(() => {
+    const fetchAlerts = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/alerts`);
+        if (res.ok) {
+          const data = await res.json();
+          setAlerts(data);
+        }
+      } catch (e) {
+        // Silent error
+      }
+    };
+
+    fetchAlerts();
+    const interval = setInterval(fetchAlerts, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Show loading spinner
   if (loading) {
@@ -105,27 +125,6 @@ const App: React.FC = () => {
         );
     }
   };
-
-  const [alerts, setAlerts] = useState<any[]>([]);
-  const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
-
-  React.useEffect(() => {
-    const fetchAlerts = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/alerts`);
-        if (res.ok) {
-          const data = await res.json();
-          setAlerts(data);
-        }
-      } catch (e) {
-        // Silent error
-      }
-    };
-
-    fetchAlerts();
-    const interval = setInterval(fetchAlerts, 10000);
-    return () => clearInterval(interval);
-  }, []);
 
   const resolveAlert = async (id: number) => {
     try {
