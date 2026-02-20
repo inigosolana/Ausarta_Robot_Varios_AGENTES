@@ -9,7 +9,7 @@ services:
     container_name: ausarta-v2-backend
     restart: unless-stopped
     ports:
-      - "8002:8001" # Puerto externo 8002 → interno 8001
+      - "8003:8001" # Puerto externo 8003 → interno 8001
     environment:
       # LiveKit
       - LIVEKIT_URL=${LIVEKIT_URL}
@@ -57,7 +57,7 @@ services:
     container_name: ausarta-v2-frontend
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "8080:80"
     networks:
       - ausarta-network
     depends_on:
