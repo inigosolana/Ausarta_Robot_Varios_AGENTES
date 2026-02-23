@@ -301,7 +301,7 @@ async def entrypoint(ctx: JobContext):
         def on_user_speech(msg: stt.SpeechEvent):
             logger.info(f"🗣️ [{job_id}] USUARIO: {msg.alternatives[0].text}")
         
-        finished = asyncio.event.Event()
+        finished = asyncio.Event()
 
         @ctx.room.on("disconnected")
         def on_disconnect():
