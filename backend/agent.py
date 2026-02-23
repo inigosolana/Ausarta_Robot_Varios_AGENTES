@@ -217,12 +217,6 @@ class DefaultAgent(Agent):
 
 server = AgentServer()
 
-# --- MEJORA VAD ---
-# Cargamos el VAD de Silero FUERA de la funcion 'async def entrypoint'.
-# Al cargarlo aqui (tarda ~10s), evitamos bloquear el Event Loop de asyncio
-# y que las llamadas se caigan por Timeout.
-vad_model = silero.VAD.load(min_silence_duration=0.5)
-
 @server.rtc_session(agent_name="Dakota-1ef9")
 async def entrypoint(ctx: JobContext):
     
@@ -236,7 +230,18 @@ async def entrypoint(ctx: JobContext):
     agent_instance = DefaultAgent(room_name=ctx.room.name)
 
     try:
+        logger.info("⏱️ Iniciando conexión a la sala (ctx.connect)...")
         await ctx.connect()
+        logger.info("✅ Conexión a sala establecida.")
+
+        # --- MEJORA VAD ---
+        # Cargamos el VAD de Silero aquí, asincronamente.
+        # De esta forma evitamos colgar el hilo principal y que LiveKit devuelva timeout.
+        logger.info("⏱️ Cargando VAD (tarda ~10s)...")
+        vad_model = await asyncio.to_thread(silero.VAD.load, min_silence_duration=0.5)
+        logger.info("✅ VAD cargado exitosamente.")
+
+        logger.info("⏱️ Inicializando AgentSession...")
         session = AgentSession(
             stt=deepgram.STT(model="nova-3", language="es"),
             llm=openai.LLM(
@@ -253,6 +258,7 @@ async def entrypoint(ctx: JobContext):
             vad=vad_model,
             preemptive_generation=True, 
         )
+        logger.info("✅ AgentSession inicializada.")
 
         @session.on("user_speech_committed")
         def on_user_speech(msg: stt.SpeechEvent):
