@@ -34,6 +34,7 @@ services:
       - BRIDGE_SERVER_URL=http://127.0.0.1:8001
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "livekit.ausarta.net:51.94.186.74"
     networks:
       - ausarta-network
     volumes:
