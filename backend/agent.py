@@ -222,9 +222,9 @@ async def fetch_agent_config(survey_id: str) -> dict:
 # ============================================================================
 # SERVIDOR Y ENTRYPOINT DINÁMICO
 # ============================================================================
-server = AgentServer(name="ausarta-agent")
+server = AgentServer()
 
-@server.rtc_session()
+@server.rtc_session(name="ausarta-agent")
 async def entrypoint(ctx: JobContext):
     # Identificador único para esta instancia/trabajo
     job_id = ctx.job.id if hasattr(ctx, 'job') else "unknown"
