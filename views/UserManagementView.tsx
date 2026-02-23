@@ -82,7 +82,8 @@ const UserManagementView: React.FC = () => {
         setInviteSuccess(false);
         try {
             // Generate a random temporary password (user will set their own via email)
-            const tempPassword = crypto.randomUUID() + '!Aa1';
+            // Using a custom generator because crypto.randomUUID requires HTTPS
+            const tempPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).slice(-10) + '!Aa1';
 
             // 1. Create the user with a temporary password
             const { data, error } = await supabase.auth.signUp({
