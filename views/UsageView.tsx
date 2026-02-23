@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart3, Globe, Cpu, Mic, Volume2, AlertTriangle, XCircle, Zap } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
 
 const UsageView: React.FC = () => {
+    const { profile } = useAuth();
     const [integrations, setIntegrations] = useState<any[]>([]);
     const [usage, setUsage] = useState<any>(null);
     const [alerts, setAlerts] = useState<any[]>([]);
@@ -12,14 +14,16 @@ const UsageView: React.FC = () => {
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, [profile]);
 
     const loadData = async () => {
         try {
             setIsLoading(true);
+            const queryParams = profile?.empresa_id ? `?empresa_id=${profile.empresa_id}` : '';
+
             const [intRes, usageRes, limitsRes] = await Promise.all([
                 fetch(`${API_URL}/dashboard/integrations`),
-                fetch(`${API_URL}/dashboard/usage-stats`),
+                fetch(`${API_URL}/dashboard/usage-stats${queryParams}`),
                 fetch(`${API_URL}/ai/limits`)
             ]);
 
@@ -28,7 +32,7 @@ const UsageView: React.FC = () => {
             if (limitsRes.ok) setLiveLimits(await limitsRes.json());
 
             // Fetch alerts specifically for this view too (or pass from props, but independent fetch is fine)
-            const alertsRes = await fetch(`${API_URL}/alerts`);
+            const alertsRes = await fetch(`${API_URL}/alerts${queryParams}`);
             if (alertsRes.ok) setAlerts(await alertsRes.json());
 
         } catch (error) {

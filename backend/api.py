@@ -225,9 +225,90 @@ async def get_all_results(empresa_id: Optional[int] = None):
 
 # --- ALERTAS ---
 @app.get("/api/alerts")
-async def get_alerts():
-    # Devuelve lista vacía por ahora para evitar error 404 en frontend
-    return []
+async def get_alerts(empresa_id: Optional[int] = None):
+    # En un sistema real, esto vendría de una tabla 'alerts'
+    # Por ahora devolvemos una alerta de ejemplo si hay fallos recientes
+    if not supabase: return []
+    try:
+        query = supabase.table("encuestas").select("*").eq("status", "failed")
+        if empresa_id:
+            query = query.eq("empresa_id", empresa_id)
+        res = query.order("fecha", desc=True).limit(5).execute()
+        
+        alerts = []
+        for r in res.data:
+            alerts.append({
+                "id": f"alert_{r['id']}",
+                "type": "CALL_FAILED",
+                "message": f"Llamada fallida al número {r['telefono']}",
+                "created_at": r['fecha']
+            })
+        return alerts
+    except:
+        return []
+
+@app.get("/api/dashboard/integrations")
+async def get_integrations():
+    """Estado de las APIs configuradas"""
+    integrations = [
+        {"name": "LLM Engine", "provider": "Groq", "active": bool(os.getenv("GROQ_API_KEY")), "model": "Llama 3.3 70B"},
+        {"name": "LLM Backup", "provider": "OpenAI", "active": bool(os.getenv("OPENAI_API_KEY")), "model": "GPT-4o"},
+        {"name": "LLM Google", "provider": "Google", "active": bool(os.getenv("GOOGLE_API_KEY")), "model": "Gemini 1.5 Pro"},
+        {"name": "TTS Engine", "provider": "Cartesia", "active": bool(os.getenv("CARTESIA_API_KEY")), "model": "Sonic Multilingual"},
+        {"name": "TTS Backup", "provider": "ElevenLabs", "active": bool(os.getenv("ELEVEN_API_KEY")), "model": "Multilingual v2"},
+        {"name": "STT Engine", "provider": "Deepgram", "active": bool(os.getenv("DEEPGRAM_API_KEY")), "model": "Nova-2"},
+        {"name": "Real-time", "provider": "LiveKit", "active": bool(os.getenv("LIVEKIT_API_KEY")), "url": os.getenv("LIVEKIT_URL")}
+    ]
+    return integrations
+
+@app.get("/api/dashboard/usage-stats")
+async def get_usage_stats(empresa_id: Optional[int] = None):
+    if not supabase: return {"total_tokens": 0, "total_minutes": 0, "per_model_stats": []}
+    
+    try:
+        query = supabase.table("encuestas").select("llm_model, seconds_used, status")
+        if empresa_id:
+            query = query.eq("empresa_id", empresa_id)
+        res = query.execute()
+        
+        total_seconds = sum(r.get('seconds_used') or 0 for r in res.data)
+        
+        # Agrupar por modelo
+        model_stats = {}
+        for r in res.data:
+            model = r.get('llm_model') or "Standard"
+            if model not in model_stats:
+                model_stats[model] = {"llm_model": model, "calls": 0, "tokens": 0, "seconds": 0}
+            
+            model_stats[model]["calls"] += 1
+            model_stats[model]["seconds"] += r.get('seconds_used') or 0
+            # Estimación de tokens (aprox 15 tokens por segundo de conversación)
+            model_stats[model]["tokens"] += (r.get('seconds_used') or 0) * 15
+            
+        total_tokens = sum(s["tokens"] for s in model_stats.values())
+        
+        return {
+            "total_tokens": total_tokens,
+            "total_minutes": round(total_seconds / 60, 1),
+            "per_model_stats": list(model_stats.values())
+        }
+    except Exception as e:
+        print(f"Error usage stats: {e}")
+        return {"total_tokens": 0, "total_minutes": 0, "per_model_stats": []}
+
+@app.get("/api/ai/limits")
+async def get_ai_limits():
+    """Mock de límites para el frontend"""
+    return {
+        "groq_models": {
+            "llama-3.3-70b-versatile": {"tokens_remaining": 60000, "tokens_limit": 100000, "requests_remaining": 950, "requests_limit": 1000},
+            "llama-3.1-8b-instant": {"tokens_remaining": 25000, "tokens_limit": 30000, "requests_remaining": 480, "requests_limit": 500}
+        },
+        "openai": {"active": True, "tokens_remaining": 850000, "tokens_limit": 1000000, "requests_remaining": 4500, "requests_limit": 5000, "info": "Tier 1 Account"},
+        "deepgram": {"balances": [{"amount": "12.45", "units": "USD"}]},
+        "cartesia": {"active": True, "info": "Enterprise Plan - Unlimited Credits", "dashboard_url": "https://play.cartesia.ai/"},
+        "google": {"active": True}
+    }
 
 # --- CALL CONTROL ---
 
