@@ -115,11 +115,16 @@ DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
         logger.info(f"🤖 Agente '{agent_name}' creado con instrucciones dinámicas (Survey: {self.survey_id})")
 
     async def on_enter(self):
+        """Método para manejar la entrada a la sala. 
+        Se llama explícitamente desde el entrypoint para evitar duplicidad."""
+        logger.info(f"🎤 Agente entrando en acción para Survey ID: {self.survey_id}")
+        
         # Pausa de cortesía: 1.5 segundos para que la red telefónica se estabilice
         await asyncio.sleep(1.5)
         
+        # Solo generamos el saludo si el LLM no ha empezado ya
         await self.session.generate_reply(
-            instructions=f"Di exactamente: '{self.greeting}' y espera la respuesta.",
+            instructions=f"Di exactamente: '{self.greeting}' y espera la respuesta del usuario.",
             allow_interruptions=False
         )
 
@@ -217,20 +222,24 @@ async def fetch_agent_config(survey_id: str) -> dict:
 # ============================================================================
 # SERVIDOR Y ENTRYPOINT DINÁMICO
 # ============================================================================
-server = AgentServer()
+server = AgentServer(name="ausarta-agent")
 
 @server.rtc_session()
 async def entrypoint(ctx: JobContext):
+    # Identificador único para esta instancia/trabajo
+    job_id = ctx.job.id if hasattr(ctx, 'job') else "unknown"
+    room_name = ctx.room.name
+    
+    logger.info(f"--- 🚀 INICIO DE SESIÓN AGENTE (Job: {job_id}, Room: {room_name}) ---")
     
     def handle_error(error):
         msg = str(error)
         if "429" in msg: 
-            logger.error("\n\n🚨🚨🚨 ALERTA: Límite de API Alcanzado 🚨🚨🚨\n")
+            logger.error(f"🚨🚨🚨 ALERTA (Job {job_id}): Límite de API Alcanzado")
         else:
-            logger.error(f"\n⚠️ ERROR DEL AGENTE: {error}\n")
+            logger.error(f"⚠️ ERROR DEL AGENTE (Job {job_id}): {error}")
 
-    # --- PASO 1: Extraer survey_id del nombre de sala ---
-    room_name = ctx.room.name
+    # --- PASO 1: Extraer survey_id ---
     survey_id = "0"
     try:
         parts = room_name.split('_')
@@ -241,31 +250,27 @@ async def entrypoint(ctx: JobContext):
     except:
         survey_id = "0"
 
-    # --- PASO 2: Conectar a la sala PRIMERO (evitar timeout) ---
+    # --- PASO 2: Conectar a la sala ---
     try:
-        logger.info("⏱️ Iniciando conexión a la sala (ctx.connect)...")
+        logger.info(f"⏱️ [{job_id}] Conectando a sala...")
         await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-        logger.info("✅ Conexión a sala establecida.")
+        logger.info(f"✅ [{job_id}] Conectado.")
 
-        # --- PASO 3: Cargar en paralelo el VAD y la config del agente ---
-        logger.info("⏱️ Cargando VAD y configuración del agente en paralelo...")
+        # --- PASO 3: Cargar config ---
         vad_task = asyncio.to_thread(silero.VAD.load, min_silence_duration=0.5)
         config_task = fetch_agent_config(survey_id)
         
         vad_model, agent_config = await asyncio.gather(vad_task, config_task)
-        logger.info("✅ VAD y configuración cargados.")
+        logger.info(f"✅ [{job_id}] VAD y configuración cargados.")
 
-        # --- PASO 4: Crear el agente dinámico con la config obtenida ---
+        # --- PASO 4: Crear el agente ---
         agent_instance = DynamicAgent(room_name=room_name, agent_config=agent_config)
         
-        # Determinar modelo LLM y voz desde la config
         llm_model = agent_config.get("llm_model", "llama-3.3-70b-versatile")
         voice_id = agent_config.get("voice_id", "6511153f-72f9-4314-a204-8d8d8afd646a")
-        agent_name_display = agent_config.get("name", "Bot")
         
-        logger.info(f"🤖 Configurando sesión: Agente='{agent_name_display}', LLM='{llm_model}', Voice='{voice_id}'")
+        logger.info(f"🤖 [{job_id}] Config: LLM='{llm_model}', Voice='{voice_id}'")
 
-        logger.info("⏱️ Inicializando AgentSession...")
         session = AgentSession(
             stt=deepgram.STT(model="nova-3", language="es"),
             llm=openai.LLM(
@@ -280,45 +285,40 @@ async def entrypoint(ctx: JobContext):
                 language="es"
             ),
             vad=vad_model,
-            preemptive_generation=True, 
+            preemptive_generation=False, # Cambiado a False para controlar mejor el inicio
         )
-        logger.info("✅ AgentSession inicializada.")
 
         @session.on("user_speech_committed")
         def on_user_speech(msg: stt.SpeechEvent):
-            print(f"\n🗣️  USUARIO DICE: {msg.alternatives[0].text}\n")
-            logger.info(f"TRANSCRIPCIÓN: {msg.alternatives[0].text}")
+            logger.info(f"🗣️ [{job_id}] USUARIO: {msg.alternatives[0].text}")
         
-        # --- FIX: Bloquear hasta desconexión ---
-        finished = asyncio.Event()
+        finished = asyncio.event.Event()
 
         @ctx.room.on("disconnected")
         def on_disconnect():
-            logger.info("🔌 Sala desconectada. Finalizando agente...")
+            logger.info(f"🔌 [{job_id}] Desconectado.")
             finished.set()
 
-        await session.start(
-            agent=agent_instance,
-            room=ctx.room,
-            room_options=room_io.RoomOptions(
-                audio_input=room_io.AudioInputOptions(
-                    noise_cancellation=lambda params: noise_cancellation.BVCTelephony() if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP else noise_cancellation.BVC(),
-                ),
-            ),
-        )
+        # Iniciar sesión
+        await session.start(agent=agent_instance, room=ctx.room)
+        
+        # --- SALUDO CONTROLADO ---
+        # Llamamos a on_enter explícitamente para asegurar que el agente salude una vez
+        asyncio.create_task(agent_instance.on_enter())
 
+        # Sonido ambiente (reducido volumen aún más para evitar interferencias)
         background_audio = BackgroundAudioPlayer(
-            ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.1),
+            ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.05),
         )
         await background_audio.start(room=ctx.room, agent_session=session)
         
-        # Esperar hasta que la llamada termine
         await finished.wait()
     
     except Exception as e:
         handle_error(e)
     
     finally:
+        logger.info(f"--- 🏁 FIN DE SESIÓN AGENTE (Job: {job_id}) ---")
         data_saved = getattr(agent_instance, 'data_saved', False) if 'agent_instance' in dir() else False
         if not data_saved:
             logger.warning(f"⚠️ La sesión terminó sin guardar datos (Survey ID: {survey_id}). Marcando como 'unreached'...")
@@ -329,10 +329,12 @@ async def entrypoint(ctx: JobContext):
                     "comentarios": "Llamada finalizada sin datos (Posible No Contesta / Cuelgue inmediato)"
                 }
                 server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
-                async with aiohttp.ClientSession() as sess:
-                    url = f"{server_url}/guardar-encuesta"
-                    async with sess.post(url, json=fallback_payload, timeout=5) as r:
-                         logger.info(f"✅ (Fallback) Status guardado como 'unreached'")
+                async def do_fallback():
+                    async with aiohttp.ClientSession() as sess:
+                        url = f"{server_url}/guardar-encuesta"
+                        async with sess.post(url, json=fallback_payload, timeout=5) as r:
+                             logger.info(f"✅ (Fallback) Status guardado como 'unreached'")
+                asyncio.create_task(do_fallback())
             except Exception as ex:
                  logger.error(f"❌ (Fallback) Error salvando fallback status: {ex}")
 
