@@ -43,106 +43,83 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
-logger = logging.getLogger("agent-Dakota")
+logger = logging.getLogger("agent-dynamic")
 load_dotenv()
 
-class DefaultAgent(Agent):
-    def __init__(self, room_name: str) -> None:
+# ============================================================================
+# INSTRUCCIONES BASE - Se combinan con las instrucciones específicas del agente
+# ============================================================================
+BASE_RULES = """
+REGLAS DE ORO (¡MUY IMPORTANTE!):
+1. IDENTIDAD: Si te preguntan quién eres o cómo te llamas, preséntate con el nombre de la empresa para la que trabajas. NUNCA reveles nombres internos de sistema.
+2. PROHIBIDO NARRAR ACCIONES: NUNCA digas en voz alta que vas a guardar un dato, NUNCA menciones el "ID de la encuesta", y NUNCA leas comandos de sistema. Habla SOLO como una persona normal.
+3. PRONUNCIACIÓN: Di siempre "UNO" (ej: "del UNO al diez"), nunca "un".
+4. PARA COLGAR: Siempre PRIMERO di el texto de despedida en voz alta, ESPERA a que termine de sonar, y DESPUÉS usa 'finalizar_llamada'. NUNCA llames a 'finalizar_llamada' sin haber dicho la despedida ANTES.
+5. SI EL CLIENTE NO TE ENTIENDE O DICE "¿CÓMO?", "¿QUÉ?": Repite la última pregunta que hiciste de forma amable y clara.
+6. SI ESCUCHAS RUIDO O UNA PALABRA SIN SENTIDO: Di "Disculpe, no le he escuchado bien, ¿me lo puede repetir?"
+7. VALIDACIÓN DE NOTAS: Si el usuario te da un número menor a 1 o mayor a 10 (ej: 0, 11), NO guardes el dato. Di "Disculpe, la nota debe ser entre 1 y 10. ¿Qué nota le daría?" y espera su respuesta.
+
+REGLA CRÍTICA DE DESPEDIDA:
+Cuando vayas a terminar la llamada, SIEMPRE haz esto EN DOS PASOS SEPARADOS:
+- PRIMER PASO: Usa 'guardar_encuesta' con el status correspondiente. En el mismo turno, DI en voz alta la frase de despedida (ej: "Gracias por su tiempo y adiós."). NO llames a 'finalizar_llamada' en este turno.
+- SEGUNDO PASO: Cuando ya hayas dicho la despedida, usa 'finalizar_llamada'.
+NUNCA llames a 'guardar_encuesta' y 'finalizar_llamada' en el mismo turno.
+
+EXCEPCIÓN - BUZÓN DE VOZ / FUERA DE COBERTURA:
+- Si escuchas "fuera de cobertura", "móvil apagado", "buzón de voz", "contestador", "terminado el tiempo de grabación" o mensajes automáticos similares:
+  - Usa 'guardar_encuesta' (status='failed').
+  - Usa 'finalizar_llamada' (sin despedida).
+
+EXCEPCIÓN INTERRUPCIÓN/COLGAR:
+- Usa 'guardar_encuesta' (status='incomplete').
+- Di en voz alta: "De acuerdo. Gracias, adiós."
+- Luego usa 'finalizar_llamada'.
+
+NOTA FINAL: UNA VEZ LLAMES A 'finalizar_llamada', LA CONVERSACIÓN HA TERMINADO. NO RESPONDAS A NADA MÁS.
+"""
+
+
+class DynamicAgent(Agent):
+    """Agente dinámico que carga sus instrucciones desde Supabase."""
+    
+    def __init__(self, room_name: str, agent_config: dict) -> None:
         self.server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
-        self.data_saved = False # Flag para evitar reintentos de guardado
+        self.data_saved = False
+        self.agent_config = agent_config
+        self.greeting = agent_config.get("greeting", "Buenas, ¿tiene un momento?")
         
         try:
-            # Esperamos formatos: "encuesta_{ID}" O "encuesta_{ID}_{TIMESTAMP}"
-            # Ejemplo: encuesta_26 OR encuesta_26_1771497318
             parts = room_name.split('_')
             if len(parts) >= 2 and parts[0] == "encuesta":
                 self.survey_id = parts[1]
             else:
-                self.survey_id = parts[-1] # Fallback para formatos antiguos
+                self.survey_id = parts[-1]
         except:
             self.survey_id = "0"
 
-        super().__init__(
-            instructions=f"""Eres el agente virtual de Ausarta, una empresa de Telecomunicaciones. Estás hablando por teléfono con un cliente real.
+        # Combinar las instrucciones específicas del agente con las reglas base
+        agent_instructions = agent_config.get("instructions", "Eres un asistente virtual.")
+        agent_name = agent_config.get("name", "Bot")
+        
+        full_instructions = f"""{agent_instructions}
 
-            DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
-            - SALA ACTUAL: '{room_name}'
-            - ID DE LA ENCUESTA: {self.survey_id}
+DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
+- SALA ACTUAL: '{room_name}'
+- ID DE LA ENCUESTA: {self.survey_id}
+- NOMBRE DEL AGENTE (INTERNO, NO DECIR AL CLIENTE): {agent_name}
 
-            REGLAS DE ORO (¡MUY IMPORTANTE!):
-            1. IDENTIDAD: Si te preguntan quién eres o cómo te llamas, di SIEMPRE: "Soy el agente virtual de Ausarta". NUNCA digas que te llamas Dakota ni otro nombre propio.
-            2. PROHIBIDO NARRAR ACCIONES: NUNCA digas en voz alta que vas a guardar un dato, NUNCA menciones el "ID de la encuesta", y NUNCA leas comandos de sistema. Habla SOLO como una persona normal.
-            3. PRONUNCIACIÓN: Di siempre "UNO" (ej: "del UNO al diez"), nunca "un".
-            4. PARA COLGAR: Siempre PRIMERO di el texto de despedida en voz alta, ESPERA a que termine de sonar, y DESPUÉS usa 'finalizar_llamada'. NUNCA llames a 'finalizar_llamada' sin haber dicho la despedida ANTES.
-            5. SI EL CLIENTE NO TE ENTIENDE O DICE "¿CÓMO?", "¿QUÉ?": Repite la última pregunta que hiciste de forma amable y clara.
-            6. SI ESCUCHAS RUIDO O UNA PALABRA SIN SENTIDO: Di "Disculpe, no le he escuchado bien, ¿me lo puede repetir?"
-            7. VALIDACIÓN DE NOTAS: Si el usuario te da un número menor a 1 o mayor a 10 (ej: 0, 11), NO guardes el dato. Di "Disculpe, la nota debe ser entre 1 y 10. ¿Qué nota le daría?" y espera su respuesta.
+{BASE_RULES}
+"""
 
-            REGLA CRÍTICA DE DESPEDIDA:
-            Cuando vayas a terminar la llamada, SIEMPRE haz esto EN DOS PASOS SEPARADOS:
-            - PRIMER PASO: Usa 'guardar_encuesta' con el status correspondiente. En el mismo turno, DI en voz alta la frase de despedida (ej: "Gracias por su tiempo y adiós."). NO llames a 'finalizar_llamada' en este turno.
-            - SEGUNDO PASO: Cuando ya hayas dicho la despedida, usa 'finalizar_llamada'.
-            NUNCA llames a 'guardar_encuesta' y 'finalizar_llamada' en el mismo turno.
-
-            GUION ESTRICTO (SIGUE EL ORDEN):
-            
-            PASO 1: SALUDO
-            - Di: "Buenas, llamo de Ausarta para una encuesta rápida de calidad. ¿Tiene un momento?"
-            - Si dice NO o NO PUEDO o NO ME INTERESA: 
-              - Usa 'guardar_encuesta' (status='rejected').
-              - Di en voz alta: "Entendido, disculpe las molestias. Gracias y adiós."
-              - Después usa 'finalizar_llamada'.
-            - Si dice SÍ: Ve INMEDIATAMENTE al PASO 2.
-
-            PASO 2: NOTA COMERCIAL
-            - Pregunta: "¿Qué nota del UNO al 10 le da al comercial?"
-            - Si responde NÚMERO: 'guardar_encuesta' -> PASO 3.
-            
-            PASO 3: NOTA INSTALADOR
-            - Pregunta: "¿Qué nota del UNO al 10 le da al instalador?"
-            - Si responde NÚMERO: 'guardar_encuesta' -> PASO 4.
-
-            PASO 4: NOTA RAPIDEZ
-            - Pregunta: "¿Y qué nota del UNO al 10 le da a la rapidez?"
-            - Si responde NÚMERO: 'guardar_encuesta' -> PASO 5.
-            
-            PASO 5: CIERRE Y COMENTARIOS
-            - Pregunta: "¿Algún comentario final?"
-            - Si dice "NO", "NINGUNO":
-              - Usa 'guardar_encuesta' (comentarios="Sin comentarios", status='completed').
-              - Di en voz alta: "Perfecto. Gracias por su tiempo y adiós."
-              - Luego usa 'finalizar_llamada'.
-            - Si dice COMENTARIO:
-              - Usa 'guardar_encuesta' (comentarios=COMENTARIO, status='completed').
-              - Di en voz alta: "Tomo nota. Gracias por su tiempo y adiós."
-              - Luego usa 'finalizar_llamada'.
-
-            EXCEPCIÓN - USUARIO DICE 'NO' AL PRINCIPIO:
-            - Si a la pregunta "¿Tiene un momento?" el usuario dice "NO", "AHORA NO", "ESTOY OCUPADO":
-              - Usa 'guardar_encuesta' (status='rejected').
-              - Di en voz alta: "Entendido, disculpe las molestias. Gracias y adiós."
-              - Luego usa 'finalizar_llamada'.
-
-            EXCEPCIÓN - BUZÓN DE VOZ / FUERA DE COBERTURA:
-            - Si escuchas "fuera de cobertura", "móvil apagado", "buzón de voz", "contestador", "terminado el tiempo de grabación" o mensajes automáticos similares:
-              - Usa 'guardar_encuesta' (status='failed').
-              - Usa 'finalizar_llamada' (sin despedida).
-
-            EXCEPCIÓN INTERRUPCIÓN/COLGAR:
-            - Usa 'guardar_encuesta' (status='incomplete').
-            - Di en voz alta: "De acuerdo. Gracias, adiós."
-            - Luego usa 'finalizar_llamada'.
-
-            NOTA FINAL: UNA VEZ LLAMES A 'finalizar_llamada', LA CONVERSACIÓN HA TERMINADO. NO RESPONDAS A NADA MÁS.
-            """,
-        )
+        super().__init__(instructions=full_instructions)
+        logger.info(f"🤖 Agente '{agent_name}' creado con instrucciones dinámicas (Survey: {self.survey_id})")
 
     async def on_enter(self):
-        # Pausa de cortesía: 1.5 segundos para que la red telefónica se estabilice antes de hablar
+        # Pausa de cortesía: 1.5 segundos para que la red telefónica se estabilice
         await asyncio.sleep(1.5)
         
         await self.session.generate_reply(
-            instructions="Di exactamente: 'Buenas, llamo de Ausarta para una encuesta rápida de calidad. ¿Tiene un momento?' y espera.",
+            instructions=f"Di exactamente: '{self.greeting}' y espera la respuesta.",
             allow_interruptions=False
         )
 
@@ -165,7 +142,7 @@ class DefaultAgent(Agent):
         comentarios: Optional[str] = None,
         status: Optional[str] = None
     ) -> str | None:
-        self.data_saved = True # Flag para evitar reintentos de guardado
+        self.data_saved = True
         
         url = f"{self.server_url}/guardar-encuesta"
         real_id = int(self.survey_id) if str(self.survey_id).isdigit() else id_encuesta
@@ -196,12 +173,9 @@ class DefaultAgent(Agent):
         """
         context.disallow_interruptions()
         
-        # Si hay mensaje de despedida, lo logueamos
         if mensaje_despedida:
              logger.info(f"🗣️ Despedida (log): {mensaje_despedida}")
         
-        # Esperamos 5s para que el TTS termine de reproducir cualquier audio pendiente
-        # (la despedida se dijo en el turno anterior, pero puede haber audio en el buffer)
         logger.info("⏳ Esperando 5.0s para asegurar que se escuche la despedida...")
         await asyncio.sleep(5.0) 
         
@@ -216,44 +190,93 @@ class DefaultAgent(Agent):
             logger.error(f"Error Colgar: {e}")
             return "Error al colgar."
 
+
+# ============================================================================
+# FUNCIÓN PARA OBTENER LA CONFIGURACIÓN DEL AGENTE DESDE LA API
+# ============================================================================
+async def fetch_agent_config(survey_id: str) -> dict:
+    """Consulta la API local para obtener la configuración del agente asignado a esta encuesta."""
+    server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
+    url = f"{server_url}/api/agent_config_by_survey/{survey_id}"
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=5) as resp:
+                if resp.status == 200:
+                    config = await resp.json()
+                    logger.info(f"📋 Config de agente obtenida para survey {survey_id}: nombre='{config.get('name')}', modelo='{config.get('llm_model')}'")
+                    return config
+                else:
+                    logger.warning(f"⚠️ No se pudo obtener config de agente (HTTP {resp.status}). Usando defaults.")
+                    return {}
+    except Exception as e:
+        logger.warning(f"⚠️ Error obteniendo config de agente: {e}. Usando defaults.")
+        return {}
+
+
+# ============================================================================
+# SERVIDOR Y ENTRYPOINT DINÁMICO
+# ============================================================================
 server = AgentServer()
 
-@server.rtc_session(agent_name="Dakota-1ef9")
+@server.rtc_session()
 async def entrypoint(ctx: JobContext):
     
     def handle_error(error):
         msg = str(error)
         if "429" in msg: 
-            logger.error("\n\n🚨🚨🚨 ALERTA GROQ: Límite Alcanzado 🚨🚨🚨\n")
+            logger.error("\n\n🚨🚨🚨 ALERTA: Límite de API Alcanzado 🚨🚨🚨\n")
         else:
             logger.error(f"\n⚠️ ERROR DEL AGENTE: {error}\n")
 
-    agent_instance = DefaultAgent(room_name=ctx.room.name)
+    # --- PASO 1: Extraer survey_id del nombre de sala ---
+    room_name = ctx.room.name
+    survey_id = "0"
+    try:
+        parts = room_name.split('_')
+        if len(parts) >= 2 and parts[0] == "encuesta":
+            survey_id = parts[1]
+        else:
+            survey_id = parts[-1]
+    except:
+        survey_id = "0"
 
+    # --- PASO 2: Conectar a la sala PRIMERO (evitar timeout) ---
     try:
         logger.info("⏱️ Iniciando conexión a la sala (ctx.connect)...")
         await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
         logger.info("✅ Conexión a sala establecida.")
 
-        # --- MEJORA VAD ---
-        # Cargamos el VAD de Silero aquí, asincronamente.
-        # De esta forma evitamos colgar el hilo principal y que LiveKit devuelva timeout.
-        logger.info("⏱️ Cargando VAD (tarda ~10s)...")
-        vad_model = await asyncio.to_thread(silero.VAD.load, min_silence_duration=0.5)
-        logger.info("✅ VAD cargado exitosamente.")
+        # --- PASO 3: Cargar en paralelo el VAD y la config del agente ---
+        logger.info("⏱️ Cargando VAD y configuración del agente en paralelo...")
+        vad_task = asyncio.to_thread(silero.VAD.load, min_silence_duration=0.5)
+        config_task = fetch_agent_config(survey_id)
+        
+        vad_model, agent_config = await asyncio.gather(vad_task, config_task)
+        logger.info("✅ VAD y configuración cargados.")
+
+        # --- PASO 4: Crear el agente dinámico con la config obtenida ---
+        agent_instance = DynamicAgent(room_name=room_name, agent_config=agent_config)
+        
+        # Determinar modelo LLM y voz desde la config
+        llm_model = agent_config.get("llm_model", "llama-3.3-70b-versatile")
+        voice_id = agent_config.get("voice_id", "6511153f-72f9-4314-a204-8d8d8afd646a")
+        agent_name_display = agent_config.get("name", "Bot")
+        
+        logger.info(f"🤖 Configurando sesión: Agente='{agent_name_display}', LLM='{llm_model}', Voice='{voice_id}'")
 
         logger.info("⏱️ Inicializando AgentSession...")
         session = AgentSession(
             stt=deepgram.STT(model="nova-3", language="es"),
             llm=openai.LLM(
-                model="llama-3.3-70b-versatile", 
+                model=llm_model, 
                 base_url="https://api.groq.com/openai/v1",
                 api_key=os.getenv("GROQ_API_KEY"),
                 temperature=0.1
             ),
             tts=cartesia.TTS(
                 model="sonic-multilingual",
-                voice="6511153f-72f9-4314-a204-8d8d8afd646a",
+                voice=voice_id,
                 language="es"
             ),
             vad=vad_model,
@@ -267,8 +290,6 @@ async def entrypoint(ctx: JobContext):
             logger.info(f"TRANSCRIPCIÓN: {msg.alternatives[0].text}")
         
         # --- FIX: Bloquear hasta desconexión ---
-        # session.start() inicia los listeners pero no bloquea indefinidamente.
-        # Necesitamos esperar explícitamente a que la sala se desconecte para no matar el proceso.
         finished = asyncio.Event()
 
         @ctx.room.on("disconnected")
@@ -298,20 +319,16 @@ async def entrypoint(ctx: JobContext):
         handle_error(e)
     
     finally:
-        # --- BLOQUE DE SEGURIDAD PARA LLAMADAS FALLIDAS/NO CONTESTADAS ---
-        # Si el agente termina (por desconexión del usuario o error) y NO se han guardado datos,
-        # asumimos que la llamada fue 'unreached' o 'failed' y lo notificamos a la API 
-        # para liberar la cola de campañas.
-        if not agent_instance.data_saved:
-            logger.warning(f"⚠️ La sesión terminó sin guardar datos (Survey ID: {agent_instance.survey_id}). Marcando como 'unreached'...")
+        data_saved = getattr(agent_instance, 'data_saved', False) if 'agent_instance' in dir() else False
+        if not data_saved:
+            logger.warning(f"⚠️ La sesión terminó sin guardar datos (Survey ID: {survey_id}). Marcando como 'unreached'...")
             try:
-                # Usar un status 'unreached' por defecto si se colgó sin interacción
                 fallback_payload = {
-                    "id_encuesta": int(agent_instance.survey_id) if str(agent_instance.survey_id).isdigit() else 0,
+                    "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
                     "status": "unreached",
                     "comentarios": "Llamada finalizada sin datos (Posible No Contesta / Cuelgue inmediato)"
                 }
-                server_url = agent_instance.server_url
+                server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
                 async with aiohttp.ClientSession() as sess:
                     url = f"{server_url}/guardar-encuesta"
                     async with sess.post(url, json=fallback_payload, timeout=5) as r:

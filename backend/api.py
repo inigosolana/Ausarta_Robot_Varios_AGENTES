@@ -498,10 +498,10 @@ async def make_outbound_call(request: dict):
 
         # 4. FORZAR UNIÓNN DEL AGENTE (Job Dispatch)
         # Esto asegura que LiveKit mande al agente Dakota-1ef9 a la sala inmediatamente
-        print(f"🚀 [API] Solicitando despacho de agente 'Dakota-1ef9' a sala {room_name}...")
+        print(f"🚀 [API] Solicitando despacho de agente genérico a sala {room_name}...")
         try:
             await lkapi.agent_dispatch.create_dispatch(api.CreateAgentDispatchRequest(
-                agent_name="Dakota-1ef9",
+                agent_name="",
                 room=room_name
             ))
         except Exception as e:
@@ -547,27 +547,61 @@ async def get_prompts_alias():
 async def update_agent(agent_id: str, config: dict):
     if not supabase: return {"error": "No DB"}
     try:
-        # Ignoramos el ID de la URL y actualizamos el ÚNICO agente que tenemos
-        curr = supabase.table("agent_config").select("id").limit(1).execute()
-        
         db_config = {}
         if "name" in config: db_config["name"] = config["name"]
         if "instructions" in config: db_config["instructions"] = config["instructions"]
         if "greeting" in config: db_config["greeting"] = config["greeting"]
         if "description" in config: db_config["description"] = config["description"]
-        if "useCase" in config: db_config["use_case"] = config["useCase"] 
+        if "useCase" in config or "use_case" in config: 
+            db_config["use_case"] = config.get("useCase") or config.get("use_case")
+        if "voice_id" in config: db_config["voice_id"] = config["voice_id"]
+        if "llm_model" in config: db_config["llm_model"] = config["llm_model"]
+        if "empresa_id" in config: db_config["empresa_id"] = config["empresa_id"]
         
         db_config["updated_at"] = datetime.utcnow().isoformat()
         
-        if not curr.data:
-            supabase.table("agent_config").insert(db_config).execute()
-        else:
-            first_id = curr.data[0]['id']
-            supabase.table("agent_config").update(db_config).eq("id", first_id).execute()
+        # Update the specific agent by its ID
+        supabase.table("agent_config").update(db_config).eq("id", int(agent_id)).execute()
             
-        return {"status": "ok", "message": "Agente actualizado"}
+        return {"status": "ok", "message": f"Agente {agent_id} actualizado"}
     except Exception as e:
         print(f"Error updating agent: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/api/agents")
+async def create_agent(config: dict):
+    """Crear un nuevo agente dinámico"""
+    if not supabase: return JSONResponse(status_code=500, content={"error": "No DB"})
+    try:
+        db_config = {
+            "name": config.get("name", "Nuevo Agente"),
+            "instructions": config.get("instructions", "Eres un asistente virtual."),
+            "greeting": config.get("greeting", "Buenas, ¿tiene un momento?"),
+            "description": config.get("description", ""),
+            "use_case": config.get("useCase") or config.get("use_case", ""),
+            "voice_id": config.get("voice_id", "6511153f-72f9-4314-a204-8d8d8afd646a"),
+            "llm_model": config.get("llm_model", "llama-3.3-70b-versatile"),
+            "empresa_id": config.get("empresa_id"),
+        }
+        
+        res = supabase.table("agent_config").insert(db_config).execute()
+        new_agent = res.data[0] if res.data else {}
+        new_agent['id'] = str(new_agent.get('id', ''))
+        
+        return {"status": "ok", "agent": new_agent}
+    except Exception as e:
+        print(f"Error creating agent: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.delete("/api/agents/{agent_id}")
+async def delete_agent(agent_id: str):
+    """Eliminar un agente"""
+    if not supabase: return JSONResponse(status_code=500, content={"error": "No DB"})
+    try:
+        supabase.table("agent_config").delete().eq("id", int(agent_id)).execute()
+        return {"status": "ok", "message": f"Agente {agent_id} eliminado"}
+    except Exception as e:
+        print(f"Error deleting agent: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 # --- CONFIGURACIÓN DE MODELOS (AI) ---
@@ -787,6 +821,39 @@ async def get_campaign_details(campaign_id: int):
         print(f"Error getting campaign details {campaign_id}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@app.get("/api/agent_config_by_survey/{survey_id}")
+async def get_agent_config_by_survey(survey_id: int):
+    if not supabase: return JSONResponse(status_code=500, content={"error": "Supabase not connected"})
+    try:
+        # Get survey
+        res_survey = supabase.table("encuestas").select("agent_id").eq("id", survey_id).execute()
+        if not res_survey.data:
+            return JSONResponse(status_code=404, content={"error": "Survey not found"})
+            
+        agent_id = res_survey.data[0].get("agent_id")
+        
+        # If no agent explicitly mapped, return default
+        if not agent_id:
+            # Fallback to Dakota id=1 or just returning default values
+            return {"name": "Bot", "greeting": "Buenas, le llamo...", "instructions": "Eres un asistente...", "voice_id": "6511153f-72f9-4314-a204-8d8d8afd646a", "llm_model": "llama-3.3-70b-versatile"}
+            
+        res_agent = supabase.table("agent_config").select("*").eq("id", agent_id).execute()
+        if not res_agent.data:
+            return JSONResponse(status_code=404, content={"error": "Agent not found"})
+            
+        agent_data = res_agent.data[0]
+        # Return sensible defaults for missing fields
+        return {
+            "name": agent_data.get("name", "Bot"),
+            "greeting": agent_data.get("greeting", "Buenas, ¿tiene un momento?"),
+            "instructions": agent_data.get("instructions", "Eres un asistente"),
+            "voice_id": agent_data.get("voice_id") or "6511153f-72f9-4314-a204-8d8d8afd646a",
+            "llm_model": agent_data.get("llm_model") or "llama-3.3-70b-versatile"
+        }
+            
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 # --- WORKER DE LLAMADAS (Background) ---
 
 async def process_campaigns():
@@ -894,10 +961,10 @@ async def process_campaigns():
 
                     # 4. FORZAR UNIÓNN DEL AGENTE (Igual que en llamada de prueba)
                     # Esto asegura que LiveKit mande al agente a la sala inmediatamente
-                    print(f"🚀 [Worker] Despachando agente 'Dakota-1ef9' a sala {room_name}...")
+                    print(f"🚀 [Worker] Despachando agente genérico a sala {room_name}...")
                     try:
                         await lkapi.agent_dispatch.create_dispatch(api.CreateAgentDispatchRequest(
-                            agent_name="Dakota-1ef9",
+                            agent_name="",
                             room=room_name
                         ))
                     except Exception as e:
