@@ -20,7 +20,8 @@ from livekit.agents import (
     function_tool,
     room_io,
     utils,
-    stt
+    stt,
+    AutoSubscribe
 )
 from livekit.plugins import (
     noise_cancellation,
@@ -231,7 +232,7 @@ async def entrypoint(ctx: JobContext):
 
     try:
         logger.info("⏱️ Iniciando conexión a la sala (ctx.connect)...")
-        await ctx.connect()
+        await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
         logger.info("✅ Conexión a sala establecida.")
 
         # --- MEJORA VAD ---
