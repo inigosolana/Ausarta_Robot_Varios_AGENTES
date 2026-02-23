@@ -224,7 +224,7 @@ async def fetch_agent_config(survey_id: str) -> dict:
 # ============================================================================
 server = AgentServer()
 
-@server.rtc_session(name="ausarta-agent")
+@server.rtc_session()
 async def entrypoint(ctx: JobContext):
     # Identificador único para esta instancia/trabajo
     job_id = ctx.job.id if hasattr(ctx, 'job') else "unknown"
@@ -254,7 +254,16 @@ async def entrypoint(ctx: JobContext):
     try:
         logger.info(f"⏱️ [{job_id}] Conectando a sala...")
         await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-        logger.info(f"✅ [{job_id}] Conectado.")
+        
+        # --- CONTROL DE DUPLICIDAD ---
+        # Si ya hay otro agente (nosotros mismos u otra instancia) como participante, salimos.
+        # LiveKit suele tener al agente como un participante de tipo AGENT.
+        agent_participants = [p for p in ctx.room.remote_participants.values() if p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT]
+        if len(agent_participants) > 0:
+            logger.warning(f"⚠️ [{job_id}] Ya hay un agente en la sala {room_name}. Cancelando esta instancia para evitar doble voz.")
+            return
+
+        logger.info(f"✅ [{job_id}] Conectado (Instancia única).")
 
         # --- PASO 3: Cargar config ---
         vad_task = asyncio.to_thread(silero.VAD.load, min_silence_duration=0.5)
