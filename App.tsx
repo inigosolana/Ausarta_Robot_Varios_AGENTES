@@ -193,7 +193,7 @@ const App: React.FC = () => {
           {hasPermission('campaigns') && (
             <SidebarItem
               icon={<Megaphone size={18} />}
-              label="Campaigns"
+              label="Campañas"
               isActive={currentView === 'campaigns'}
               onClick={() => setCurrentView('campaigns')}
               collapsed={!isSidebarOpen}
