@@ -32,14 +32,34 @@ const UserManagementView: React.FC = () => {
     const loadUsersAndEmpresas = async () => {
         setLoading(true);
         try {
-            const { data: empData } = await supabase.from('empresas').select('*').order('nombre');
+            // 1. Load empresas based on role
+            let empQuery = supabase.from('empresas').select('*').order('nombre');
+
+            // Non-superadmins only see their own company
+            if (!isRole('superadmin') && currentProfile?.empresa_id) {
+                empQuery = empQuery.eq('id', currentProfile.empresa_id);
+            }
+
+            const { data: empData } = await empQuery;
             if (empData) setEmpresas(empData);
 
-            const { data: usersData, error } = await supabase
+            // Pre-select empresa for admins
+            if (isRole('admin') && !isRole('superadmin') && currentProfile?.empresa_id) {
+                setNewEmpresaId(currentProfile.empresa_id);
+            }
+
+            // 2. Load user profiles based on role
+            let userQuery = supabase
                 .from('user_profiles')
                 .select('*, empresas(*)')
                 .order('created_at', { ascending: false });
 
+            // Non-superadmins only see users from their own company
+            if (!isRole('superadmin') && currentProfile?.empresa_id) {
+                userQuery = userQuery.eq('empresa_id', currentProfile.empresa_id);
+            }
+
+            const { data: usersData, error } = await userQuery;
             if (error) throw error;
 
             const usersWithPerms = await Promise.all(
@@ -66,11 +86,20 @@ const UserManagementView: React.FC = () => {
             return;
         }
 
-        // Only superadmin can create users
-        if (!isRole('superadmin')) {
-            alert('Solo el superadmin puede crear usuarios');
+        // Only superadmin and admin can create users
+        if (!isRole('superadmin', 'admin')) {
+            alert('No tienes permisos para crear usuarios');
             return;
         }
+
+        // Admins can't create superadmins
+        if (!isRole('superadmin') && newRole === 'superadmin') {
+            alert('No puedes crear usuarios superadmin');
+            return;
+        }
+
+        // Admins are locked to their company
+        const finalEmpresaId = isRole('superadmin') ? newEmpresaId : currentProfile?.empresa_id;
 
         // Validate role permissions
         if (newRole === 'superadmin') {
@@ -82,8 +111,24 @@ const UserManagementView: React.FC = () => {
         setInviteSuccess(false);
         try {
             // Generate a random temporary password (user will set their own via email)
-            // Using a custom generator because crypto.randomUUID requires HTTPS
-            const tempPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).slice(-10) + '!Aa1';
+            // Improved generator: try crypto.getRandomValues, fallback to Math.random
+            const generateRandomString = (length: number) => {
+                const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+                let retVal = "";
+                if (window.crypto && window.crypto.getRandomValues) {
+                    const values = new Uint32Array(length);
+                    window.crypto.getRandomValues(values);
+                    for (let i = 0; i < length; i++) {
+                        retVal += charset.charAt(values[i] % charset.length);
+                    }
+                } else {
+                    for (let i = 0; i < length; i++) {
+                        retVal += charset.charAt(Math.floor(Math.random() * charset.length));
+                    }
+                }
+                return retVal;
+            };
+            const tempPassword = generateRandomString(12) + '!Aa1';
 
             // 1. Create the user with a temporary password
             const { data, error } = await supabase.auth.signUp({
@@ -105,7 +150,7 @@ const UserManagementView: React.FC = () => {
                     email: newEmail,
                     full_name: newName,
                     role: newRole,
-                    empresa_id: newEmpresaId || null,
+                    empresa_id: finalEmpresaId || null,
                     created_by: currentProfile?.id
                 });
 
@@ -265,8 +310,8 @@ const UserManagementView: React.FC = () => {
         return false;
     };
 
-    // Only superadmin can create users
-    const canCreateUsers = isRole('superadmin');
+    // Superadmins and Admins can create users
+    const canCreateUsers = isRole('superadmin', 'admin');
 
     return (
         <div className="space-y-6">
@@ -455,25 +500,35 @@ const UserManagementView: React.FC = () => {
                                         <select
                                             value={newRole}
                                             onChange={(e) => setNewRole(e.target.value as UserRole)}
-                                            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white"
+                                            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white font-medium"
                                         >
-                                            <option value="user">Usuario</option>
-                                            {isRole('superadmin') && <option value="admin">Admin</option>}
+                                            {isRole('superadmin') && <option value="superadmin">Superadmin</option>}
+                                            <option value="admin">Admin (Empresa)</option>
+                                            <option value="user">Usuario (Solo Resultados)</option>
                                         </select>
                                     </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label>
-                                        <select
-                                            value={newEmpresaId}
-                                            onChange={(e) => setNewEmpresaId(e.target.value === '' ? '' : Number(e.target.value))}
-                                            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white"
-                                        >
-                                            <option value="">-- Ninguna --</option>
-                                            {empresas.map(emp => (
-                                                <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                                            ))}
-                                        </select>
-                                    </div>
+                                    {isRole('superadmin') ? (
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label>
+                                            <select
+                                                value={newEmpresaId}
+                                                onChange={(e) => setNewEmpresaId(e.target.value === '' ? '' : Number(e.target.value))}
+                                                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white font-medium"
+                                            >
+                                                <option value="">-- Ninguna --</option>
+                                                {empresas.map(emp => (
+                                                    <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label>
+                                            <div className="px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-600 font-medium">
+                                                {empresas.find(e => e.id === currentProfile?.empresa_id)?.nombre || 'Tu Empresa'}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
