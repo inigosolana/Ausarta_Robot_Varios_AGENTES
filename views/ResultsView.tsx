@@ -1,6 +1,6 @@
-
 import React, { useEffect, useState } from 'react';
 import { Download, Search, RefreshCw, FileText } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface SurveyResult {
     id: number;
@@ -18,6 +18,7 @@ interface SurveyResult {
 }
 
 const ResultsView: React.FC = () => {
+    const { profile } = useAuth();
     const [results, setResults] = useState<SurveyResult[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -27,7 +28,11 @@ const ResultsView: React.FC = () => {
         setLoading(true);
         try {
             const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
-            const res = await fetch(`${API_URL}/api/results`);
+            let url = `${API_URL}/api/results`;
+            if (profile?.empresa_id) {
+                url += `?empresa_id=${profile.empresa_id}`;
+            }
+            const res = await fetch(url);
             if (res.ok) {
                 const data = await res.json();
                 setResults(data);
@@ -41,7 +46,7 @@ const ResultsView: React.FC = () => {
 
     useEffect(() => {
         loadResults();
-    }, []);
+    }, [profile]);
 
     const filteredResults = results.filter(r =>
         r.telefono.includes(searchTerm) ||

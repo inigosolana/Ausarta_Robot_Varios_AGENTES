@@ -65,6 +65,7 @@ class CampaignLeadModel(BaseModel):
 class CampaignModel(BaseModel):
     name: str
     agent_id: int
+    empresa_id: Optional[int] = None
     status: str = "pending"
     scheduled_time: Optional[datetime] = None
     retries_count: int = 3
@@ -108,27 +109,44 @@ async def root():
 
 # --- DASHBOARD METRICS ---
 @app.get("/api/dashboard/stats")
-async def get_dashboard_stats():
+async def get_dashboard_stats(empresa_id: Optional[int] = None):
     if not supabase: return {"error": "Database not connected"}
     
     try:
         # Total llamadas
-        res_total = supabase.table("encuestas").select("count", count="exact").execute()
+        query_total = supabase.table("encuestas").select("count", count="exact")
+        if empresa_id:
+            query_total = query_total.eq("empresa_id", empresa_id)
+        res_total = query_total.execute()
         total_calls = res_total.count if res_total.count is not None else 0
         
         # Completadas
-        res_completed = supabase.table("encuestas").select("count", count="exact").eq("completada", 1).execute()
+        query_comp = supabase.table("encuestas").select("count", count="exact").eq("completada", 1)
+        if empresa_id:
+            query_comp = query_comp.eq("empresa_id", empresa_id)
+        res_completed = query_comp.execute()
         completed_calls = res_completed.count if res_completed.count is not None else 0
         
         # Pendientes (Campaign Leads)
-        res_pending = supabase.table("campaign_leads").select("count", count="exact").eq("status", "pending").execute()
-        pending_calls = res_pending.count if res_pending.count is not None else 0
+        # Para leads pendientes, buscamos los que pertenecen a campañas de esta empresa
+        if empresa_id:
+            # Primero obtenemos IDs de campañas de la empresa
+            camps_res = supabase.table("campaigns").select("id").eq("empresa_id", empresa_id).execute()
+            camp_ids = [c['id'] for c in camps_res.data]
+            if camp_ids:
+                res_pending = supabase.table("campaign_leads").select("count", count="exact").eq("status", "pending").in_("campaign_id", camp_ids).execute()
+                pending_calls = res_pending.count if res_pending.count is not None else 0
+            else:
+                pending_calls = 0
+        else:
+            res_pending = supabase.table("campaign_leads").select("count", count="exact").eq("status", "pending").execute()
+            pending_calls = res_pending.count if res_pending.count is not None else 0
         
-        # Promedios (Usando RPC o calculando en Python si no hay RPC creado)
-        # Para simplificar y evitar crear funciones SQL complejas ahora, traemos los datos y calculamos
-        # IMPORTANTE: En producción con muchos datos, usar funciones SQL (RPC)
-        
-        res_scores = supabase.table("encuestas").select("puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez").not_.is_("puntuacion_comercial", "null").execute()
+        # Promedios
+        query_scores = supabase.table("encuestas").select("puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez").not_.is_("puntuacion_comercial", "null")
+        if empresa_id:
+            query_scores = query_scores.eq("empresa_id", empresa_id)
+        res_scores = query_scores.execute()
         
         avg_comercial = 0
         avg_instalador = 0
@@ -162,10 +180,13 @@ async def get_dashboard_stats():
         return {"total_calls": 0, "completed_calls": 0, "pending_calls": 0, "avg_scores": {}}
 
 @app.get("/api/dashboard/recent-calls")
-async def get_recent_calls():
+async def get_recent_calls(empresa_id: Optional[int] = None):
     if not supabase: return []
     try:
-        response = supabase.table("encuestas").select("*").order("fecha", desc=True).limit(50).execute()
+        query = supabase.table("encuestas").select("*")
+        if empresa_id:
+            query = query.eq("empresa_id", empresa_id)
+        response = query.order("fecha", desc=True).limit(50).execute()
         # Mapeamos los campos de la BD al formato que espera el frontend
         mapped = []
         for r in response.data:
@@ -188,11 +209,14 @@ async def get_recent_calls():
         return []
 
 @app.get("/api/results")
-async def get_all_results():
+async def get_all_results(empresa_id: Optional[int] = None):
     if not supabase: return []
     try:
         # Traemos todos los resultados de encuestas
-        response = supabase.table("encuestas").select("*").order("fecha", desc=True).execute()
+        query = supabase.table("encuestas").select("*")
+        if empresa_id:
+            query = query.eq("empresa_id", empresa_id)
+        response = query.order("fecha", desc=True).execute()
         return response.data
     except Exception as e:
         print(f"Error getting results: {e}")
@@ -314,12 +338,23 @@ async def make_outbound_call(request: dict):
     try:
         # 1. Crear registro en BD
         if supabase:
+            # Obtener empresa_id del agente si no viene en el request
+            emp_id = request.get("empresa_id")
+            if not emp_id and agent_id:
+                try:
+                    agent_res = supabase.table("agent_config").select("empresa_id").eq("id", agent_id).execute()
+                    if agent_res.data:
+                        emp_id = agent_res.data[0].get("empresa_id")
+                except: pass
+
             encuesta_data = {
                 "telefono": phone,
                 "nombre_cliente": "Prueba Dashboard",
                 "fecha": datetime.now(timezone.utc).isoformat(),
                 "status": "initiated",
-                "completada": 0
+                "completada": 0,
+                "agent_id": agent_id,
+                "empresa_id": emp_id
             }
             res_enc = supabase.table("encuestas").insert(encuesta_data).execute()
             encuesta_id = res_enc.data[0]['id']
@@ -364,19 +399,26 @@ async def make_outbound_call(request: dict):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/api/agents")
-async def get_agents():
+async def get_agents(empresa_id: Optional[int] = None):
     """Endpoint compatible con frontend que espera lista de agentes"""
     if not supabase: return [{"name": "Dakota", "instructions": "Default"}]
     try:
-        res = supabase.table("agent_config").select("*").limit(1).execute()
+        query = supabase.table("agent_config").select("*")
+        if empresa_id:
+            query = query.eq("empresa_id", empresa_id)
+        
+        res = query.execute()
+        
         if res.data:
             # Frontend espera 'instructions' en el objeto principal
             # Y 'id' como string si es posible
-            agent = res.data[0]
-            agent['id'] = str(agent['id'])
-            return [agent] # Devolvemos lista
+            agents = []
+            for agent in res.data:
+                agent['id'] = str(agent['id'])
+                agents.append(agent)
+            return agents # Devolvemos lista
         else:
-            return [{"id": "1", "name": "Dakota", "use_case": "Encuesta", "instructions": "Default"}]
+            return []
     except Exception as e:
         print(f"Error getting agents: {e}")
         return []
@@ -484,6 +526,7 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
         camp_data = {
             "name": campaign.name,
             "agent_id": campaign.agent_id,
+            "empresa_id": campaign.empresa_id,
             "status": status_final,
             "scheduled_time": campaign.scheduled_time.isoformat() if campaign.scheduled_time else None,
             "retries_count": campaign.retries_count,
@@ -517,11 +560,15 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/api/campaigns")
-async def list_campaigns():
+async def list_campaigns(empresa_id: Optional[int] = None):
     if not supabase: return []
     try:
         # Traer campañas ordenadas por fecha reciente
-        res = supabase.table("campaigns").select("*").order("created_at", desc=True).limit(20).execute()
+        query = supabase.table("campaigns").select("*")
+        if empresa_id:
+            query = query.eq("empresa_id", empresa_id)
+            
+        res = query.order("created_at", desc=True).limit(50).execute()
         return res.data
     except Exception as e:
         print(f"Error listing campaigns: {e}")
@@ -693,7 +740,9 @@ async def process_campaigns():
                     "nombre_cliente": name,
                     "fecha": datetime.now(timezone.utc).isoformat(),
                     "status": "initiated",
-                    "completada": 0
+                    "completada": 0,
+                    "agent_id": lead.get("agent_id") or camp.get("agent_id"),
+                    "empresa_id": camp.get("empresa_id")
                 }
                 res_enc = supabase.table("encuestas").insert(encuesta_data).execute()
                 encuesta_id = res_enc.data[0]['id']

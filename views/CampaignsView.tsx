@@ -1,8 +1,8 @@
-// @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import {
   Plus, Upload, Clock, AlertCircle, History, Trash2, X, Edit2
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Campaign {
   id: number;
@@ -36,6 +36,7 @@ interface Agent {
 }
 
 export function CampaignsView() {
+  const { profile } = useAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -108,11 +109,15 @@ export function CampaignsView() {
   useEffect(() => {
     loadCampaigns();
     loadAgents();
-  }, []);
+  }, [profile]);
 
   const loadAgents = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/agents`);
+      let url = `${API_URL}/api/agents`;
+      if (profile && profile.role !== 'superadmin' && profile.empresa_id) {
+        url += `?empresa_id=${profile.empresa_id}`;
+      }
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setAgents(Array.isArray(data) ? data : []);
@@ -126,7 +131,11 @@ export function CampaignsView() {
 
   const loadCampaigns = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/campaigns`);
+      let url = `${API_URL}/api/campaigns`;
+      if (profile && profile.role !== 'superadmin' && profile.empresa_id) {
+        url += `?empresa_id=${profile.empresa_id}`;
+      }
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setCampaigns(Array.isArray(data) ? data : []);
@@ -220,6 +229,7 @@ export function CampaignsView() {
         campaign: {
           name,
           agent_id: selectedAgent,
+          empresa_id: profile?.empresa_id,
           scheduled_time: scheduledTime ? new Date(scheduledTime).toISOString() : null,
           status: 'pending',
           retry_interval: retryInterval || 60

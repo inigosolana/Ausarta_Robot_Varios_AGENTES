@@ -8,6 +8,7 @@ import {
     Calendar,
     Zap
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 // API URL
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
@@ -87,6 +88,7 @@ const IntegrationCard: React.FC<{ integ: Integration }> = ({ integ }) => (
 );
 
 const DashboardView: React.FC = () => {
+    const { profile } = useAuth();
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [recentCalls, setRecentCalls] = useState<Call[]>([]);
     const [integrations, setIntegrations] = useState<Integration[]>([]);
@@ -94,14 +96,16 @@ const DashboardView: React.FC = () => {
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, [profile]);
 
     const loadData = async () => {
         try {
             setIsLoading(true);
+            const queryParams = profile?.empresa_id ? `?empresa_id=${profile.empresa_id}` : '';
+
             const [statsRes, callsRes, intRes] = await Promise.all([
-                fetch(`${API_URL}/dashboard/stats`),
-                fetch(`${API_URL}/dashboard/recent-calls`),
+                fetch(`${API_URL}/dashboard/stats${queryParams}`),
+                fetch(`${API_URL}/dashboard/recent-calls${queryParams}`),
                 fetch(`${API_URL}/dashboard/integrations`)
             ]);
 

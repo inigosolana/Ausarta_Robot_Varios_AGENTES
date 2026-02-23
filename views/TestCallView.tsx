@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Phone, Loader2, Bot, PhoneCall } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 import type { AgentConfig } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8001/api';
 
 const TestCallView: React.FC = () => {
+    const { profile } = useAuth();
     const [agents, setAgents] = useState<AgentConfig[]>([]);
     const [selectedAgentId, setSelectedAgentId] = useState<string>('');
     const [phoneNumber, setPhoneNumber] = useState('+34');
@@ -15,14 +17,19 @@ const TestCallView: React.FC = () => {
 
     useEffect(() => {
         loadAgents();
-    }, []);
+    }, [profile]);
 
     const loadAgents = async () => {
         try {
-            const { data, error } = await supabase
+            let query = supabase
                 .from('agent_config')
-                .select('id, name, use_case, description, instructions, greeting')
-                .order('name');
+                .select('id, name, use_case, description, instructions, greeting');
+
+            if (profile && profile.role !== 'superadmin' && profile.empresa_id) {
+                query = query.eq('empresa_id', profile.empresa_id);
+            }
+
+            const { data, error } = await query.order('name');
 
             if (error) throw error;
             setAgents(data || []);
@@ -169,8 +176,8 @@ const TestCallView: React.FC = () => {
                     {/* Call Result */}
                     {callResult && (
                         <div className={`p-4 rounded-xl text-sm font-medium ${callResult.success
-                                ? 'bg-green-50 border border-green-200 text-green-700'
-                                : 'bg-red-50 border border-red-200 text-red-700'
+                            ? 'bg-green-50 border border-green-200 text-green-700'
+                            : 'bg-red-50 border border-red-200 text-red-700'
                             }`}>
                             {callResult.message}
                         </div>
