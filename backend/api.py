@@ -480,6 +480,7 @@ async def make_outbound_call(request: dict):
 
         # 3. Dial Out
         logger.info(f"☎️ [API] Marcando vía SIP a {phone} en sala {room_name}...")
+        print(f"☎️ [API] Marcando vía SIP a {phone} en sala {room_name}...", flush=True)
         try:
             sip_res = await lkapi.sip.create_sip_participant(api.CreateSIPParticipantRequest(
                 sip_trunk_id=sip_trunk_id,
@@ -489,8 +490,10 @@ async def make_outbound_call(request: dict):
                 participant_name="Test User"
             ))
             logger.info(f"✅ [API] Respuesta SIP: {sip_res}")
+            print(f"✅ [API] Respuesta SIP: {sip_res}", flush=True)
         except Exception as sip_err:
             logger.error(f"❌ [API] Error creando participante SIP: {sip_err}")
+            print(f"❌ [API] Error creando participante SIP: {sip_err}", flush=True)
             raise sip_err
 
         # 4. FORZAR UNIÓNN DEL AGENTE (Job Dispatch)
@@ -865,6 +868,7 @@ async def process_campaigns():
                 # 3. Lanzar Llamada y ESPERAR
                 try:
                     logger.info(f"📞 [Worker] Llamando a {phone} (Encuesta ID: {encuesta_id})...")
+                    print(f"📞 [Worker] Llamando a {phone} (Encuesta ID: {encuesta_id})...", flush=True)
                     
                     sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
                     room_name = f"encuesta_{encuesta_id}"
@@ -882,8 +886,10 @@ async def process_campaigns():
                             participant_name=name or "Cliente"
                         ))
                         logger.info(f"✅ [Worker] SIP Marcado: {sip_res}")
+                        print(f"✅ [Worker] SIP Marcado: {sip_res}", flush=True)
                     except Exception as sip_err:
                         logger.error(f"❌ [Worker] Error SIP Participant: {sip_err}")
+                        print(f"❌ [Worker] Error SIP Participant: {sip_err}", flush=True)
                         raise sip_err
 
                     # 4. FORZAR UNIÓNN DEL AGENTE (Igual que en llamada de prueba)
