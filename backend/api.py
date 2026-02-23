@@ -10,6 +10,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from supabase import create_client, Client
+import logging
+import sys
+
+# --- CONFIGURACIÓN DE LOGS ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("api.log", mode='a', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("api-backend")
 
 load_dotenv()
 
@@ -26,7 +39,7 @@ else:
         supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
         print(f"✅ Conectado a Supabase: {SUPABASE_URL}")
     except Exception as e:
-        print(f"❌ Error al conectar a Supabase: {e}")
+        logger.error(f"❌ Error al conectar a Supabase: {e}")
         supabase = None
 
 app = FastAPI(title="Ausarta Voice Agent API", version="1.0.0")
@@ -39,6 +52,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- LOGS SIP ---
+@app.get("/api/logs/sip")
+async def get_sip_logs(lines: int = 100):
+    try:
+        log_path = "api.log"
+        if os.path.exists(log_path):
+            with open(log_path, "r", encoding="utf-8") as f:
+                content = f.readlines()
+                return {"logs": [l.strip() for l in content[-lines:]]}
+        return {"logs": ["No hay logs acumulados en api.log."]}
+    except Exception as e:
+        return {"error": str(e)}
 
 # --- MODELOS PYDANTIC ---
 class VoiceAgentCreate(BaseModel):
@@ -453,14 +479,19 @@ async def make_outbound_call(request: dict):
             print(f"⚠️ [API] Aviso al crear sala (puede que ya exista): {e}")
 
         # 3. Dial Out
-        print(f"☎️ [API] Marcando vía SIP a {phone} en sala {room_name}...")
-        await lkapi.sip.create_sip_participant(api.CreateSIPParticipantRequest(
-            sip_trunk_id=sip_trunk_id,
-            sip_call_to=phone,
-            room_name=room_name,
-            participant_identity=f"user_{phone}_{int(time.time())}",
-            participant_name="Test User"
-        ))
+        logger.info(f"☎️ [API] Marcando vía SIP a {phone} en sala {room_name}...")
+        try:
+            sip_res = await lkapi.sip.create_sip_participant(api.CreateSIPParticipantRequest(
+                sip_trunk_id=sip_trunk_id,
+                sip_call_to=phone,
+                room_name=room_name,
+                participant_identity=f"user_{phone}_{int(time.time())}",
+                participant_name="Test User"
+            ))
+            logger.info(f"✅ [API] Respuesta SIP: {sip_res}")
+        except Exception as sip_err:
+            logger.error(f"❌ [API] Error creando participante SIP: {sip_err}")
+            raise sip_err
 
         # 4. FORZAR UNIÓNN DEL AGENTE (Job Dispatch)
         # Esto asegura que LiveKit mande al agente Dakota-1ef9 a la sala inmediatamente
@@ -833,7 +864,7 @@ async def process_campaigns():
 
                 # 3. Lanzar Llamada y ESPERAR
                 try:
-                    print(f"📞 [Worker] Llamando a {phone} (Encuesta ID: {encuesta_id})...")
+                    logger.info(f"📞 [Worker] Llamando a {phone} (Encuesta ID: {encuesta_id})...")
                     
                     sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
                     room_name = f"encuesta_{encuesta_id}"
@@ -842,13 +873,18 @@ async def process_campaigns():
                         await lkapi.room.create_room(api.CreateRoomRequest(name=room_name))
                     except: pass 
 
-                    await lkapi.sip.create_sip_participant(api.CreateSIPParticipantRequest(
-                        sip_trunk_id=sip_trunk_id,
-                        sip_call_to=phone,
-                        room_name=room_name,
-                        participant_identity=f"user_{phone}",
-                        participant_name=name or "Cliente"
-                    ))
+                    try:
+                        sip_res = await lkapi.sip.create_sip_participant(api.CreateSIPParticipantRequest(
+                            sip_trunk_id=sip_trunk_id,
+                            sip_call_to=phone,
+                            room_name=room_name,
+                            participant_identity=f"user_{phone}",
+                            participant_name=name or "Cliente"
+                        ))
+                        logger.info(f"✅ [Worker] SIP Marcado: {sip_res}")
+                    except Exception as sip_err:
+                        logger.error(f"❌ [Worker] Error SIP Participant: {sip_err}")
+                        raise sip_err
 
                     # 4. FORZAR UNIÓNN DEL AGENTE (Igual que en llamada de prueba)
                     # Esto asegura que LiveKit mande al agente a la sala inmediatamente
