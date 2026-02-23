@@ -235,6 +235,7 @@ async def entrypoint(ctx: JobContext):
     agent_instance = DefaultAgent(room_name=ctx.room.name)
 
     try:
+        await ctx.connect(auto_subscribe=rtc.AutoSubscribe.AUDIO_ONLY)
         session = AgentSession(
             stt=deepgram.STT(model="nova-3", language="es"),
             llm=openai.LLM(
