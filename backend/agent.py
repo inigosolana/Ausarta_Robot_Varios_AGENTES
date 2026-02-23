@@ -217,13 +217,14 @@ class DefaultAgent(Agent):
 
 server = AgentServer()
 
+# --- MEJORA VAD ---
+# Cargamos el VAD de Silero FUERA de la funcion 'async def entrypoint'.
+# Al cargarlo aqui (tarda ~10s), evitamos bloquear el Event Loop de asyncio
+# y que las llamadas se caigan por Timeout.
+vad_model = silero.VAD.load(min_silence_duration=0.5)
+
 @server.rtc_session(agent_name="Dakota-1ef9")
 async def entrypoint(ctx: JobContext):
-    
-    # --- MEJORA VAD ---
-    # min_silence_duration=0.5 hace que el bot entienda que has terminado de hablar 
-    # más rápido, evitando quedarse "sordo" escuchando el ruido de fondo de la llamada.
-    vad_model = silero.VAD.load(min_silence_duration=0.5)
     
     def handle_error(error):
         msg = str(error)
