@@ -23,7 +23,7 @@ const defaultAIConfig: AIConfig = {
 };
 
 const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
-    const { isRole } = useAuth();
+    const { isRole, hasPermission, profile } = useAuth();
     const isEditing = !!agent?.id;
     const [empresas, setEmpresas] = useState<Empresa[]>([]);
 
@@ -45,7 +45,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
     const [showAiPromptModal, setShowAiPromptModal] = useState(false);
     const [aiPromptRequest, setAiPromptRequest] = useState('');
     const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
-    const { hasPermission } = useAuth();
+
 
     useEffect(() => {
         if (isEditing && agent?.id) {
@@ -158,18 +158,31 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
         setIsGeneratingPrompt(true);
         try {
             const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+            const payload = {
+                user_request: aiPromptRequest,
+                empresa_id: formData.empresa_id || profile?.empresa_id || null
+            };
+
             const response = await fetch(`${API_URL}/api/ai/generate-prompt`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_request: aiPromptRequest })
+                body: JSON.stringify(payload)
             });
-            const data = await response.json();
-            if (data.success) {
-                setFormData(prev => ({ ...prev, instructions: data.prompt }));
+            const result = await response.json();
+            if (result.success && result.data) {
+                const aiData = result.data;
+                setFormData(prev => ({
+                    ...prev,
+                    name: aiData.name || prev.name,
+                    use_case: aiData.use_case || prev.use_case,
+                    greeting: aiData.greeting || prev.greeting,
+                    description: aiData.description || prev.description,
+                    instructions: aiData.instructions || prev.instructions
+                }));
                 setShowAiPromptModal(false);
                 setAiPromptRequest('');
             } else {
-                alert(`Error al generar prompt: ${data.error}`);
+                alert(`Error al generar prompt: ${result.error || 'Error desconocido'}`);
             }
         } catch (err) {
             console.error(err);

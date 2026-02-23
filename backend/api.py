@@ -123,6 +123,7 @@ class CallEndRequest(BaseModel):
 
 class AIPromptRequest(BaseModel):
     user_request: str
+    empresa_id: Optional[int] = None
 
 # --- LIVEKIT SETUP ---
 LIVEKIT_URL = os.getenv('LIVEKIT_URL')
@@ -140,16 +141,29 @@ async def root():
 async def generate_ai_prompt(req: AIPromptRequest):
     try:
         from openai import AsyncOpenAI
-        # Usa la API de OpenAI (necesita estar en .env o usar otra si se prefiere, por ahora OpenAI as requested)
+        import json
         client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
-        system_prompt = """
-Eres un experto en diseñar Prompts (Instrucciones) para Agentes Telefónicos de IA de call center o recepción.
+        empresa_name = "la empresa"
+        if req.empresa_id and supabase:
+            try:
+                emp_res = supabase.table("empresas").select("nombre").eq("id", req.empresa_id).execute()
+                if emp_res.data:
+                    empresa_name = emp_res.data[0]["nombre"]
+            except Exception as e_emp:
+                logger.warning(f"No se pudo cargar nombre de empresa: {e_emp}")
+
+        system_prompt = f"""
+Eres un experto en diseñar e implementar Agentes Telefónicos de IA.
 El usuario te dará un propósito general o unas preguntas que quiere hacer en su campaña.
-Tu tarea es devolver ÚNICAMENTE el texto final completo que servirá como instrucción del sistema (instrucciones) para el Agente bot.
-Crea instrucciones claras, directas, y en español. Estructura bien el texto.
-Si el usuario menciona que es un cuestionario o encuesta abierta, incluye explícitamente "Pregunta 1:", "Pregunta 2:", etc., en tu prompt para estructurar bien qué información debe sacar y rellenar.
-NO HABLES. NO SALUDES. SOLO devuelve el texto bruto del prompt que será copiado y pegado en el sistema del agente. 
+Tu tarea es devolver la configuración del agente EN FORMATO JSON ESTRICTO, con las siguientes claves y nada más:
+- "name": Un nombre creativo y común (ej: Dakota, Carlos, Laura) para el agente.
+- "use_case": Frase muy breve de qué va (ej: Encuesta de satisfacción).
+- "greeting": El saludo inicial. Como regla general, debe decir que es el asistente virtual de "{empresa_name}". Ejemplo: "Hola, soy [name], el asistente virtual de {empresa_name}. ¿Tiene un momento?".
+- "description": Breve descripción interna del propósito.
+- "instructions": Todo el texto del prompt, en español, con las reglas de cómo debe comportarse. Si es una encuesta, incluye explícitamente "Pregunta 1:", "Pregunta 2:", etc. como instrucciones de paso a paso.
+
+SOLO DEBES DEVOLVER EL TEXTO EN FORMATO JSON, QUE SEA PUEDE CARGAR MEDIANTE JSON.LOADS(). SIN ACENTOS EN LAS CLAVES DEL JSON (sólo usa las indicadas en inglés). SI USAS MARKDOWN PARA EL JSON (```json), EL SISTEMA FALLARÁ. DEVUELVE DIRECTAMENTE `{{"name": ...}}`.
 """
         response = await client.chat.completions.create(
             model="gpt-4o",
@@ -158,9 +172,17 @@ NO HABLES. NO SALUDES. SOLO devuelve el texto bruto del prompt que será copiado
                 {"role": "user", "content": req.user_request}
             ],
             temperature=0.7,
-            max_tokens=1000
+            max_tokens=1500
         )
-        return {"success": True, "prompt": response.choices[0].message.content}
+        
+        raw_content = response.choices[0].message.content.strip()
+        if raw_content.startswith("```json"):
+            raw_content = raw_content[7:-3].strip()
+        elif raw_content.startswith("```"):
+            raw_content = raw_content[3:-3].strip()
+            
+        data = json.loads(raw_content)
+        return {"success": True, "data": data}
     except Exception as e:
         logger.error(f"Error AI Prompt Generator: {e}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
