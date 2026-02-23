@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
     Users, Plus, Shield, ShieldCheck, User, Trash2, Loader2,
-    ToggleLeft, ToggleRight, X, Settings, ChevronDown, ChevronUp
+    ToggleLeft, ToggleRight, X, Settings, ChevronDown, ChevronUp,
+    Mail, CheckCircle, AlertCircle
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -18,11 +19,11 @@ const UserManagementView: React.FC = () => {
 
     // Create user form
     const [newEmail, setNewEmail] = useState('');
-    const [newPassword, setNewPassword] = useState('');
     const [newName, setNewName] = useState('');
     const [newRole, setNewRole] = useState<UserRole>('user');
     const [newEmpresaId, setNewEmpresaId] = useState<number | ''>('');
     const [creating, setCreating] = useState(false);
+    const [inviteSuccess, setInviteSuccess] = useState(false);
 
     useEffect(() => {
         loadUsersAndEmpresas();
@@ -60,35 +61,43 @@ const UserManagementView: React.FC = () => {
     };
 
     const handleCreateUser = async () => {
-        if (!newEmail || !newPassword || !newName) {
-            alert('Rellena todos los campos');
+        if (!newEmail || !newName) {
+            alert('Rellena nombre y email');
+            return;
+        }
+
+        // Only superadmin can create users
+        if (!isRole('superadmin')) {
+            alert('Solo el superadmin puede crear usuarios');
             return;
         }
 
         // Validate role permissions
-        if (isRole('admin') && newRole !== 'user') {
-            alert('Solo puedes crear usuarios con rol "user"');
-            return;
-        }
-        if (isRole('superadmin') && newRole === 'superadmin') {
+        if (newRole === 'superadmin') {
             alert('No puedes crear otro superadmin');
             return;
         }
 
         setCreating(true);
+        setInviteSuccess(false);
         try {
-            // Sign up user via Supabase Auth
+            // Generate a random temporary password (user will set their own via email)
+            const tempPassword = crypto.randomUUID() + '!Aa1';
+
+            // 1. Create the user with a temporary password
             const { data, error } = await supabase.auth.signUp({
                 email: newEmail,
-                password: newPassword,
+                password: tempPassword,
                 options: {
-                    data: { full_name: newName, role: newRole }
+                    data: { full_name: newName, role: newRole },
+                    // Don't redirect on signup confirmation
+                    emailRedirectTo: undefined,
                 }
             });
 
             if (error) throw error;
 
-            // If the trigger didn't fire or we need to update the role/creator
+            // 2. Create the profile
             if (data.user) {
                 await supabase.from('user_profiles').upsert({
                     id: data.user.id,
@@ -99,7 +108,7 @@ const UserManagementView: React.FC = () => {
                     created_by: currentProfile?.id
                 });
 
-                // Set default permissions for new user (all enabled by default)
+                // Set default permissions (all enabled by default)
                 const defaultPerms = ALL_MODULES.map(m => ({
                     user_id: data.user!.id,
                     module: m.key,
@@ -110,18 +119,40 @@ const UserManagementView: React.FC = () => {
                 await supabase.from('user_permissions').insert(defaultPerms);
             }
 
-            alert('Usuario creado correctamente');
-            setShowCreate(false);
-            setNewEmail('');
-            setNewPassword('');
-            setNewName('');
-            setNewRole('user');
-            setNewEmpresaId('');
-            loadUsersAndEmpresas();
+            // 3. Send password reset email so the user can set their own password
+            await supabase.auth.resetPasswordForEmail(newEmail, {
+                redirectTo: `${window.location.origin}/#recovery`,
+            });
+
+            setInviteSuccess(true);
+
+            // Reset form after a brief delay to show success
+            setTimeout(() => {
+                setShowCreate(false);
+                setNewEmail('');
+                setNewName('');
+                setNewRole('user');
+                setNewEmpresaId('');
+                setInviteSuccess(false);
+                loadUsersAndEmpresas();
+            }, 2500);
+
         } catch (err: any) {
             alert(`Error: ${err.message}`);
         } finally {
             setCreating(false);
+        }
+    };
+
+    const handleResendInvite = async (email: string) => {
+        try {
+            const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: `${window.location.origin}/#recovery`,
+            });
+            if (error) throw error;
+            alert(`📧 Email de invitación reenviado a ${email}`);
+        } catch (err: any) {
+            alert(`Error: ${err.message}`);
         }
     };
 
@@ -233,6 +264,9 @@ const UserManagementView: React.FC = () => {
         return false;
     };
 
+    // Only superadmin can create users
+    const canCreateUsers = isRole('superadmin');
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -241,13 +275,15 @@ const UserManagementView: React.FC = () => {
                     <h1 className="text-2xl font-bold text-gray-900">Gestión de Usuarios</h1>
                     <p className="text-gray-500 text-sm">Administra roles y permisos</p>
                 </div>
-                <button
-                    onClick={() => setShowCreate(true)}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-500 hover:to-blue-400 transition-all shadow-lg shadow-blue-500/20 font-medium text-sm"
-                >
-                    <Plus size={18} />
-                    Crear Usuario
-                </button>
+                {canCreateUsers && (
+                    <button
+                        onClick={() => setShowCreate(true)}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-500 hover:to-blue-400 transition-all shadow-lg shadow-blue-500/20 font-medium text-sm"
+                    >
+                        <Plus size={18} />
+                        Invitar Usuario
+                    </button>
+                )}
             </div>
 
             {/* Users Table / Cards */}
@@ -291,6 +327,13 @@ const UserManagementView: React.FC = () => {
                                 <div className="flex items-center gap-2">
                                     {canManageUser(user) && (
                                         <>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleResendInvite(user.email); }}
+                                                className="p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
+                                                title="Reenviar invitación / Reset contraseña"
+                                            >
+                                                <Mail size={16} />
+                                            </button>
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); handleToggleActive(user.id, user.is_active); }}
                                                 className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
@@ -352,89 +395,101 @@ const UserManagementView: React.FC = () => {
                 </div>
             )}
 
-            {/* Create User Modal */}
+            {/* Create / Invite User Modal */}
             {showCreate && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
                         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                             <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                                <Users size={20} className="text-blue-600" /> Crear Usuario
+                                <Mail size={20} className="text-blue-600" /> Invitar Usuario
                             </h3>
-                            <button onClick={() => setShowCreate(false)} className="text-gray-400 hover:text-gray-600">
+                            <button onClick={() => { setShowCreate(false); setInviteSuccess(false); }} className="text-gray-400 hover:text-gray-600">
                                 <X size={20} />
                             </button>
                         </div>
 
-                        <div className="p-6 space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Nombre completo</label>
-                                <input
-                                    type="text"
-                                    value={newName}
-                                    onChange={(e) => setNewName(e.target.value)}
-                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                    placeholder="Juan Pérez"
-                                />
+                        {inviteSuccess ? (
+                            <div className="p-8 text-center">
+                                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-50 mb-4">
+                                    <CheckCircle size={32} className="text-green-500" />
+                                </div>
+                                <h3 className="text-lg font-semibold text-gray-900 mb-2">¡Invitación enviada!</h3>
+                                <p className="text-gray-500 text-sm">
+                                    Se ha enviado un email a <strong>{newEmail}</strong> con un enlace para crear su contraseña.
+                                </p>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                                <input
-                                    type="email"
-                                    value={newEmail}
-                                    onChange={(e) => setNewEmail(e.target.value)}
-                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                    placeholder="juan@empresa.com"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Contraseña</label>
-                                <input
-                                    type="password"
-                                    value={newPassword}
-                                    onChange={(e) => setNewPassword(e.target.value)}
-                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                    placeholder="Mínimo 6 caracteres"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Rol</label>
-                                <select
-                                    value={newRole}
-                                    onChange={(e) => setNewRole(e.target.value as UserRole)}
-                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white"
-                                >
-                                    <option value="user">Usuario</option>
-                                    {isRole('superadmin') && <option value="admin">Admin</option>}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label>
-                                <select
-                                    value={newEmpresaId}
-                                    onChange={(e) => setNewEmpresaId(e.target.value === '' ? '' : Number(e.target.value))}
-                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white"
-                                >
-                                    <option value="">-- Ninguna --</option>
-                                    {empresas.map(emp => (
-                                        <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        </div>
+                        ) : (
+                            <>
+                                <div className="p-6 space-y-4">
+                                    {/* Info banner */}
+                                    <div className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-100 rounded-xl">
+                                        <AlertCircle size={18} className="text-blue-500 mt-0.5 shrink-0" />
+                                        <p className="text-sm text-blue-700">
+                                            El usuario recibirá un email con un enlace para establecer su propia contraseña.
+                                        </p>
+                                    </div>
 
-                        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
-                            <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={handleCreateUser}
-                                disabled={creating}
-                                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 flex items-center gap-2 transition-colors"
-                            >
-                                {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-                                {creating ? 'Creando...' : 'Crear Usuario'}
-                            </button>
-                        </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Nombre completo</label>
+                                        <input
+                                            type="text"
+                                            value={newName}
+                                            onChange={(e) => setNewName(e.target.value)}
+                                            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                            placeholder="Juan Pérez"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                                        <input
+                                            type="email"
+                                            value={newEmail}
+                                            onChange={(e) => setNewEmail(e.target.value)}
+                                            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                            placeholder="juan@empresa.com"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Rol</label>
+                                        <select
+                                            value={newRole}
+                                            onChange={(e) => setNewRole(e.target.value as UserRole)}
+                                            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white"
+                                        >
+                                            <option value="user">Usuario</option>
+                                            {isRole('superadmin') && <option value="admin">Admin</option>}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label>
+                                        <select
+                                            value={newEmpresaId}
+                                            onChange={(e) => setNewEmpresaId(e.target.value === '' ? '' : Number(e.target.value))}
+                                            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white"
+                                        >
+                                            <option value="">-- Ninguna --</option>
+                                            {empresas.map(emp => (
+                                                <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+                                    <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        onClick={handleCreateUser}
+                                        disabled={creating}
+                                        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 flex items-center gap-2 transition-colors"
+                                    >
+                                        {creating ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
+                                        {creating ? 'Enviando...' : 'Enviar invitación'}
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             )}

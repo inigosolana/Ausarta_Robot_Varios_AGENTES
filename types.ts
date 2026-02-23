@@ -2,6 +2,8 @@
 export type ViewState =
   | 'overview'
   | 'create-agents'
+  | 'empresas'
+  | 'agents'
   | 'test-call'
   | 'campaigns'
   | 'automation'
@@ -107,7 +109,8 @@ export interface ModelConfig {
 // All available modules for permission system
 export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'overview', label: 'Dashboard' },
-  { key: 'create-agents', label: 'Empresas' },
+  { key: 'empresas', label: 'Empresas' },
+  { key: 'agents', label: 'Agentes' },
   { key: 'test-call', label: 'Llamada Prueba' },
   { key: 'campaigns', label: 'Campañas' },
   { key: 'models', label: 'AI Models' },

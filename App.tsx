@@ -2,13 +2,12 @@
 import React, { useState, useEffect } from 'react';
 import {
   LayoutDashboard,
-  Mic2,
+  Bot,
+  Building2,
   Megaphone,
   Zap,
   Cpu,
   PhoneCall,
-  Wrench,
-  MessageSquare,
   BarChart3,
   ClipboardList,
   PanelLeftClose,
@@ -31,6 +30,7 @@ import DashboardView from './views/DashboardView';
 import ResultsView from './views/ResultsView';
 import UsageView from './views/UsageView';
 import UserManagementView from './views/UserManagementView';
+import AgentManagementView from './views/AgentManagementView';
 import LoginView from './views/LoginView';
 
 const App: React.FC = () => {
@@ -96,7 +96,10 @@ const App: React.FC = () => {
       case 'campaigns':
         return <CampaignsView />;
       case 'create-agents':
+      case 'empresas':
         return <AgentListView />;
+      case 'agents':
+        return <AgentManagementView />;
       case 'test-call':
         return <TestCallView />;
       case 'overview':
@@ -172,12 +175,21 @@ const App: React.FC = () => {
           <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
             Build
           </div>
-          {hasPermission('create-agents') && (
+          {hasPermission('empresas') && (
             <SidebarItem
-              icon={<Mic2 size={18} />}
+              icon={<Building2 size={18} />}
               label="Empresas"
-              isActive={currentView === 'create-agents'}
-              onClick={() => setCurrentView('create-agents')}
+              isActive={currentView === 'empresas' || currentView === 'create-agents'}
+              onClick={() => setCurrentView('empresas')}
+              collapsed={!isSidebarOpen}
+            />
+          )}
+          {hasPermission('agents') && (
+            <SidebarItem
+              icon={<Bot size={18} />}
+              label="Agentes"
+              isActive={currentView === 'agents'}
+              onClick={() => setCurrentView('agents')}
               collapsed={!isSidebarOpen}
             />
           )}

@@ -1,22 +1,20 @@
-import React, { useState, useEffect } from "react";
-import { Plus, Bot, Edit2, Trash2, Loader2, Search, Mic, Brain, Speaker, Building2, ChevronRight, ArrowLeft, Users, Mail } from "lucide-react";
+Ôªøimport React, { useState, useEffect } from "react";
+import { Bot, Loader2, Search, Building2, ChevronRight, ArrowLeft, Users, Mail, Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
 import type { AgentConfig, AIConfig, Empresa, UserProfile } from "../types";
-import AgentFormView from "./AgentFormView";
 
 const AgentListView: React.FC = () => {
+    const { isRole } = useAuth();
     const [empresas, setEmpresas] = useState<Empresa[]>([]);
     const [agents, setAgents] = useState<(AgentConfig & { ai_config?: AIConfig })[]>([]);
     const [companyUsers, setCompanyUsers] = useState<UserProfile[]>([]);
-    
+
     // View States
     const [loading, setLoading] = useState(true);
     const [selectedEmpresa, setSelectedEmpresa] = useState<Empresa | null>(null);
     const [activeTab, setActiveTab] = useState<"agents" | "users">("agents");
-    
     const [search, setSearch] = useState("");
-    const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
-    const [isCreatingAgent, setIsCreatingAgent] = useState(false);
 
     useEffect(() => {
         loadEmpresas();
@@ -90,7 +88,7 @@ const AgentListView: React.FC = () => {
     };
 
     const handleDeleteEmpresa = async (id: number) => {
-        if (!confirm("øSeguro que quieres eliminar esta empresa y TODOS sus agentes?")) return;
+        if (!confirm("¬øSeguro que quieres eliminar esta empresa y TODOS sus agentes?")) return;
         try {
             await supabase.from("empresas").delete().eq("id", id);
             loadEmpresas();
@@ -99,34 +97,7 @@ const AgentListView: React.FC = () => {
         }
     };
 
-    const handleDeleteAgent = async (id: number) => {
-        if (!confirm("øEst·s seguro de que quieres eliminar este agente?")) return;
-        try {
-            await supabase.from("ai_config").delete().eq("agent_id", id);
-            await supabase.from("agent_config").delete().eq("id", id);
-            setAgents(prev => prev.filter(a => a.id !== id));
-        } catch (err) {
-            alert("Error al eliminar el agente");
-        }
-    };
-
-    if (isCreatingAgent || editingAgent) {
-        return (
-            <AgentFormView
-                agent={editingAgent || { name: "", use_case: "", description: "", instructions: "", greeting: "", empresa_id: selectedEmpresa?.id }}
-                onSave={async () => {
-                    setEditingAgent(null);
-                    setIsCreatingAgent(false);
-                    if (selectedEmpresa) await loadCompanyData(selectedEmpresa.id!);
-                }}
-                onCancel={() => { 
-                    setEditingAgent(null); 
-                    setIsCreatingAgent(false); 
-                }}
-            />
-        );
-    }
-
+    // ===== COMPANY DETAIL VIEW (Read-only agents) =====
     if (selectedEmpresa) {
         return (
             <div className="space-y-6">
@@ -141,26 +112,17 @@ const AgentListView: React.FC = () => {
                         </h1>
                         <p className="text-gray-500 text-sm">Responsable: {selectedEmpresa.responsable}</p>
                     </div>
-                    {activeTab === "agents" && (
-                        <button
-                            onClick={() => setIsCreatingAgent(true)}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-500 shadow-lg shadow-blue-500/20 font-medium text-sm transition-all hover:scale-105"
-                        >
-                            <Plus size={18} />
-                            Crear Agente
-                        </button>
-                    )}
                 </div>
 
                 {/* Tabs */}
                 <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-                    <button 
+                    <button
                         onClick={() => setActiveTab("agents")}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === "agents" ? "bg-white text-blue-600 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
                     >
                         <Bot size={18} /> Agentes ({agents.length})
                     </button>
-                    <button 
+                    <button
                         onClick={() => setActiveTab("users")}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === "users" ? "bg-white text-blue-600 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
                     >
@@ -182,27 +144,42 @@ const AgentListView: React.FC = () => {
                 {loading ? (
                     <div className="flex justify-center py-20"><Loader2 className="animate-spin text-blue-500" size={32} /></div>
                 ) : activeTab === "agents" ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                        {agents.filter(a => a.name.toLowerCase().includes(search.toLowerCase())).map((agent) => (
-                            <div key={agent.id} onClick={() => setEditingAgent(agent)} className="group bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-lg cursor-pointer overflow-hidden p-5 transition-all">
-                                <div className="flex items-start justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="p-2.5 rounded-xl bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all">
-                                            <Bot size={20} />
-                                        </div>
-                                        <div>
-                                            <h3 className="font-semibold text-gray-900 group-hover:text-blue-600">{agent.name}</h3>
-                                            <p className="text-xs text-gray-400">{agent.use_case || "Sin caso de uso"}</p>
-                                        </div>
-                                    </div>
-                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteAgent(agent.id!); }} className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition-all">
-                                        <Trash2 size={16} />
-                                    </button>
-                                </div>
-                                <p className="text-sm text-gray-500 my-4 line-clamp-2">{agent.description}</p>
+                    <>
+                        {agents.length === 0 ? (
+                            <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-gray-200">
+                                <Bot size={40} className="mx-auto text-gray-300 mb-3" />
+                                <p className="text-gray-500 font-medium">Esta empresa no tiene agentes a√∫n</p>
+                                <p className="text-gray-400 text-sm mt-1">Ve a la pesta√±a "Agentes" del men√∫ lateral para crear uno.</p>
                             </div>
-                        ))}
-                    </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                {agents.filter(a => a.name.toLowerCase().includes(search.toLowerCase())).map((agent) => (
+                                    <div key={agent.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden p-5 transition-all hover:border-blue-100 hover:shadow-sm">
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2.5 rounded-xl bg-blue-50 text-blue-600">
+                                                <Bot size={20} />
+                                            </div>
+                                            <div>
+                                                <h3 className="font-semibold text-gray-900">{agent.name}</h3>
+                                                <p className="text-xs text-gray-400">{agent.use_case || "Sin caso de uso"}</p>
+                                            </div>
+                                        </div>
+                                        <p className="text-sm text-gray-500 my-4 line-clamp-2">{agent.description || "Sin descripci√≥n"}</p>
+                                        {agent.ai_config && (
+                                            <div className="flex flex-wrap gap-1.5 text-[10px]">
+                                                <span className="px-2 py-0.5 bg-purple-50 text-purple-600 rounded-full font-medium">
+                                                    {agent.ai_config.llm_model}
+                                                </span>
+                                                <span className="px-2 py-0.5 bg-green-50 text-green-600 rounded-full font-medium">
+                                                    {agent.ai_config.stt_provider}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         {companyUsers.filter(u => u.email.toLowerCase().includes(search.toLowerCase()) || u.full_name.toLowerCase().includes(search.toLowerCase())).map((user) => (
@@ -228,21 +205,23 @@ const AgentListView: React.FC = () => {
         );
     }
 
-    // LISTADO DE EMPRESAS
+    // ===== MAIN: COMPANY LIST =====
     return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">Empresas y Clientes</h1>
-                    <p className="text-gray-500 text-sm">Gestiona la estructura multitenant y sus usuarios/agentes</p>
+                    <p className="text-gray-500 text-sm">Visualiza y gestiona la estructura multitenant</p>
                 </div>
-                <button
-                    onClick={handleCreateEmpresa}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-xl hover:bg-gray-800 transition-all font-medium text-sm shadow-lg shadow-gray-200"
-                >
-                    <Building2 size={18} />
-                    Crear Nueva Empresa
-                </button>
+                {isRole('superadmin') && (
+                    <button
+                        onClick={handleCreateEmpresa}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-xl hover:bg-gray-800 transition-all font-medium text-sm shadow-lg shadow-gray-200"
+                    >
+                        <Building2 size={18} />
+                        Crear Nueva Empresa
+                    </button>
+                )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in duration-700">
@@ -252,15 +231,17 @@ const AgentListView: React.FC = () => {
                     <div className="col-span-full text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200">
                         <Building2 size={48} className="mx-auto text-gray-300 mb-4" />
                         <h3 className="text-lg font-semibold text-gray-700">Comienza creando una empresa</h3>
-                        <p className="text-gray-400 text-sm">Podr·s separar agentes y usuarios por cada cliente.</p>
+                        <p className="text-gray-400 text-sm">Podr√°s separar agentes y usuarios por cada cliente.</p>
                     </div>
                 ) : (
                     empresas.map((empresa) => (
                         <div key={empresa.id} onClick={() => { setSelectedEmpresa(empresa); loadCompanyData(empresa.id!); setSearch(""); }} className="group relative bg-white rounded-2xl border border-gray-100 p-8 flex flex-col items-center text-center space-y-4 hover:border-blue-400 hover:shadow-2xl hover:shadow-blue-500/10 transition-all cursor-pointer">
-                            <button onClick={(e) => { e.stopPropagation(); handleDeleteEmpresa(empresa.id!); }} className="absolute top-4 right-4 p-2 opacity-0 group-hover:opacity-100 hover:bg-red-50 text-gray-300 hover:text-red-500 rounded-xl transition-all">
-                                <Trash2 size={18} />
-                            </button>
-                            
+                            {isRole('superadmin') && (
+                                <button onClick={(e) => { e.stopPropagation(); handleDeleteEmpresa(empresa.id!); }} className="absolute top-4 right-4 p-2 opacity-0 group-hover:opacity-100 hover:bg-red-50 text-gray-300 hover:text-red-500 rounded-xl transition-all">
+                                    <Trash2 size={18} />
+                                </button>
+                            )}
+
                             <div className="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center group-hover:bg-blue-600 group-hover:rotate-6 transition-all duration-500 shadow-inner">
                                 <Building2 size={32} className="text-blue-500 group-hover:text-white transition-colors" />
                             </div>
@@ -271,7 +252,7 @@ const AgentListView: React.FC = () => {
                             </div>
 
                             <div className="pt-4 flex items-center gap-2 text-xs font-bold text-blue-500 opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all">
-                                GESTIONAR EMPRESA <ChevronRight size={14} />
+                                VER EMPRESA <ChevronRight size={14} />
                             </div>
                         </div>
                     ))
@@ -282,4 +263,3 @@ const AgentListView: React.FC = () => {
 };
 
 export default AgentListView;
-

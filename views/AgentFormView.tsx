@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Save, ArrowLeft, Loader2, Bot, Mic, Speaker, Brain } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import type { AgentConfig, AIConfig } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import type { AgentConfig, AIConfig, Empresa } from '../types';
 
 interface Props {
     agent?: AgentConfig;
@@ -22,7 +23,9 @@ const defaultAIConfig: AIConfig = {
 };
 
 const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
+    const { isRole } = useAuth();
     const isEditing = !!agent?.id;
+    const [empresas, setEmpresas] = useState<Empresa[]>([]);
 
     const [formData, setFormData] = useState<AgentConfig>({
         name: agent?.name || '',
@@ -43,7 +46,15 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
             loadAIConfig(agent.id);
         }
         loadTemplates();
+        if (isRole('superadmin')) {
+            loadEmpresas();
+        }
     }, []);
+
+    const loadEmpresas = async () => {
+        const { data } = await supabase.from('empresas').select('*').order('nombre');
+        if (data) setEmpresas(data);
+    };
 
     const loadAIConfig = async (agentId: number) => {
         setIsLoading(true);
@@ -187,6 +198,35 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
                                 />
                             </div>
+                            {isRole('superadmin') ? (
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Empresa / Proyecto *</label>
+                                    <select
+                                        value={formData.empresa_id || ''}
+                                        onChange={(e) => setFormData({ ...formData, empresa_id: e.target.value ? Number(e.target.value) : null })}
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none bg-white"
+                                    >
+                                        <option value="" disabled>-- Selecciona Empresa --</option>
+                                        {empresas.map(emp => (
+                                            <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            ) : (
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Caso de Uso</label>
+                                    <input
+                                        type="text"
+                                        value={formData.use_case}
+                                        onChange={(e) => setFormData({ ...formData, use_case: e.target.value })}
+                                        placeholder="Ej: Encuesta de satisfacción"
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                    />
+                                </div>
+                            )}
+                        </div>
+
+                        {isRole('superadmin') && (
                             <div>
                                 <label className="block text-sm font-semibold text-gray-700 mb-1">Caso de Uso</label>
                                 <input
@@ -197,7 +237,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
                                 />
                             </div>
-                        </div>
+                        )}
 
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 mb-1">Saludo Inicial</label>
