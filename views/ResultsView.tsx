@@ -15,6 +15,7 @@ interface SurveyResult {
     comentarios: string | null;
     transcription: string | null;
     llm_model: string | null;
+    is_question_based?: boolean;
 }
 
 const ResultsView: React.FC = () => {
@@ -132,7 +133,7 @@ const ResultsView: React.FC = () => {
                                 <th className="px-6 py-3">Phone / Campaign</th>
                                 <th className="px-6 py-3">Date</th>
                                 <th className="px-6 py-3 text-center">Status</th>
-                                <th className="px-6 py-3 text-center">Scores (C/I/R)</th>
+                                <th className="px-6 py-3 text-center">Results / Scores</th>
                                 <th className="px-6 py-3">Model</th>
                                 <th className="px-6 py-3">Comments</th>
                                 <th className="px-6 py-3 text-right">More</th>
@@ -175,20 +176,28 @@ const ResultsView: React.FC = () => {
                                         })()}
                                     </td>
                                     <td className="px-6 py-4 text-center">
-                                        <div className="flex items-center justify-center gap-2">
-                                            {[
-                                                { label: 'COM', val: row.puntuacion_comercial },
-                                                { label: 'INS', val: row.puntuacion_instalador },
-                                                { label: 'RAP', val: row.puntuacion_rapidez }
-                                            ].map((s, idx) => (
-                                                <div key={idx} className="flex flex-col items-center">
-                                                    <span className="text-[10px] text-gray-400 mb-0.5">{s.label}</span>
-                                                    <span className={`w-8 h-8 flex items-center justify-center rounded-lg text-sm font-bold shadow-sm ${getScoreColor(s.val)}`}>
-                                                        {s.val ?? '-'}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
+                                        {row.is_question_based ? (
+                                            <div className="flex justify-center items-center">
+                                                <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-1 rounded-full border border-gray-200">
+                                                    Preguntas Abiertas
+                                                </span>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center justify-center gap-2">
+                                                {[
+                                                    { label: 'COM', val: row.puntuacion_comercial },
+                                                    { label: 'INS', val: row.puntuacion_instalador },
+                                                    { label: 'RAP', val: row.puntuacion_rapidez }
+                                                ].map((s, idx) => (
+                                                    <div key={idx} className="flex flex-col items-center">
+                                                        <span className="text-[10px] text-gray-400 mb-0.5">{s.label}</span>
+                                                        <span className={`w-8 h-8 flex items-center justify-center rounded-lg text-sm font-bold shadow-sm ${getScoreColor(s.val)}`}>
+                                                            {s.val ?? '-'}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                     </td>
                                     <td className="px-6 py-4">
                                         <div className="flex flex-col">

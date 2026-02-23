@@ -15,6 +15,7 @@ interface Campaign {
   failed_leads?: number;
   pending_leads?: number;
   retries_count?: number;
+  is_question_based?: boolean;
 }
 
 interface Lead {
@@ -501,7 +502,20 @@ export function CampaignsView() {
                       </div>
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
-                      {(lead.puntuacion_comercial != null || lead.puntuacion_instalador != null || lead.puntuacion_rapidez != null) ? (
+                      {selectedCampaign?.is_question_based ? (
+                        lead.comentarios ? (
+                          <div className="space-y-1">
+                            <div className="font-semibold text-gray-800 text-xs uppercase mb-1">Respuestas Registradas:</div>
+                            <p className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-2 rounded border border-gray-100">{lead.comentarios}</p>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 italic">
+                            {lead.status === 'unreached' ? 'No contestó' :
+                              lead.status === 'rejected_opt_out' ? 'Cliente rechazó responder' :
+                                lead.status === 'pending' ? 'Esperando...' : 'Sin respuestas todavía'}
+                          </span>
+                        )
+                      ) : (lead.puntuacion_comercial != null || lead.puntuacion_instalador != null || lead.puntuacion_rapidez != null) ? (
                         <div className="space-y-1">
                           <div className="flex gap-2">
                             <span className="font-bold text-gray-900">C:</span>{lead.puntuacion_comercial ?? '-'}

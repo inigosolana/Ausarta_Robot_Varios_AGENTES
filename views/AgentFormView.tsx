@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, ArrowLeft, Loader2, Bot, Mic, Speaker, Brain } from 'lucide-react';
+import { Save, ArrowLeft, Loader2, Bot, Mic, Speaker, Brain, Sparkles, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { AgentConfig, AIConfig, Empresa } from '../types';
@@ -40,6 +40,12 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
     const [isSaving, setIsSaving] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [templates, setTemplates] = useState<{ id: number; name: string; content: string }[]>([]);
+
+    // AI Prompt Generation State
+    const [showAiPromptModal, setShowAiPromptModal] = useState(false);
+    const [aiPromptRequest, setAiPromptRequest] = useState('');
+    const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+    const { hasPermission } = useAuth();
 
     useEffect(() => {
         if (isEditing && agent?.id) {
@@ -144,6 +150,32 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
             alert(`Error al guardar: ${err.message}`);
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const handleGenerateAIPrompt = async () => {
+        if (!aiPromptRequest.trim()) return;
+        setIsGeneratingPrompt(true);
+        try {
+            const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+            const response = await fetch(`${API_URL}/api/ai/generate-prompt`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_request: aiPromptRequest })
+            });
+            const data = await response.json();
+            if (data.success) {
+                setFormData(prev => ({ ...prev, instructions: data.prompt }));
+                setShowAiPromptModal(false);
+                setAiPromptRequest('');
+            } else {
+                alert(`Error al generar prompt: ${data.error}`);
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Error al contactar con el generador de IA');
+        } finally {
+            setIsGeneratingPrompt(false);
         }
     };
 
@@ -266,10 +298,21 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                     {/* Instructions */}
                     <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
                         <div className="flex justify-between items-center">
-                            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                                <Brain size={20} className="text-purple-500" />
-                                Instrucciones (Prompt)
-                            </h3>
+                            <div className="flex items-center gap-3">
+                                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                                    <Brain size={20} className="text-purple-500" />
+                                    Instrucciones (Prompt)
+                                </h3>
+                                {(hasPermission('ai_prompt_generator') || isRole('superadmin')) && (
+                                    <button
+                                        onClick={() => setShowAiPromptModal(true)}
+                                        className="flex items-center gap-1.5 px-3 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-full border border-purple-200 transition-colors"
+                                    >
+                                        <Sparkles size={14} />
+                                        Mago IA Extra
+                                    </button>
+                                )}
+                            </div>
 
                             <div className="flex items-center gap-2">
                                 <select
@@ -453,6 +496,52 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                     </section>
                 </div>
             </div>
+
+            {/* AI Generator Modal */}
+            {showAiPromptModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg border border-purple-100 overflow-hidden transform transition-all">
+                        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4 flex justify-between items-center">
+                            <h2 className="text-white font-bold text-lg flex items-center gap-2">
+                                <Sparkles size={20} /> Asistente Mago IA
+                            </h2>
+                            <button onClick={() => setShowAiPromptModal(false)} className="text-white/80 hover:text-white transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <p className="text-sm text-gray-600">
+                                Describe cómo quieres que sea tu agente o qué preguntas debe realizar.
+                                La Inteligencia Artificial estructurará las reglas y el prompt por ti.
+                            </p>
+                            <textarea
+                                value={aiPromptRequest}
+                                onChange={(e) => setAiPromptRequest(e.target.value)}
+                                rows={5}
+                                placeholder="Ej: Quiero que actúe como una secretaria amable y haga una encuesta de satisfacción con 3 preguntas..."
+                                className="w-full px-4 py-3 border border-purple-200 rounded-xl focus:ring-2 focus:ring-purple-500/30 outline-none text-sm resize-none bg-purple-50/30"
+                            />
+
+                            <div className="flex justify-end gap-3 pt-2">
+                                <button
+                                    onClick={() => setShowAiPromptModal(false)}
+                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={handleGenerateAIPrompt}
+                                    disabled={!aiPromptRequest.trim() || isGeneratingPrompt}
+                                    className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-sm font-semibold rounded-lg shadow-md shadow-purple-500/20 transition-all disabled:opacity-50"
+                                >
+                                    {isGeneratingPrompt ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                                    {isGeneratingPrompt ? 'Creando Magia...' : 'Generar Prompt'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

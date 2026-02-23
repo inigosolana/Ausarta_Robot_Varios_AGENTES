@@ -121,6 +121,9 @@ class EncuestaData(BaseModel):
 class CallEndRequest(BaseModel):
     nombre_sala: str
 
+class AIPromptRequest(BaseModel):
+    user_request: str
+
 # --- LIVEKIT SETUP ---
 LIVEKIT_URL = os.getenv('LIVEKIT_URL')
 LIVEKIT_API_KEY = os.getenv('LIVEKIT_API_KEY')
@@ -132,6 +135,35 @@ lkapi = api.LiveKitAPI(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "Ausarta Backend", "database": "Supabase"}
+
+@app.post("/api/ai/generate-prompt")
+async def generate_ai_prompt(req: AIPromptRequest):
+    try:
+        from openai import AsyncOpenAI
+        # Usa la API de OpenAI (necesita estar en .env o usar otra si se prefiere, por ahora OpenAI as requested)
+        client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        system_prompt = """
+Eres un experto en diseñar Prompts (Instrucciones) para Agentes Telefónicos de IA de call center o recepción.
+El usuario te dará un propósito general o unas preguntas que quiere hacer en su campaña.
+Tu tarea es devolver ÚNICAMENTE el texto final completo que servirá como instrucción del sistema (instrucciones) para el Agente bot.
+Crea instrucciones claras, directas, y en español. Estructura bien el texto.
+Si el usuario menciona que es un cuestionario o encuesta abierta, incluye explícitamente "Pregunta 1:", "Pregunta 2:", etc., en tu prompt para estructurar bien qué información debe sacar y rellenar.
+NO HABLES. NO SALUDES. SOLO devuelve el texto bruto del prompt que será copiado y pegado en el sistema del agente. 
+"""
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": req.user_request}
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+        return {"success": True, "prompt": response.choices[0].message.content}
+    except Exception as e:
+        logger.error(f"Error AI Prompt Generator: {e}")
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 # --- DASHBOARD METRICS ---
 @app.get("/api/dashboard/stats")
@@ -243,7 +275,24 @@ async def get_all_results(empresa_id: Optional[int] = None):
         if empresa_id:
             query = query.eq("empresa_id", empresa_id)
         response = query.order("fecha", desc=True).execute()
-        return response.data
+        
+        results = response.data
+        
+        # Enriquecer con is_question_based
+        try:
+            agents_res = supabase.table("agent_config").select("id, instructions").execute()
+            qs_agents = set()
+            for a in (agents_res.data or []):
+                inst_lower = a.get("instructions", "").lower()
+                if "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower:
+                    qs_agents.add(str(a["id"]))
+            
+            for res in results:
+                res["is_question_based"] = str(res.get("agent_id")) in qs_agents
+        except Exception as e_agent:
+            print(f"Error enriching query based question agents: {e_agent}")
+            
+        return results
     except Exception as e:
         print(f"Error getting results: {e}")
         return []
@@ -733,6 +782,19 @@ async def get_campaign_details(campaign_id: int):
             return JSONResponse(status_code=404, content={"error": "Campaign not found"})
         
         campaign = res_camp.data[0]
+        
+        # Check if agent is question-based
+        is_question_based = False
+        try:
+            agent_res = supabase.table("agent_config").select("instructions").eq("id", campaign["agent_id"]).execute()
+            if agent_res.data:
+                inst_lower = agent_res.data[0].get("instructions", "").lower()
+                if "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower:
+                    is_question_based = True
+        except Exception as e:
+            print(f"Error fetching agent for question detection: {e}")
+            
+        campaign["is_question_based"] = is_question_based
         
         # 2. Obtener leads asociados
         res_leads = supabase.table("campaign_leads").select("*").eq("campaign_id", campaign_id).execute()

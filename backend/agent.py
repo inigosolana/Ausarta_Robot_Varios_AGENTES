@@ -101,6 +101,15 @@ class DynamicAgent(Agent):
         agent_instructions = agent_config.get("instructions", "Eres un asistente virtual.")
         agent_name = agent_config.get("name", "Bot")
         
+        base_rules_to_use = BASE_RULES
+        inst_lower = agent_instructions.lower()
+        if "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower:
+            base_rules_to_use += """
+REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
+- Como este es un cuestionario de preguntas abiertas, USA el campo 'comentarios' de la herramienta 'guardar_encuesta' para guardar todas las respuestas de las preguntas planteadas recopiladas en forma de texto descriptivo.
+- IGNORA la regla estructurada de "Validación de notas de 1 al 10" si no aplica a tus preguntas.
+"""
+        
         full_instructions = f"""{agent_instructions}
 
 DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
@@ -108,7 +117,7 @@ DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
 - ID DE LA ENCUESTA: {self.survey_id}
 - NOMBRE DEL AGENTE (INTERNO, NO DECIR AL CLIENTE): {agent_name}
 
-{BASE_RULES}
+{base_rules_to_use}
 """
 
         super().__init__(instructions=full_instructions)
