@@ -173,7 +173,7 @@ const UserManagementView: React.FC = () => {
                     : window.location.origin;
 
                 await supabase.auth.resetPasswordForEmail(newEmail, {
-                    redirectTo: `${redirectBaseUrl}/#recovery`,
+                    redirectTo: redirectBaseUrl,
                 });
             }
 
@@ -201,7 +201,7 @@ const UserManagementView: React.FC = () => {
     const handleResendInvite = async (email: string) => {
         try {
             const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                redirectTo: `${window.location.origin.includes('localhost') ? 'https://app.ausarta.net' : window.location.origin}/#recovery`,
+                redirectTo: window.location.origin.includes('localhost') ? 'https://app.ausarta.net' : window.location.origin,
             });
             if (error) throw error;
             alert(`📧 Email de invitación reenviado a ${email}`);

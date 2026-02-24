@@ -48,7 +48,7 @@ const LoginView: React.FC = () => {
         setLoading(true);
 
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-            redirectTo: `${window.location.origin}/#recovery`,
+            redirectTo: window.location.origin,
         });
 
         if (error) {
