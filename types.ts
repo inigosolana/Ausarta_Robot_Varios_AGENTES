@@ -53,6 +53,7 @@ export interface AgentConfig {
   use_case: string;
   description: string;
   instructions: string;
+  critical_rules?: string;
   greeting: string;
   created_at?: string;
   updated_at?: string;

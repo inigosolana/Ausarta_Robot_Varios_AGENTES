@@ -75,7 +75,7 @@ const AgentManagementView: React.FC = () => {
         const empresaId = editingAgent?.empresa_id || getNewAgentEmpresaId();
         return (
             <AgentFormView
-                agent={editingAgent || { name: "", use_case: "", description: "", instructions: "", greeting: "", empresa_id: empresaId }}
+                agent={editingAgent || { name: "", use_case: "", description: "", instructions: "", critical_rules: "", greeting: "", empresa_id: empresaId }}
                 onSave={async () => {
                     setEditingAgent(null);
                     setIsCreatingAgent(false);

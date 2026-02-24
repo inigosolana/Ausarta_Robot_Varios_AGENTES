@@ -32,6 +32,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
         use_case: agent?.use_case || '',
         description: agent?.description || '',
         instructions: agent?.instructions || '',
+        critical_rules: agent?.critical_rules || '',
         greeting: agent?.greeting || '',
         empresa_id: agent?.empresa_id || null,
     });
@@ -102,6 +103,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                         use_case: formData.use_case,
                         description: formData.description,
                         instructions: formData.instructions,
+                        critical_rules: formData.critical_rules,
                         greeting: formData.greeting,
                         empresa_id: formData.empresa_id,
                         updated_at: new Date().toISOString()
@@ -119,6 +121,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                         use_case: formData.use_case,
                         description: formData.description,
                         instructions: formData.instructions,
+                        critical_rules: formData.critical_rules,
                         greeting: formData.greeting,
                         empresa_id: formData.empresa_id,
                     })
@@ -177,7 +180,8 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                     use_case: aiData.use_case || prev.use_case,
                     greeting: aiData.greeting || prev.greeting,
                     description: aiData.description || prev.description,
-                    instructions: aiData.instructions || prev.instructions
+                    instructions: aiData.instructions || prev.instructions,
+                    critical_rules: Array.isArray(aiData.critical_rules) ? aiData.critical_rules.join('\n') : (aiData.critical_rules || prev.critical_rules)
                 }));
                 setShowAiPromptModal(false);
                 setAiPromptRequest('');
@@ -378,6 +382,22 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                             className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500/20 outline-none font-mono text-sm bg-gray-50"
                         />
                         <p className="text-xs text-gray-500">Define aquí la personalidad, misión y reglas del agente.</p>
+                    </section>
+
+                    {/* Critical Rules */}
+                    <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                        <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                            <X size={20} className="text-red-500" />
+                            Reglas Críticas (No negociables)
+                        </h3>
+                        <textarea
+                            rows={5}
+                            value={formData.critical_rules}
+                            onChange={(e) => setFormData({ ...formData, critical_rules: e.target.value })}
+                            placeholder="Ej: No colgar sin antes agradecer. No dar información técnica. Repetir si el cliente no entiende..."
+                            className="w-full px-4 py-3 border border-red-100 rounded-lg focus:ring-2 focus:ring-red-500/20 outline-none font-mono text-sm bg-red-50/20"
+                        />
+                        <p className="text-xs text-gray-500">Estas reglas se aplicarán con máxima prioridad sobre cualquier otra instrucción.</p>
                     </section>
                 </div>
 

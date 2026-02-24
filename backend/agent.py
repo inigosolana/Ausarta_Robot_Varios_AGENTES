@@ -120,6 +120,10 @@ DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
 {base_rules_to_use}
 """
 
+        critical_rules = agent_config.get("critical_rules")
+        if critical_rules:
+            full_instructions += f"\n🚨 REGLAS CRÍTICAS ADICIONALES (¡CUMPLIR A RAJA TABLA!):\n{critical_rules}\n"
+
         super().__init__(instructions=full_instructions)
         logger.info(f"🤖 Agente '{agent_name}' creado con instrucciones dinámicas (Survey: {self.survey_id})")
 

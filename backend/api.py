@@ -162,6 +162,7 @@ Tu tarea es devolver la configuración del agente EN FORMATO JSON ESTRICTO, con 
 - "greeting": El saludo inicial. Como regla general, debe decir que es el asistente virtual de "{empresa_name}". Ejemplo: "Hola, soy [name], el asistente virtual de {empresa_name}. ¿Tiene un momento?".
 - "description": Breve descripción interna del propósito.
 - "instructions": Todo el texto del prompt, en español, con las reglas de cómo debe comportarse. Si es una encuesta, incluye explícitamente "Pregunta 1:", "Pregunta 2:", etc. como instrucciones de paso a paso.
+- "critical_rules": Una lista de 3 a 5 reglas críticas e innegociables que el agente debe seguir pase lo que pase (ej: "No inventar datos", "Siempre despedirse", "No saltar a la siguiente pregunta sin confirmar").
 
 SOLO DEBES DEVOLVER EL TEXTO EN FORMATO JSON, QUE SEA PUEDE CARGAR MEDIANTE JSON.LOADS(). SIN ACENTOS EN LAS CLAVES DEL JSON (sólo usa las indicadas en inglés). SI USAS MARKDOWN PARA EL JSON (```json), EL SISTEMA FALLARÁ. DEVUELVE DIRECTAMENTE `{{"name": ...}}`.
 """
@@ -302,15 +303,19 @@ async def get_all_results(empresa_id: Optional[int] = None):
         
         # Enriquecer con is_question_based
         try:
-            agents_res = supabase.table("agent_config").select("id, instructions").execute()
+            agents_res = supabase.table("agent_config").select("id, instructions, critical_rules").execute()
             qs_agents = set()
+            agent_critical_rules = {}
             for a in (agents_res.data or []):
                 inst_lower = a.get("instructions", "").lower()
                 if "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower:
                     qs_agents.add(str(a["id"]))
+                if a.get("critical_rules"):
+                    agent_critical_rules[str(a["id"])] = a["critical_rules"]
             
             for res in results:
                 res["is_question_based"] = str(res.get("agent_id")) in qs_agents
+                res["agent_critical_rules"] = agent_critical_rules.get(str(res.get("agent_id")))
         except Exception as e_agent:
             print(f"Error enriching query based question agents: {e_agent}")
             
@@ -621,6 +626,7 @@ async def update_agent(agent_id: str, config: dict):
         db_config = {}
         if "name" in config: db_config["name"] = config["name"]
         if "instructions" in config: db_config["instructions"] = config["instructions"]
+        if "critical_rules" in config: db_config["critical_rules"] = config["critical_rules"]
         if "greeting" in config: db_config["greeting"] = config["greeting"]
         if "description" in config: db_config["description"] = config["description"]
         if "useCase" in config or "use_case" in config: 
@@ -647,6 +653,7 @@ async def create_agent(config: dict):
         db_config = {
             "name": config.get("name", "Nuevo Agente"),
             "instructions": config.get("instructions", "Eres un asistente virtual."),
+            "critical_rules": config.get("critical_rules", ""),
             "greeting": config.get("greeting", "Buenas, ¿tiene un momento?"),
             "description": config.get("description", ""),
             "use_case": config.get("useCase") or config.get("use_case", ""),
@@ -931,6 +938,7 @@ async def get_agent_config_by_survey(survey_id: int):
             "name": agent_data.get("name", "Bot"),
             "greeting": agent_data.get("greeting", "Buenas, ¿tiene un momento?"),
             "instructions": agent_data.get("instructions", "Eres un asistente"),
+            "critical_rules": agent_data.get("critical_rules", ""),
             "voice_id": agent_data.get("voice_id") or "6511153f-72f9-4314-a204-8d8d8afd646a",
             "llm_model": agent_data.get("llm_model") or "llama-3.3-70b-versatile"
         }
