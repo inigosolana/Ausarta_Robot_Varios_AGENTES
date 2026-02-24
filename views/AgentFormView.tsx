@@ -478,6 +478,21 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                     <option value="deepseek">DeepSeek (V3, R1)</option>
                                 </select>
                             </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Idioma del Agente</label>
+                                <select
+                                    value={aiConfig.language || 'es'}
+                                    onChange={(e) => setAiConfig({ ...aiConfig, language: e.target.value })}
+                                    className="w-full px-3 py-2 border rounded-lg bg-white"
+                                >
+                                    <option value="es">Español (es)</option>
+                                    <option value="en">Inglés (en)</option>
+                                    <option value="eu">Euskera (eu)</option>
+                                    <option value="gl">Gallego (gl)</option>
+                                </select>
+                            </div>
+
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
                                 <select
@@ -541,13 +556,36 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Voice ID</label>
-                                <input
-                                    type="text"
-                                    value={aiConfig.tts_voice}
-                                    onChange={(e) => setAiConfig({ ...aiConfig, tts_voice: e.target.value })}
-                                    className="w-full px-3 py-2 border rounded-lg font-mono text-xs"
-                                />
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Voz (Voice ID)</label>
+                                {aiConfig.tts_provider === 'cartesia' ? (
+                                    <select
+                                        value={aiConfig.tts_voice}
+                                        onChange={(e) => setAiConfig({ ...aiConfig, tts_voice: e.target.value })}
+                                        className="w-full px-3 py-2 border rounded-lg font-mono text-xs bg-white"
+                                    >
+                                        <option value="a2f12ebd-80df-4de7-83f3-809599135b1d">Castellano - Chica</option>
+                                        <option value="3380a516-6acc-4389-97c8-68273b540dd3">Castellano - Chico</option>
+                                        <option value="44c5567b-1b68-4873-8231-4e7660f749ad">Castellano - Chica (Ausarta)</option>
+                                        <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">Euskera - Chica</option>
+                                        <option value="a62209c3-9f0a-4474-9b51-84b191593f49">Euskera - Chico</option>
+                                        <option value="96eade6e-d863-4f9a-8b08-5d7b74d1643b">Gallego - Chica</option>
+                                        <option value="4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2">Gallego - Chico</option>
+                                        <option value="62ae83ad-4f6a-430b-af41-a9bede9286ca">Inglés - Chica</option>
+                                        <option value="0ad65e7f-006c-47cf-bd31-52279d487913">Inglés - Chico</option>
+                                        {/* Permite usar una custom si ya está guardada pero no coincide */}
+                                        {!["a2f12ebd-80df-4de7-83f3-809599135b1d", "3380a516-6acc-4389-97c8-68273b540dd3", "44c5567b-1b68-4873-8231-4e7660f749ad", "a62209c3-9f0a-4474-9b51-84b191593f49", "99543693-cf6e-4e1d-9259-2e5cc9a0f76b", "4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2", "96eade6e-d863-4f9a-8b08-5d7b74d1643b", "62ae83ad-4f6a-430b-af41-a9bede9286ca", "0ad65e7f-006c-47cf-bd31-52279d487913"].includes(aiConfig.tts_voice) && (
+                                            <option value={aiConfig.tts_voice}>Custom: {aiConfig.tts_voice}</option>
+                                        )}
+                                    </select>
+                                ) : (
+                                    <input
+                                        type="text"
+                                        value={aiConfig.tts_voice}
+                                        onChange={(e) => setAiConfig({ ...aiConfig, tts_voice: e.target.value })}
+                                        className="w-full px-3 py-2 border rounded-lg font-mono text-xs"
+                                        placeholder="Escribe el ID de voz"
+                                    />
+                                )}
                             </div>
                         </section>
 

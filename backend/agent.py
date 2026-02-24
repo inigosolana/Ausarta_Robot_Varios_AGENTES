@@ -291,11 +291,12 @@ async def entrypoint(ctx: JobContext):
         
         llm_model = agent_config.get("llm_model", "llama-3.3-70b-versatile")
         voice_id = agent_config.get("voice_id", "6511153f-72f9-4314-a204-8d8d8afd646a")
+        language = agent_config.get("language", "es")
         
-        logger.info(f"🤖 [{job_id}] Config: LLM='{llm_model}', Voice='{voice_id}'")
+        logger.info(f"🤖 [{job_id}] Config: LLM='{llm_model}', Voice='{voice_id}', Lang='{language}'")
 
         session = AgentSession(
-            stt=deepgram.STT(model="nova-3", language="es"),
+            stt=deepgram.STT(model="nova-3", language=language),
             llm=openai.LLM(
                 model=llm_model, 
                 base_url="https://api.groq.com/openai/v1",
@@ -305,7 +306,7 @@ async def entrypoint(ctx: JobContext):
             tts=cartesia.TTS(
                 model="sonic-multilingual",
                 voice=voice_id,
-                language="es"
+                language=language
             ),
             vad=vad_model,
             preemptive_generation=False, # Cambiado a False para controlar mejor el inicio

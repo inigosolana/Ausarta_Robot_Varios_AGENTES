@@ -993,14 +993,20 @@ async def get_agent_config_by_survey(survey_id: int):
             return JSONResponse(status_code=404, content={"error": "Agent not found"})
             
         agent_data = res_agent.data[0]
+        
+        # Get AI config
+        res_ai = supabase.table("ai_config").select("*").eq("agent_id", agent_id).execute()
+        ai_data = res_ai.data[0] if res_ai.data else {}
+
         # Return sensible defaults for missing fields
         return {
             "name": agent_data.get("name", "Bot"),
             "greeting": agent_data.get("greeting", "Buenas, ¿tiene un momento?"),
             "instructions": agent_data.get("instructions", "Eres un asistente"),
             "critical_rules": agent_data.get("critical_rules", ""),
-            "voice_id": agent_data.get("voice_id") or "6511153f-72f9-4314-a204-8d8d8afd646a",
-            "llm_model": agent_data.get("llm_model") or "llama-3.3-70b-versatile"
+            "voice_id": ai_data.get("tts_voice") or "6511153f-72f9-4314-a204-8d8d8afd646a",
+            "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
+            "language": ai_data.get("language") or "es"
         }
             
     except Exception as e:
