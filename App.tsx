@@ -71,8 +71,12 @@ const App: React.FC = () => {
     );
   }
 
-  // Show login if not authenticated
-  if (!user || !profile) {
+  // Show login if not authenticated or if in password recovery/invitation flow
+  const isAuthFlow = window.location.hash.includes('type=recovery') ||
+    window.location.hash.includes('type=signup') ||
+    window.location.hash.includes('type=invite');
+
+  if ((!user || !profile) || isAuthFlow) {
     return <LoginView />;
   }
 

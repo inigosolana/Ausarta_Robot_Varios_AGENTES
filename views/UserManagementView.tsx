@@ -182,9 +182,12 @@ const UserManagementView: React.FC = () => {
                 await supabase.from('user_permissions').insert(defaultPerms);
             }
 
-            // 3. Send password reset email if no manual password was set
+            // 3. The user will receive a confirmation email. 
+            // Our updated LoginView and App.tsx will detect the 'type=signup' in the link 
+            // and force them to set a password upon first entry.
+            // No need to send a separate resetPassword email which causes confusion.
+            /*
             if (!newPassword) {
-                // Fix for localhost emails
                 const redirectBaseUrl = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')
                     ? 'https://app.ausarta.net'
                     : window.location.origin;
@@ -193,6 +196,7 @@ const UserManagementView: React.FC = () => {
                     redirectTo: redirectBaseUrl,
                 });
             }
+            */
 
             setInviteSuccess(true);
 

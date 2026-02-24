@@ -16,10 +16,10 @@ const LoginView: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState<ViewMode>('login');
 
-    // Check URL params for password recovery
+    // Check URL params for password recovery or invitation
     React.useEffect(() => {
         const hash = window.location.hash;
-        if (hash && hash.includes('type=recovery')) {
+        if (hash && (hash.includes('type=recovery') || hash.includes('type=signup') || hash.includes('type=invite'))) {
             setViewMode('update-password');
         }
     }, []);
