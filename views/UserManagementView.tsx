@@ -415,39 +415,51 @@ const UserManagementView: React.FC = () => {
                             </div>
 
                             {/* Expanded Permissions */}
-                            {expandedUser === user.id && user.role === 'user' && (
+                            {expandedUser === user.id && (
                                 <div className="px-4 pb-4 border-t border-gray-100 pt-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Settings size={14} className="text-gray-400" />
-                                        <span className="text-sm font-medium text-gray-600">Módulos habilitados</span>
-                                    </div>
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                        {ALL_MODULES.map((mod) => {
-                                            const perm = user.permissions.find(p => p.module === mod.key);
-                                            const isEnabled = perm?.enabled ?? false;
+                                    {(isRole('superadmin') || user.role === 'user') ? (
+                                        <>
+                                            <div className="flex items-center justify-between mb-3">
+                                                <div className="flex items-center gap-2">
+                                                    <Settings size={14} className="text-gray-400" />
+                                                    <span className="text-sm font-medium text-gray-600">Permisos y Módulos</span>
+                                                </div>
+                                                {user.role !== 'user' && (
+                                                    <span className="text-xs text-amber-600 font-medium bg-amber-50 px-2 py-0.5 rounded-full">
+                                                        Admin: Acceso total exceptuando Premium
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                                {ALL_MODULES.map((mod) => {
+                                                    const perm = user.permissions.find(p => p.module === mod.key);
+                                                    const isEnabled = perm?.enabled ?? false;
 
-                                            return (
-                                                <button
-                                                    key={mod.key}
-                                                    onClick={() => canManageUser(user) && handleTogglePermission(user.id, mod.key, isEnabled)}
-                                                    disabled={!canManageUser(user)}
-                                                    className={`flex items-center gap-2 p-3 rounded-lg text-sm font-medium transition-all border ${isEnabled
-                                                        ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100'
-                                                        : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'
-                                                        } ${!canManageUser(user) ? 'opacity-50 cursor-default' : 'cursor-pointer'}`}
-                                                >
-                                                    {isEnabled ? <ToggleRight size={16} className="text-green-500" /> : <ToggleLeft size={16} />}
-                                                    {mod.label}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
+                                                    // For admins, non-premium modules are always enabled visually
+                                                    const visuallyEnabled = (user.role !== 'user' && mod.key !== 'premium_voice') || isEnabled;
 
-                            {expandedUser === user.id && user.role !== 'user' && (
-                                <div className="px-4 pb-4 border-t border-gray-100 pt-4">
-                                    <p className="text-sm text-gray-400 italic">Los administradores y superadmins tienen acceso a todos los módulos.</p>
+                                                    return (
+                                                        <button
+                                                            key={mod.key}
+                                                            onClick={() => canManageUser(user) && handleTogglePermission(user.id, mod.key, isEnabled)}
+                                                            disabled={!canManageUser(user) || (user.role !== 'user' && mod.key !== 'premium_voice')}
+                                                            className={`flex items-center gap-2 p-3 rounded-lg text-sm font-medium transition-all border ${visuallyEnabled
+                                                                ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100'
+                                                                : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'
+                                                                } ${(!canManageUser(user) || (user.role !== 'user' && mod.key !== 'premium_voice')) ? 'opacity-50 cursor-default' : 'cursor-pointer'}`}
+                                                        >
+                                                            {visuallyEnabled ? <ToggleRight size={16} className="text-green-500" /> : <ToggleLeft size={16} />}
+                                                            {mod.label}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="py-2">
+                                            <p className="text-sm text-gray-400 italic">Los administradores tienen acceso a todos los módulos básicos.</p>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>

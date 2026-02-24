@@ -119,4 +119,5 @@ export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'results', label: 'Resultados' },
   { key: 'usage', label: 'Uso' },
   { key: 'ai_prompt_generator', label: 'Generador de Agentes AI (Extra)' },
+  { key: 'premium_voice', label: 'Voz Ausarta (Acceso Premium)' },
 ];

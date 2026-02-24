@@ -117,8 +117,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const hasPermission = (module: string): boolean => {
         if (!profile) return false;
-        // Superadmins and admins have access to everything
+
+        // Special case: premium_voice is ONLY for superadmins OR explicitly granted
+        if (module === 'premium_voice') {
+            if (profile.role === 'superadmin') return true;
+            const perm = permissions.find(p => p.module === module);
+            return perm?.enabled ?? false;
+        }
+
+        // Default behavior: Superadmins and admins have access to everything else
         if (profile.role === 'superadmin' || profile.role === 'admin') return true;
+
         // Regular users check permissions
         const perm = permissions.find(p => p.module === module);
         return perm?.enabled ?? false;

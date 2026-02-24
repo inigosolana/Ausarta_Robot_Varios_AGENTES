@@ -564,7 +564,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                         className="w-full px-3 py-2 border rounded-lg font-mono text-xs bg-white"
                                     >
                                         <option value="gD1lexrzCvxYPHUuTDs3">Española (Gisela)</option>
-                                        {isRole('superadmin') && (
+                                        {hasPermission('premium_voice') && (
                                             <option value="a2f12ebd-80df-4de7-83f3-809599135b1d">Voz Ausarta (Premium)</option>
                                         )}
                                         {/* Fallback for custom IDs if already set */}
@@ -580,7 +580,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                     >
                                         <option value="cefcb124-080b-4655-b31f-932f3ee743de">Castellano - Chica</option>
                                         <option value="3380a516-6acc-4389-97c8-68273b540dd3">Castellano - Chico</option>
-                                        {isRole('superadmin') && (
+                                        {hasPermission('premium_voice') && (
                                             <option value="44c5567b-1b68-4873-8231-4e7660f749ad">Castellano - Chica (Ausarta)</option>
                                         )}
                                         <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">Euskera - Chica</option>
