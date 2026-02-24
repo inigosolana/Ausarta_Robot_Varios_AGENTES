@@ -290,7 +290,7 @@ async def entrypoint(ctx: JobContext):
         agent_instance = DynamicAgent(room_name=room_name, agent_config=agent_config)
         
         llm_model = agent_config.get("llm_model", "llama-3.3-70b-versatile")
-        voice_id = agent_config.get("voice_id", "6511153f-72f9-4314-a204-8d8d8afd646a")
+        voice_id = agent_config.get("voice_id", "cefcb124-080b-4655-b31f-932f3ee743de")
         language = agent_config.get("language", "es")
         stt_provider = agent_config.get("stt_provider", "deepgram")
         

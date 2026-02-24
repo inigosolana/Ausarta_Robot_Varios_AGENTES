@@ -46,7 +46,7 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
     llm_model: 'llama-3.3-70b-versatile',
     tts_provider: 'cartesia',
     tts_model: 'sonic-multilingual',
-    tts_voice: 'fb926b21-4d92-411a-85d0-9d06859e2171',
+    tts_voice: 'cefcb124-080b-4655-b31f-932f3ee743de',
     stt_provider: 'deepgram',
     stt_model: 'nova-2',
     language: 'es'

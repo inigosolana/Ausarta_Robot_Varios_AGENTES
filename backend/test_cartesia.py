@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY", "")
-VOICE_ID = "fb926b21-4d92-411a-85d0-9d06859e2171"
+VOICE_ID = "cefcb124-080b-4655-b31f-932f3ee743de"
 MODEL = "sonic-multilingual"
 
 print("\n" + "="*50)

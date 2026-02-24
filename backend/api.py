@@ -717,7 +717,7 @@ async def create_agent(config: dict):
             "greeting": config.get("greeting", "Buenas, ¿tiene un momento?"),
             "description": config.get("description", ""),
             "use_case": config.get("useCase") or config.get("use_case", ""),
-            "voice_id": config.get("voice_id", "6511153f-72f9-4314-a204-8d8d8afd646a"),
+            "voice_id": config.get("voice_id", "cefcb124-080b-4655-b31f-932f3ee743de"),
             "llm_model": config.get("llm_model", "llama-3.3-70b-versatile"),
             "empresa_id": config.get("empresa_id"),
         }
@@ -1013,7 +1013,7 @@ async def get_agent_config_by_survey(survey_id: int):
         # If no agent explicitly mapped, return default
         if not agent_id:
             # Fallback to Dakota id=1 or just returning default values
-            return {"name": "Bot", "greeting": "Buenas, le llamo...", "instructions": "Eres un asistente...", "voice_id": "6511153f-72f9-4314-a204-8d8d8afd646a", "llm_model": "llama-3.3-70b-versatile"}
+            return {"name": "Bot", "greeting": "Buenas, le llamo...", "instructions": "Eres un asistente...", "voice_id": "cefcb124-080b-4655-b31f-932f3ee743de", "llm_model": "llama-3.3-70b-versatile"}
             
         res_agent = supabase.table("agent_config").select("*").eq("id", agent_id).execute()
         if not res_agent.data:
@@ -1031,7 +1031,7 @@ async def get_agent_config_by_survey(survey_id: int):
             "greeting": agent_data.get("greeting", "Buenas, ¿tiene un momento?"),
             "instructions": agent_data.get("instructions", "Eres un asistente"),
             "critical_rules": agent_data.get("critical_rules", ""),
-            "voice_id": ai_data.get("tts_voice") or "6511153f-72f9-4314-a204-8d8d8afd646a",
+            "voice_id": ai_data.get("tts_voice") or "cefcb124-080b-4655-b31f-932f3ee743de",
             "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
             "language": ai_data.get("language") or "es",
             "stt_provider": ai_data.get("stt_provider") or "deepgram"
