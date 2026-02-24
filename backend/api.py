@@ -1006,7 +1006,8 @@ async def get_agent_config_by_survey(survey_id: int):
             "critical_rules": agent_data.get("critical_rules", ""),
             "voice_id": ai_data.get("tts_voice") or "6511153f-72f9-4314-a204-8d8d8afd646a",
             "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
-            "language": ai_data.get("language") or "es"
+            "language": ai_data.get("language") or "es",
+            "stt_provider": ai_data.get("stt_provider") or "deepgram"
         }
             
     except Exception as e:

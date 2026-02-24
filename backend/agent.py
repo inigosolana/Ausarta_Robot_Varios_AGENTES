@@ -292,11 +292,22 @@ async def entrypoint(ctx: JobContext):
         llm_model = agent_config.get("llm_model", "llama-3.3-70b-versatile")
         voice_id = agent_config.get("voice_id", "6511153f-72f9-4314-a204-8d8d8afd646a")
         language = agent_config.get("language", "es")
+        stt_provider = agent_config.get("stt_provider", "deepgram")
         
-        logger.info(f"🤖 [{job_id}] Config: LLM='{llm_model}', Voice='{voice_id}', Lang='{language}'")
+        logger.info(f"🤖 [{job_id}] Config: LLM='{llm_model}', Voice='{voice_id}', Lang='{language}', STT='{stt_provider}'")
+
+        if language in ["eu", "gl"] or stt_provider == "openai":
+            # Deepgram Nova-3 no soporta Euskera ni Gallego, forzamos OpenAI
+            if language in ["eu", "gl"] and stt_provider == "deepgram":
+                logger.warning(f"⚠️ Idioma '{language}' no soportado por Deepgram STT en Nova-3. Usando OpenAI como fallback.")
+            stt_plugin = openai.STT(language=language)
+            logger.info("🎙️ Usando STT: OpenAI Whisper")
+        else:
+            stt_plugin = deepgram.STT(model="nova-3", language=language)
+            logger.info("🎙️ Usando STT: Deepgram Nova-3")
 
         session = AgentSession(
-            stt=deepgram.STT(model="nova-3", language=language),
+            stt=stt_plugin,
             llm=openai.LLM(
                 model=llm_model, 
                 base_url="https://api.groq.com/openai/v1",
