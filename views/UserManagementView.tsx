@@ -295,13 +295,21 @@ const UserManagementView: React.FC = () => {
     };
 
     const handleDeleteUser = async (userId: string) => {
-        if (!confirm('¿Estás seguro de que quieres eliminar este usuario? Esta acción no se puede deshacer.')) return;
+        if (!confirm('¿Estás seguro de que quieres eliminar este usuario? Esta acción no se puede deshacer y borrará también su acceso de autenticación.')) return;
         try {
-            await supabase.from('user_permissions').delete().eq('user_id', userId);
-            await supabase.from('user_profiles').delete().eq('id', userId);
+            const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+            const res = await fetch(`${API_URL}/api/admin/users/${userId}`, {
+                method: 'DELETE'
+            });
+
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.error || 'Error al eliminar usuario');
+            }
+
             setUsers(prev => prev.filter(u => u.id !== userId));
-        } catch (err) {
-            alert('Error al eliminar usuario');
+        } catch (err: any) {
+            alert(`Error: ${err.message}`);
         }
     };
 

@@ -799,6 +799,33 @@ async def delete_campaign(campaign_id: int):
         print(f"Error deleting campaign: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@app.delete("/api/admin/users/{user_id}")
+async def delete_auth_user(user_id: str):
+    """Elimina un usuario de Supabase Auth (requiere Service Role Key)"""
+    if not supabase: 
+        return JSONResponse(status_code=500, content={"error": "No hay conexión con la base de datos"})
+    
+    service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if not service_role_key:
+        # Fallback: intentar usar la key normal si por casualidad fuera la de servicio
+        service_role_key = os.getenv("SUPABASE_KEY")
+
+    try:
+        # Creamos un cliente con privilegios de root para esta operación
+        admin_client = create_client(os.getenv("SUPABASE_URL"), service_role_key)
+        # Auth Admin API de Supabase
+        admin_client.auth.admin.delete_user(user_id)
+        
+        # También borramos explícitamente el perfil y permisos por si no hay CASCADE
+        supabase.table("user_permissions").delete().eq("user_id", user_id).execute()
+        supabase.table("user_profiles").delete().eq("id", user_id).execute()
+        
+        logger.info(f"🗑️ Usuario {user_id} eliminado completamente del sistema")
+        return {"status": "ok", "message": f"Usuario {user_id} eliminado correctamente"}
+    except Exception as e:
+        logger.error(f"❌ Error al borrar usuario admin: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 @app.post("/api/campaigns")
 async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel]):
     if not supabase: return {"error": "No DB"}
