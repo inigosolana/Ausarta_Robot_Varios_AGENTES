@@ -15,6 +15,7 @@ const AgentListView: React.FC = () => {
     const [selectedEmpresa, setSelectedEmpresa] = useState<Empresa | null>(null);
     const [activeTab, setActiveTab] = useState<"agents" | "users">("agents");
     const [search, setSearch] = useState("");
+    const [selectedResponsable, setSelectedResponsable] = useState<string>("all");
 
     useEffect(() => {
         loadEmpresas();
@@ -224,6 +225,33 @@ const AgentListView: React.FC = () => {
                 )}
             </div>
 
+            {/* Filters */}
+            <div className="flex flex-col sm:flex-row gap-3">
+                {isRole('superadmin') && (
+                    <select
+                        value={selectedResponsable}
+                        onChange={(e) => setSelectedResponsable(e.target.value)}
+                        className="px-4 py-2.5 border border-gray-200 rounded-xl outline-none focus:border-blue-400 bg-white text-sm font-medium"
+                    >
+                        <option value="all">👤 Todos los responsables</option>
+                        {Array.from(new Set(empresas.map(e => e.responsable).filter(Boolean))).sort().map(resp => (
+                            <option key={resp} value={resp}>👤 {resp}</option>
+                        ))}
+                    </select>
+                )}
+
+                <div className="relative flex-1">
+                    <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                        type="text"
+                        placeholder="Buscar empresa o responsable..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl outline-none focus:border-blue-400 transition-all bg-white text-sm"
+                    />
+                </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in duration-700">
                 {loading ? (
                     <div className="col-span-full flex justify-center py-20"><Loader2 className="animate-spin text-blue-500" size={32} /></div>
@@ -234,28 +262,34 @@ const AgentListView: React.FC = () => {
                         <p className="text-gray-400 text-sm">Podrás separar agentes y usuarios por cada cliente.</p>
                     </div>
                 ) : (
-                    empresas.map((empresa) => (
-                        <div key={empresa.id} onClick={() => { setSelectedEmpresa(empresa); loadCompanyData(empresa.id!); setSearch(""); }} className="group relative bg-white rounded-2xl border border-gray-100 p-8 flex flex-col items-center text-center space-y-4 hover:border-blue-400 hover:shadow-2xl hover:shadow-blue-500/10 transition-all cursor-pointer">
-                            {isRole('superadmin') && (
-                                <button onClick={(e) => { e.stopPropagation(); handleDeleteEmpresa(empresa.id!); }} className="absolute top-4 right-4 p-2 opacity-0 group-hover:opacity-100 hover:bg-red-50 text-gray-300 hover:text-red-500 rounded-xl transition-all">
-                                    <Trash2 size={18} />
-                                </button>
-                            )}
+                    empresas
+                        .filter(empresa => selectedResponsable === "all" || empresa.responsable === selectedResponsable)
+                        .filter(empresa =>
+                            empresa.nombre.toLowerCase().includes(search.toLowerCase()) ||
+                            (empresa.responsable && empresa.responsable.toLowerCase().includes(search.toLowerCase()))
+                        )
+                        .map((empresa) => (
+                            <div key={empresa.id} onClick={() => { setSelectedEmpresa(empresa); loadCompanyData(empresa.id!); setSearch(""); }} className="group relative bg-white rounded-2xl border border-gray-100 p-8 flex flex-col items-center text-center space-y-4 hover:border-blue-400 hover:shadow-2xl hover:shadow-blue-500/10 transition-all cursor-pointer">
+                                {isRole('superadmin') && (
+                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteEmpresa(empresa.id!); }} className="absolute top-4 right-4 p-2 opacity-0 group-hover:opacity-100 hover:bg-red-50 text-gray-300 hover:text-red-500 rounded-xl transition-all">
+                                        <Trash2 size={18} />
+                                    </button>
+                                )}
 
-                            <div className="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center group-hover:bg-blue-600 group-hover:rotate-6 transition-all duration-500 shadow-inner">
-                                <Building2 size={32} className="text-blue-500 group-hover:text-white transition-colors" />
-                            </div>
+                                <div className="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center group-hover:bg-blue-600 group-hover:rotate-6 transition-all duration-500 shadow-inner">
+                                    <Building2 size={32} className="text-blue-500 group-hover:text-white transition-colors" />
+                                </div>
 
-                            <div>
-                                <h3 className="text-xl font-bold text-gray-900 group-hover:text-blue-600 transition-colors uppercase tracking-tight">{empresa.nombre}</h3>
-                                <p className="text-sm text-gray-500 font-medium">Responsable: {empresa.responsable}</p>
-                            </div>
+                                <div>
+                                    <h3 className="text-xl font-bold text-gray-900 group-hover:text-blue-600 transition-colors uppercase tracking-tight">{empresa.nombre}</h3>
+                                    <p className="text-sm text-gray-500 font-medium">Responsable: {empresa.responsable}</p>
+                                </div>
 
-                            <div className="pt-4 flex items-center gap-2 text-xs font-bold text-blue-500 opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all">
-                                VER EMPRESA <ChevronRight size={14} />
+                                <div className="pt-4 flex items-center gap-2 text-xs font-bold text-blue-500 opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all">
+                                    VER EMPRESA <ChevronRight size={14} />
+                                </div>
                             </div>
-                        </div>
-                    ))
+                        ))
                 )}
             </div>
         </div>
