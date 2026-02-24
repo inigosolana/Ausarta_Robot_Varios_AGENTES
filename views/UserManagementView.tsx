@@ -22,6 +22,7 @@ const UserManagementView: React.FC = () => {
     const [newName, setNewName] = useState('');
     const [newRole, setNewRole] = useState<UserRole>('user');
     const [newEmpresaId, setNewEmpresaId] = useState<number | ''>('');
+    const [newPassword, setNewPassword] = useState('');
     const [creating, setCreating] = useState(false);
     const [inviteSuccess, setInviteSuccess] = useState(false);
 
@@ -110,8 +111,7 @@ const UserManagementView: React.FC = () => {
         setCreating(true);
         setInviteSuccess(false);
         try {
-            // Generate a random temporary password (user will set their own via email)
-            // Improved generator: try crypto.getRandomValues, fallback to Math.random
+            // Generate a random temporary password if no explicitly provided password
             const generateRandomString = (length: number) => {
                 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
                 let retVal = "";
@@ -128,7 +128,7 @@ const UserManagementView: React.FC = () => {
                 }
                 return retVal;
             };
-            const tempPassword = generateRandomString(12) + '!Aa1';
+            const tempPassword = newPassword || (generateRandomString(12) + '!Aa1');
 
             // 1. Create the user with a temporary password
             const { data, error } = await supabase.auth.signUp({
@@ -165,10 +165,17 @@ const UserManagementView: React.FC = () => {
                 await supabase.from('user_permissions').insert(defaultPerms);
             }
 
-            // 3. Send password reset email so the user can set their own password
-            await supabase.auth.resetPasswordForEmail(newEmail, {
-                redirectTo: `${window.location.origin}/#recovery`,
-            });
+            // 3. Send password reset email if no manual password was set
+            if (!newPassword) {
+                // Fix for localhost emails
+                const redirectBaseUrl = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')
+                    ? 'https://app.ausarta.net'
+                    : window.location.origin;
+
+                await supabase.auth.resetPasswordForEmail(newEmail, {
+                    redirectTo: `${redirectBaseUrl}/#recovery`,
+                });
+            }
 
             setInviteSuccess(true);
 
@@ -179,6 +186,7 @@ const UserManagementView: React.FC = () => {
                 setNewName('');
                 setNewRole('user');
                 setNewEmpresaId('');
+                setNewPassword('');
                 setInviteSuccess(false);
                 loadUsersAndEmpresas();
             }, 2500);
@@ -193,7 +201,7 @@ const UserManagementView: React.FC = () => {
     const handleResendInvite = async (email: string) => {
         try {
             const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                redirectTo: `${window.location.origin}/#recovery`,
+                redirectTo: `${window.location.origin.includes('localhost') ? 'https://app.ausarta.net' : window.location.origin}/#recovery`,
             });
             if (error) throw error;
             alert(`📧 Email de invitación reenviado a ${email}`);
@@ -459,9 +467,13 @@ const UserManagementView: React.FC = () => {
                                 <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-50 mb-4">
                                     <CheckCircle size={32} className="text-green-500" />
                                 </div>
-                                <h3 className="text-lg font-semibold text-gray-900 mb-2">¡Invitación enviada!</h3>
+                                <h3 className="text-lg font-semibold text-gray-900 mb-2">¡Usuario creado con éxito!</h3>
                                 <p className="text-gray-500 text-sm">
-                                    Se ha enviado un email a <strong>{newEmail}</strong> con un enlace para crear su contraseña.
+                                    {newPassword ? (
+                                        <>El usuario ya puede acceder con el email <strong>{newEmail}</strong> y la contraseña proporcionada.</>
+                                    ) : (
+                                        <>Se ha enviado un email a <strong>{newEmail}</strong> con un enlace para crear su contraseña.</>
+                                    )}
                                 </p>
                             </div>
                         ) : (
@@ -471,7 +483,7 @@ const UserManagementView: React.FC = () => {
                                     <div className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-100 rounded-xl">
                                         <AlertCircle size={18} className="text-blue-500 mt-0.5 shrink-0" />
                                         <p className="text-sm text-blue-700">
-                                            El usuario recibirá un email con un enlace para establecer su propia contraseña.
+                                            Puedes asignarle una contraseña directamente, o dejarlo en blanco para que reciba un email y cree la suya.
                                         </p>
                                     </div>
 
@@ -529,6 +541,20 @@ const UserManagementView: React.FC = () => {
                                             </div>
                                         </div>
                                     )}
+
+                                    <div className="pt-2 border-t border-gray-100 mt-2">
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Contraseña <span className="text-gray-400 font-normal">(Opcional)</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={newPassword}
+                                            onChange={(e) => setNewPassword(e.target.value)}
+                                            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                            placeholder="Introduce una contraseña para el usuario"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1.5">Si lo dejas en blanco, enviaremos un email de invitación. (Mínimo 6 caracteres)</p>
+                                    </div>
                                 </div>
 
                                 <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
