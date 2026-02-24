@@ -130,18 +130,35 @@ const UserManagementView: React.FC = () => {
             };
             const tempPassword = newPassword || (generateRandomString(12) + '!Aa1');
 
-            // 1. Create the user with a temporary password
-            const { data, error } = await supabase.auth.signUp({
+            // 1. Create the user with a temporary password (with timeout)
+            const signUpPromise = supabase.auth.signUp({
                 email: newEmail,
                 password: tempPassword,
                 options: {
                     data: { full_name: newName, role: newRole },
-                    // Don't redirect on signup confirmation
                     emailRedirectTo: undefined,
                 }
             });
 
-            if (error) throw error;
+            // Add a timeout to avoid hanging forever
+            const timeout = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("La operación está tardando demasiado. Revisa si el email ya está registrado o tu conexión.")), 20000)
+            );
+
+            const { data, error } = await Promise.race([signUpPromise, timeout]) as any;
+
+            if (error) {
+                // If user already exists, we might want to just send the reset email
+                if (error.message.toLowerCase().includes("already registered") || error.status === 400) {
+                    const confirmResend = window.confirm("Este usuario ya parece estar registrado. ¿Quieres intentar reenviar el email de invitación?");
+                    if (confirmResend) {
+                        await handleResendInvite(newEmail);
+                        setShowCreate(false);
+                        return;
+                    }
+                }
+                throw error;
+            }
 
             // 2. Create the profile
             if (data.user) {
