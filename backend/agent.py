@@ -60,10 +60,9 @@ REGLAS DE ORO (¡MUY IMPORTANTE!):
 7. VALIDACIÓN DE NOTAS: Si el usuario te da un número menor a 1 o mayor a 10 (ej: 0, 11), NO guardes el dato. Di "Disculpe, la nota debe ser entre 1 y 10. ¿Qué nota le daría?" y espera su respuesta.
 
 REGLA CRÍTICA DE DESPEDIDA:
-Cuando vayas a terminar la llamada, SIEMPRE haz esto EN DOS PASOS SEPARADOS:
-- PRIMER PASO: Usa 'guardar_encuesta' con el status correspondiente. En el mismo turno, DI en voz alta la frase de despedida (ej: "Gracias por su tiempo y adiós."). NO llames a 'finalizar_llamada' en este turno.
-- SEGUNDO PASO: Cuando ya hayas dicho la despedida, usa 'finalizar_llamada'.
-NUNCA llames a 'guardar_encuesta' y 'finalizar_llamada' en el mismo turno.
+Cuando termines la interacción y vayas a despedirte, SIEMPRE hazlo en TU MISMO TURNO junto con la herramienta 'finalizar_llamada'.
+Es decir, redacta tu frase de despedida (ej: "Muchas gracias por su tiempo, adiós") y LLAMA A LA VEZ a la herramienta 'finalizar_llamada'.
+NUNCA finalices la llamada sin enviar texto de despedida en el mismo turno. NUNCA esperes a que el usuario cuelgue si tú ya has terminado.
 
 EXCEPCIÓN - BUZÓN DE VOZ / FUERA DE COBERTURA:
 - Si escuchas "fuera de cobertura", "móvil apagado", "buzón de voz", "contestador", "terminado el tiempo de grabación" o mensajes automáticos similares:
@@ -109,6 +108,10 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
 - Como este es un cuestionario de preguntas abiertas, USA el campo 'comentarios' de la herramienta 'guardar_encuesta' para guardar todas las respuestas de las preguntas planteadas recopiladas en forma de texto descriptivo.
 - IGNORA la regla estructurada de "Validación de notas de 1 al 10" si no aplica a tus preguntas.
 """
+            # Add "tienes un minuto" to the greeting if not already present
+            greet_lower = self.greeting.lower()
+            if "minuto" not in greet_lower:
+                self.greeting = f"{self.greeting.strip()} ¿Tienes un minuto para responder unas preguntas?"
         
         full_instructions = f"""{agent_instructions}
 
@@ -186,27 +189,25 @@ DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
     ) -> str | None:
         """
         Herramienta para colgar la llamada.
-        Úsala COMO ÚLTIMA ACCIÓN tras despedirte.
-        La despedida ya se habrá dicho en voz alta en el turno anterior.
+        Úsala SIMULTÁNEAMENTE con tu mensaje final de despedida (en el mismo turno).
         """
-        context.disallow_interruptions()
-        
         if mensaje_despedida:
              logger.info(f"🗣️ Despedida (log): {mensaje_despedida}")
         
-        logger.info("⏳ Esperando 5.0s para asegurar que se escuche la despedida...")
-        await asyncio.sleep(5.0) 
-        
-        url = f"{self.server_url}/colgar"
-        payload = {"nombre_sala": nombre_sala}
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, timeout=5, json=payload) as resp:
-                    logger.info(f"✂️ COLGANDO: {nombre_sala}")
-                    return "Llamada finalizada."
-        except Exception as e:
-            logger.error(f"Error Colgar: {e}")
-            return "Error al colgar."
+        async def delayed_hangup():
+            logger.info("⏳ Esperando 5.0s para asegurar que se escuche la despedida...")
+            await asyncio.sleep(5.0) 
+            url = f"{self.server_url}/colgar"
+            payload = {"nombre_sala": nombre_sala}
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, timeout=5, json=payload) as resp:
+                        logger.info(f"✂️ COLGANDO: {nombre_sala}")
+            except Exception as e:
+                logger.error(f"Error Colgar: {e}")
+                
+        asyncio.create_task(delayed_hangup())
+        return "Se cortará la llamada en unos segundos. Continúa."
 
 
 # ============================================================================

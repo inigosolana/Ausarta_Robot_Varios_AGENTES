@@ -166,7 +166,13 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
             const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
             const payload = {
                 user_request: aiPromptRequest,
-                empresa_id: formData.empresa_id || profile?.empresa_id || null
+                empresa_id: formData.empresa_id || profile?.empresa_id || null,
+                current_name: formData.name,
+                current_use_case: formData.use_case,
+                current_greeting: formData.greeting,
+                current_description: formData.description,
+                current_instructions: formData.instructions,
+                current_critical_rules: formData.critical_rules
             };
 
             const response = await fetch(`${API_URL}/api/ai/generate-prompt`, {

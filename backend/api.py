@@ -124,6 +124,12 @@ class CallEndRequest(BaseModel):
 class AIPromptRequest(BaseModel):
     user_request: str
     empresa_id: Optional[int] = None
+    current_name: Optional[str] = None
+    current_use_case: Optional[str] = None
+    current_greeting: Optional[str] = None
+    current_description: Optional[str] = None
+    current_instructions: Optional[str] = None
+    current_critical_rules: Optional[str] = None
 
 # --- LIVEKIT SETUP ---
 LIVEKIT_URL = os.getenv('LIVEKIT_URL')
@@ -155,7 +161,7 @@ async def generate_ai_prompt(req: AIPromptRequest):
 
         system_prompt = f"""
 Eres un experto en diseñar e implementar Agentes Telefónicos de IA.
-El usuario te dará un propósito general o unas preguntas que quiere hacer en su campaña.
+El usuario te dará un propósito general o unas preguntas que quiere hacer en su campaña. O tal vez te pida editar un agente existente.
 Tu tarea es devolver la configuración del agente EN FORMATO JSON ESTRICTO, con las siguientes claves y nada más:
 - "name": Un nombre creativo y común (ej: Dakota, Carlos, Laura) para el agente.
 - "use_case": Frase muy breve de qué va (ej: Encuesta de satisfacción).
@@ -165,6 +171,19 @@ Tu tarea es devolver la configuración del agente EN FORMATO JSON ESTRICTO, con 
 - "critical_rules": Una lista de 3 a 5 reglas críticas e innegociables que el agente debe seguir pase lo que pase (ej: "No inventar datos", "Siempre despedirse", "No saltar a la siguiente pregunta sin confirmar").
 
 SOLO DEBES DEVOLVER EL TEXTO EN FORMATO JSON, QUE SEA PUEDE CARGAR MEDIANTE JSON.LOADS(). SIN ACENTOS EN LAS CLAVES DEL JSON (sólo usa las indicadas en inglés). SI USAS MARKDOWN PARA EL JSON (```json), EL SISTEMA FALLARÁ. DEVUELVE DIRECTAMENTE `{{"name": ...}}`.
+"""
+        
+        if any([req.current_name, req.current_instructions, req.current_greeting]):
+            system_prompt += f"""
+CONFIGURACIÓN ACTUAL DEL AGENTE:
+- Nombre: {req.current_name or ''}
+- Caso de uso: {req.current_use_case or ''}
+- Saludo: {req.current_greeting or ''}
+- Descripción: {req.current_description or ''}
+- Instrucciones: {req.current_instructions or ''}
+- Reglas críticas: {req.current_critical_rules or ''}
+
+IMPORTANTE: El usuario quiere ACTUALIZAR este agente con el nuevo request. Modifica solo lo que pida el usuario y mantén el resto de la configuración si sigue teniendo sentido.
 """
         response = await client.chat.completions.create(
             model="gpt-4o",
