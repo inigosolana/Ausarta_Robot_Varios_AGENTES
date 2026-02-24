@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Download, Search, RefreshCw, FileText } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 
 interface SurveyResult {
     id: number;
@@ -18,22 +19,36 @@ interface SurveyResult {
     is_question_based?: boolean;
 }
 
-const ResultsView: React.FC = () => {
-    const { profile } = useAuth();
+interface Props {
+    empresaId?: number;
+    agentId?: number;
+    campaignId?: number;
+    title?: string;
+    hideHeader?: boolean;
+}
+
+const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, hideHeader }) => {
+    const { profile, isRole } = useAuth();
     const [results, setResults] = useState<SurveyResult[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [viewingTranscript, setViewingTranscript] = useState<SurveyResult | null>(null);
+    const [empresas, setEmpresas] = useState<any[]>([]);
+    const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | 'all'>(empresaId || 'all');
 
     const loadResults = async () => {
         setLoading(true);
         try {
-            const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
-            let url = `${API_URL}/api/results`;
-            if (profile?.empresa_id) {
-                url += `?empresa_id=${profile.empresa_id}`;
-            }
-            const res = await fetch(url);
+            const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
+            const params = new URLSearchParams();
+
+            const finalEmpresaId = selectedEmpresaId !== 'all' ? selectedEmpresaId : (profile?.empresa_id);
+            if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
+            if (agentId) params.append('agent_id', String(agentId));
+            if (campaignId) params.append('campaign_id', String(campaignId));
+
+            const queryStr = params.toString() ? `?${params.toString()}` : '';
+            const res = await fetch(`${API_URL}/results${queryStr}`);
             if (res.ok) {
                 const data = await res.json();
                 setResults(data);
@@ -46,8 +61,18 @@ const ResultsView: React.FC = () => {
     };
 
     useEffect(() => {
+        const fetchEmpresas = async () => {
+            if (isRole('superadmin')) {
+                const { data } = await supabase.from('empresas').select('*').order('nombre');
+                setEmpresas(data || []);
+            }
+        };
+        fetchEmpresas();
+    }, []);
+
+    useEffect(() => {
         loadResults();
-    }, [profile]);
+    }, [profile, selectedEmpresaId, agentId, campaignId]);
 
     const filteredResults = results.filter(r =>
         r.telefono.includes(searchTerm) ||
@@ -87,30 +112,44 @@ const ResultsView: React.FC = () => {
 
     return (
         <div className="space-y-6">
-            <header className="flex justify-between items-center">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Survey Results</h1>
-                    <p className="text-gray-500 text-sm mt-1">Detailed view of all agent interactions</p>
-                </div>
-                <div className="flex gap-2">
-                    <button
-                        onClick={loadResults}
-                        className="p-2 bg-white border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                        <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
-                    </button>
-                    <button
-                        onClick={exportCSV}
-                        className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                        <Download size={16} />
-                        Export CSV
-                    </button>
-                </div>
-            </header>
+            {!hideHeader && (
+                <header className="flex justify-between items-center">
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-900">{title || 'Survey Results'}</h1>
+                        <p className="text-gray-500 text-sm mt-1">Detailed view of all agent interactions</p>
+                    </div>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={loadResults}
+                            className="p-2 bg-white border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                            <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+                        </button>
+                        <button
+                            onClick={exportCSV}
+                            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                            <Download size={16} />
+                            Export CSV
+                        </button>
+                    </div>
+                </header>
+            )}
 
             {/* Filters */}
-            <div className="flex gap-4">
+            <div className="flex flex-col sm:flex-row gap-4">
+                {isRole('superadmin') && !empresaId && (
+                    <select
+                        value={selectedEmpresaId}
+                        onChange={(e) => setSelectedEmpresaId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                        className="px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white"
+                    >
+                        <option value="all">Todas las empresas</option>
+                        {empresas.map(emp => (
+                            <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                        ))}
+                    </select>
+                )}
                 <div className="relative flex-1 max-w-md">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
                     <input
@@ -223,8 +262,8 @@ const ResultsView: React.FC = () => {
                                             {(row.status === 'failed' || row.status === 'incomplete') && (
                                                 <button
                                                     onClick={() => {
-                                                        const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
-                                                        fetch(`${API_URL}/api/calls/outbound`, {
+                                                        const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api';
+                                                        fetch(`${API_URL}/calls/outbound`, {
                                                             method: 'POST',
                                                             headers: { 'Content-Type': 'application/json' },
                                                             body: JSON.stringify({ phoneNumber: row.telefono })

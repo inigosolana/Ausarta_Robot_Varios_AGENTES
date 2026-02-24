@@ -3,6 +3,8 @@ import { Save, ArrowLeft, Loader2, Bot, Mic, Speaker, Brain, Sparkles, X } from 
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { AgentConfig, AIConfig, Empresa } from '../types';
+import DashboardView from './DashboardView';
+import ResultsView from './ResultsView';
 
 interface Props {
     agent?: AgentConfig;
@@ -41,6 +43,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
     const [isSaving, setIsSaving] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [templates, setTemplates] = useState<{ id: number; name: string; content: string }[]>([]);
+    const [activeTab, setActiveTab] = useState<'config' | 'overview' | 'results'>('config');
 
     // AI Prompt Generation State
     const [showAiPromptModal, setShowAiPromptModal] = useState(false);
@@ -226,42 +229,97 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                 </button>
             </header>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Left Column: Agent Details */}
-                <div className="md:col-span-2 space-y-6">
-                    {/* General Info */}
-                    <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                        <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                            <Bot size={20} className="text-blue-500" />
-                            Identidad del Agente
-                        </h3>
+            {/* Tabs (Only if editing) */}
+            {isEditing && (
+                <div className="flex border-b border-gray-100 mb-6 bg-white rounded-xl shadow-sm overflow-hidden p-1 gap-1">
+                    <button
+                        onClick={() => setActiveTab('config')}
+                        className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeTab === 'config' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+                    >
+                        Configuración
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('overview')}
+                        className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeTab === 'overview' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+                    >
+                        Overview
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('results')}
+                        className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeTab === 'results' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+                    >
+                        Resultados
+                    </button>
+                </div>
+            )}
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Nombre del Agente *</label>
-                                <input
-                                    type="text"
-                                    value={formData.name}
-                                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                    placeholder="Ej: Dakota, Luna, Carlos..."
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                />
-                            </div>
-                            {isRole('superadmin') ? (
+            {activeTab === 'overview' && isEditing && agent?.id && (
+                <DashboardView
+                    agentId={agent.id}
+                    title={`Dashboard: ${agent.name}`}
+                    hideIntegrations={true}
+                />
+            )}
+
+            {activeTab === 'results' && isEditing && agent?.id && (
+                <ResultsView
+                    agentId={agent.id}
+                    title={`Resultados: ${agent.name}`}
+                    hideHeader={true}
+                />
+            )}
+
+            {activeTab === 'config' && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in">
+                    {/* Left Column: Agent Details */}
+                    <div className="md:col-span-2 space-y-6">
+                        {/* General Info */}
+                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                                <Bot size={20} className="text-blue-500" />
+                                Identidad del Agente
+                            </h3>
+
+                            <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Empresa / Proyecto *</label>
-                                    <select
-                                        value={formData.empresa_id || ''}
-                                        onChange={(e) => setFormData({ ...formData, empresa_id: e.target.value ? Number(e.target.value) : null })}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none bg-white"
-                                    >
-                                        <option value="" disabled>-- Selecciona Empresa --</option>
-                                        {empresas.map(emp => (
-                                            <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                                        ))}
-                                    </select>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Nombre del Agente *</label>
+                                    <input
+                                        type="text"
+                                        value={formData.name}
+                                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                        placeholder="Ej: Dakota, Luna, Carlos..."
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                    />
                                 </div>
-                            ) : (
+                                {isRole('superadmin') ? (
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1">Empresa / Proyecto *</label>
+                                        <select
+                                            value={formData.empresa_id || ''}
+                                            onChange={(e) => setFormData({ ...formData, empresa_id: e.target.value ? Number(e.target.value) : null })}
+                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none bg-white"
+                                        >
+                                            <option value="" disabled>-- Selecciona Empresa --</option>
+                                            {empresas.map(emp => (
+                                                <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1">Caso de Uso</label>
+                                        <input
+                                            type="text"
+                                            value={formData.use_case}
+                                            onChange={(e) => setFormData({ ...formData, use_case: e.target.value })}
+                                            placeholder="Ej: Encuesta de satisfacción"
+                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                        />
+                                    </div>
+                                )}
+                            </div>
+
+                            {isRole('superadmin') && (
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-1">Caso de Uso</label>
                                     <input
@@ -273,262 +331,249 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                     />
                                 </div>
                             )}
-                        </div>
 
-                        {isRole('superadmin') && (
                             <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Caso de Uso</label>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Saludo Inicial</label>
                                 <input
                                     type="text"
-                                    value={formData.use_case}
-                                    onChange={(e) => setFormData({ ...formData, use_case: e.target.value })}
-                                    placeholder="Ej: Encuesta de satisfacción"
+                                    value={formData.greeting}
+                                    onChange={(e) => setFormData({ ...formData, greeting: e.target.value })}
+                                    placeholder="Hola, soy..."
                                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
                                 />
+                                <p className="text-xs text-gray-400 mt-1">Lo primero que dirá el agente al contestar.</p>
                             </div>
-                        )}
 
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-1">Saludo Inicial</label>
-                            <input
-                                type="text"
-                                value={formData.greeting}
-                                onChange={(e) => setFormData({ ...formData, greeting: e.target.value })}
-                                placeholder="Hola, soy..."
-                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
-                            />
-                            <p className="text-xs text-gray-400 mt-1">Lo primero que dirá el agente al contestar.</p>
-                        </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Descripción</label>
+                                <textarea
+                                    rows={2}
+                                    value={formData.description}
+                                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                    placeholder="Breve descripción del propósito del agente"
+                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none resize-none"
+                                />
+                            </div>
+                        </section>
 
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-1">Descripción</label>
-                            <textarea
-                                rows={2}
-                                value={formData.description}
-                                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                placeholder="Breve descripción del propósito del agente"
-                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none resize-none"
-                            />
-                        </div>
-                    </section>
+                        {/* Instructions */}
+                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                            <div className="flex justify-between items-center">
+                                <div className="flex items-center gap-3">
+                                    <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                                        <Brain size={20} className="text-purple-500" />
+                                        Instrucciones (Prompt)
+                                    </h3>
+                                    {(hasPermission('ai_prompt_generator') || isRole('superadmin')) && (
+                                        <button
+                                            onClick={() => setShowAiPromptModal(true)}
+                                            className="flex items-center gap-1.5 px-3 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-full border border-purple-200 transition-colors"
+                                        >
+                                            <Sparkles size={14} />
+                                            Mago IA Extra
+                                        </button>
+                                    )}
+                                </div>
 
-                    {/* Instructions */}
-                    <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                        <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-3">
-                                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                                    <Brain size={20} className="text-purple-500" />
-                                    Instrucciones (Prompt)
-                                </h3>
-                                {(hasPermission('ai_prompt_generator') || isRole('superadmin')) && (
-                                    <button
-                                        onClick={() => setShowAiPromptModal(true)}
-                                        className="flex items-center gap-1.5 px-3 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-full border border-purple-200 transition-colors"
+                                <div className="flex items-center gap-2">
+                                    <select
+                                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 max-w-[150px]"
+                                        onChange={(e) => {
+                                            const template = templates.find(t => t.id === Number(e.target.value));
+                                            if (template) {
+                                                if (confirm('¿Reemplazar las instrucciones actuales con esta plantilla?')) {
+                                                    setFormData({ ...formData, instructions: template.content });
+                                                }
+                                            }
+                                        }}
+                                        value=""
                                     >
-                                        <Sparkles size={14} />
-                                        Mago IA Extra
+                                        <option value="" disabled>📂 Cargar Plantilla...</option>
+                                        {templates.map(t => (
+                                            <option key={t.id} value={t.id}>{t.name}</option>
+                                        ))}
+                                    </select>
+
+                                    <button
+                                        onClick={async () => {
+                                            const name = prompt('Nombre para la nueva plantilla:');
+                                            if (name) {
+                                                const { error } = await supabase.from('prompt_templates').insert({
+                                                    name,
+                                                    description: 'Creado desde el editor',
+                                                    content: formData.instructions
+                                                });
+                                                if (!error) {
+                                                    alert('Plantilla guardada!');
+                                                    loadTemplates();
+                                                } else {
+                                                    alert('Error al guardar plantilla');
+                                                }
+                                            }
+                                        }}
+                                        className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg border border-gray-200 transition-colors"
+                                    >
+                                        💾 Guardar como Plantilla
                                     </button>
-                                )}
+                                </div>
                             </div>
 
-                            <div className="flex items-center gap-2">
+                            <textarea
+                                rows={15}
+                                value={formData.instructions}
+                                onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
+                                placeholder="Define aquí la personalidad, misión y reglas del agente..."
+                                className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500/20 outline-none font-mono text-sm bg-gray-50"
+                            />
+                            <p className="text-xs text-gray-500">Define aquí la personalidad, misión y reglas del agente.</p>
+                        </section>
+
+                        {/* Critical Rules */}
+                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                                <X size={20} className="text-red-500" />
+                                Reglas Críticas (No negociables)
+                            </h3>
+                            <textarea
+                                rows={5}
+                                value={formData.critical_rules}
+                                onChange={(e) => setFormData({ ...formData, critical_rules: e.target.value })}
+                                placeholder="Ej: No colgar sin antes agradecer. No dar información técnica. Repetir si el cliente no entiende..."
+                                className="w-full px-4 py-3 border border-red-100 rounded-lg focus:ring-2 focus:ring-red-500/20 outline-none font-mono text-sm bg-red-50/20"
+                            />
+                            <p className="text-xs text-gray-500">Estas reglas se aplicarán con máxima prioridad sobre cualquier otra instrucción.</p>
+                        </section>
+                    </div>
+
+                    {/* Right Column: AI Config */}
+                    <div className="space-y-6">
+                        {/* LLM Config */}
+                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                                <Brain size={16} /> Modelo de Lenguaje (LLM)
+                            </h3>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor</label>
                                 <select
-                                    className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 max-w-[150px]"
+                                    value={aiConfig.llm_provider}
                                     onChange={(e) => {
-                                        const template = templates.find(t => t.id === Number(e.target.value));
-                                        if (template) {
-                                            if (confirm('¿Reemplazar las instrucciones actuales con esta plantilla?')) {
-                                                setFormData({ ...formData, instructions: template.content });
-                                            }
-                                        }
+                                        const p = e.target.value;
+                                        let m = 'llama-3.3-70b-versatile';
+                                        if (p === 'google') m = 'models/gemini-2.0-flash';
+                                        if (p === 'openai') m = 'gpt-4o';
+                                        if (p === 'deepseek') m = 'deepseek-chat';
+                                        setAiConfig({ ...aiConfig, llm_provider: p, llm_model: m });
                                     }}
-                                    value=""
+                                    className="w-full px-3 py-2 border rounded-lg bg-gray-50"
                                 >
-                                    <option value="" disabled>📂 Cargar Plantilla...</option>
-                                    {templates.map(t => (
-                                        <option key={t.id} value={t.id}>{t.name}</option>
-                                    ))}
+                                    <option value="openai">OpenAI (GPT-4o)</option>
+                                    <option value="groq">Groq (Llama 3, Mixtral)</option>
+                                    <option value="google">Google Gemini</option>
+                                    <option value="deepseek">DeepSeek (V3, R1)</option>
                                 </select>
-
-                                <button
-                                    onClick={async () => {
-                                        const name = prompt('Nombre para la nueva plantilla:');
-                                        if (name) {
-                                            const { error } = await supabase.from('prompt_templates').insert({
-                                                name,
-                                                description: 'Creado desde el editor',
-                                                content: formData.instructions
-                                            });
-                                            if (!error) {
-                                                alert('Plantilla guardada!');
-                                                loadTemplates();
-                                            } else {
-                                                alert('Error al guardar plantilla');
-                                            }
-                                        }
-                                    }}
-                                    className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg border border-gray-200 transition-colors"
-                                >
-                                    💾 Guardar como Plantilla
-                                </button>
                             </div>
-                        </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
+                                <select
+                                    value={aiConfig.llm_model}
+                                    onChange={(e) => setAiConfig({ ...aiConfig, llm_model: e.target.value })}
+                                    className="w-full px-3 py-2 border rounded-lg bg-white"
+                                >
+                                    {aiConfig.llm_provider === 'openai' ? (
+                                        <>
+                                            <option value="gpt-4o">GPT-4o (High Intelligence)</option>
+                                            <option value="gpt-4o-mini">GPT-4o mini (Fast & Cheap)</option>
+                                            <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                                        </>
+                                    ) : aiConfig.llm_provider === 'google' ? (
+                                        <>
+                                            <option value="models/gemini-2.0-flash">Gemini 2.0 Flash (Fast)</option>
+                                            <option value="models/gemini-2.0-pro-exp-02-05">Gemini 2.0 Pro (Most Powerful)</option>
+                                            <option value="models/gemini-2.0-flash-lite">Gemini 2.0 Flash Lite</option>
+                                            <option value="models/gemini-1.5-pro">Gemini 1.5 Pro</option>
+                                            <option value="models/gemini-1.5-flash">Gemini 1.5 Flash</option>
+                                        </>
+                                    ) : aiConfig.llm_provider === 'deepseek' ? (
+                                        <>
+                                            <option value="deepseek-chat">DeepSeek-V3 (Chat)</option>
+                                            <option value="deepseek-reasoner">DeepSeek-R1 (Reasoning)</option>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
+                                            <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+                                        </>
+                                    )}
+                                </select>
+                            </div>
+                        </section>
 
-                        <textarea
-                            rows={15}
-                            value={formData.instructions}
-                            onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
-                            placeholder="Define aquí la personalidad, misión y reglas del agente..."
-                            className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500/20 outline-none font-mono text-sm bg-gray-50"
-                        />
-                        <p className="text-xs text-gray-500">Define aquí la personalidad, misión y reglas del agente.</p>
-                    </section>
+                        {/* TTS Config */}
+                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                                <Speaker size={16} /> Voz (TTS)
+                            </h3>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor</label>
+                                <select
+                                    value={aiConfig.tts_provider}
+                                    onChange={(e) => setAiConfig({ ...aiConfig, tts_provider: e.target.value })}
+                                    className="w-full px-3 py-2 border rounded-lg bg-gray-50"
+                                >
+                                    <option value="cartesia">Cartesia (Sonic)</option>
+                                    <option value="openai">OpenAI TTS</option>
+                                    <option value="elevenlabs">ElevenLabs</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
+                                <input
+                                    type="text"
+                                    value={aiConfig.tts_model}
+                                    onChange={(e) => setAiConfig({ ...aiConfig, tts_model: e.target.value })}
+                                    className="w-full px-3 py-2 border rounded-lg"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Voice ID</label>
+                                <input
+                                    type="text"
+                                    value={aiConfig.tts_voice}
+                                    onChange={(e) => setAiConfig({ ...aiConfig, tts_voice: e.target.value })}
+                                    className="w-full px-3 py-2 border rounded-lg font-mono text-xs"
+                                />
+                            </div>
+                        </section>
 
-                    {/* Critical Rules */}
-                    <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                        <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                            <X size={20} className="text-red-500" />
-                            Reglas Críticas (No negociables)
-                        </h3>
-                        <textarea
-                            rows={5}
-                            value={formData.critical_rules}
-                            onChange={(e) => setFormData({ ...formData, critical_rules: e.target.value })}
-                            placeholder="Ej: No colgar sin antes agradecer. No dar información técnica. Repetir si el cliente no entiende..."
-                            className="w-full px-4 py-3 border border-red-100 rounded-lg focus:ring-2 focus:ring-red-500/20 outline-none font-mono text-sm bg-red-50/20"
-                        />
-                        <p className="text-xs text-gray-500">Estas reglas se aplicarán con máxima prioridad sobre cualquier otra instrucción.</p>
-                    </section>
+                        {/* STT Config */}
+                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                                <Mic size={16} /> Transcripción (STT)
+                            </h3>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor</label>
+                                <select
+                                    value={aiConfig.stt_provider}
+                                    onChange={(e) => setAiConfig({ ...aiConfig, stt_provider: e.target.value })}
+                                    className="w-full px-3 py-2 border rounded-lg bg-gray-50"
+                                >
+                                    <option value="deepgram">Deepgram</option>
+                                    <option value="openai">OpenAI Whisper</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
+                                <input
+                                    type="text"
+                                    value={aiConfig.stt_model}
+                                    onChange={(e) => setAiConfig({ ...aiConfig, stt_model: e.target.value })}
+                                    className="w-full px-3 py-2 border rounded-lg"
+                                />
+                            </div>
+                        </section>
+                    </div>
                 </div>
-
-                {/* Right Column: AI Config */}
-                <div className="space-y-6">
-                    {/* LLM Config */}
-                    <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                            <Brain size={16} /> Modelo de Lenguaje (LLM)
-                        </h3>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor</label>
-                            <select
-                                value={aiConfig.llm_provider}
-                                onChange={(e) => {
-                                    const p = e.target.value;
-                                    let m = 'llama-3.3-70b-versatile';
-                                    if (p === 'google') m = 'models/gemini-2.0-flash';
-                                    if (p === 'openai') m = 'gpt-4o';
-                                    if (p === 'deepseek') m = 'deepseek-chat';
-                                    setAiConfig({ ...aiConfig, llm_provider: p, llm_model: m });
-                                }}
-                                className="w-full px-3 py-2 border rounded-lg bg-gray-50"
-                            >
-                                <option value="openai">OpenAI (GPT-4o)</option>
-                                <option value="groq">Groq (Llama 3, Mixtral)</option>
-                                <option value="google">Google Gemini</option>
-                                <option value="deepseek">DeepSeek (V3, R1)</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
-                            <select
-                                value={aiConfig.llm_model}
-                                onChange={(e) => setAiConfig({ ...aiConfig, llm_model: e.target.value })}
-                                className="w-full px-3 py-2 border rounded-lg bg-white"
-                            >
-                                {aiConfig.llm_provider === 'openai' ? (
-                                    <>
-                                        <option value="gpt-4o">GPT-4o (High Intelligence)</option>
-                                        <option value="gpt-4o-mini">GPT-4o mini (Fast & Cheap)</option>
-                                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                                    </>
-                                ) : aiConfig.llm_provider === 'google' ? (
-                                    <>
-                                        <option value="models/gemini-2.0-flash">Gemini 2.0 Flash (Fast)</option>
-                                        <option value="models/gemini-2.0-pro-exp-02-05">Gemini 2.0 Pro (Most Powerful)</option>
-                                        <option value="models/gemini-2.0-flash-lite">Gemini 2.0 Flash Lite</option>
-                                        <option value="models/gemini-1.5-pro">Gemini 1.5 Pro</option>
-                                        <option value="models/gemini-1.5-flash">Gemini 1.5 Flash</option>
-                                    </>
-                                ) : aiConfig.llm_provider === 'deepseek' ? (
-                                    <>
-                                        <option value="deepseek-chat">DeepSeek-V3 (Chat)</option>
-                                        <option value="deepseek-reasoner">DeepSeek-R1 (Reasoning)</option>
-                                    </>
-                                ) : (
-                                    <>
-                                        <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
-                                        <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
-                                    </>
-                                )}
-                            </select>
-                        </div>
-                    </section>
-
-                    {/* TTS Config */}
-                    <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                            <Speaker size={16} /> Voz (TTS)
-                        </h3>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor</label>
-                            <select
-                                value={aiConfig.tts_provider}
-                                onChange={(e) => setAiConfig({ ...aiConfig, tts_provider: e.target.value })}
-                                className="w-full px-3 py-2 border rounded-lg bg-gray-50"
-                            >
-                                <option value="cartesia">Cartesia (Sonic)</option>
-                                <option value="openai">OpenAI TTS</option>
-                                <option value="elevenlabs">ElevenLabs</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
-                            <input
-                                type="text"
-                                value={aiConfig.tts_model}
-                                onChange={(e) => setAiConfig({ ...aiConfig, tts_model: e.target.value })}
-                                className="w-full px-3 py-2 border rounded-lg"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Voice ID</label>
-                            <input
-                                type="text"
-                                value={aiConfig.tts_voice}
-                                onChange={(e) => setAiConfig({ ...aiConfig, tts_voice: e.target.value })}
-                                className="w-full px-3 py-2 border rounded-lg font-mono text-xs"
-                            />
-                        </div>
-                    </section>
-
-                    {/* STT Config */}
-                    <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                            <Mic size={16} /> Transcripción (STT)
-                        </h3>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor</label>
-                            <select
-                                value={aiConfig.stt_provider}
-                                onChange={(e) => setAiConfig({ ...aiConfig, stt_provider: e.target.value })}
-                                className="w-full px-3 py-2 border rounded-lg bg-gray-50"
-                            >
-                                <option value="deepgram">Deepgram</option>
-                                <option value="openai">OpenAI Whisper</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
-                            <input
-                                type="text"
-                                value={aiConfig.stt_model}
-                                onChange={(e) => setAiConfig({ ...aiConfig, stt_model: e.target.value })}
-                                className="w-full px-3 py-2 border rounded-lg"
-                            />
-                        </div>
-                    </section>
-                </div>
-            </div>
+            )}
 
             {/* AI Generator Modal */}
             {showAiPromptModal && (

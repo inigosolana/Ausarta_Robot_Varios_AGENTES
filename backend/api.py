@@ -190,7 +190,7 @@ SOLO DEBES DEVOLVER EL TEXTO EN FORMATO JSON, QUE SEA PUEDE CARGAR MEDIANTE JSON
 
 # --- DASHBOARD METRICS ---
 @app.get("/api/dashboard/stats")
-async def get_dashboard_stats(empresa_id: Optional[int] = None):
+async def get_dashboard_stats(empresa_id: Optional[int] = None, agent_id: Optional[int] = None, campaign_id: Optional[int] = None):
     if not supabase: return {"error": "Database not connected"}
     
     try:
@@ -198,6 +198,10 @@ async def get_dashboard_stats(empresa_id: Optional[int] = None):
         query_total = supabase.table("encuestas").select("count", count="exact")
         if empresa_id:
             query_total = query_total.eq("empresa_id", empresa_id)
+        if agent_id:
+            query_total = query_total.eq("agent_id", agent_id)
+        if campaign_id:
+            query_total = query_total.eq("campaign_id", campaign_id)
         res_total = query_total.execute()
         total_calls = res_total.count if res_total.count is not None else 0
         
@@ -205,6 +209,10 @@ async def get_dashboard_stats(empresa_id: Optional[int] = None):
         query_comp = supabase.table("encuestas").select("count", count="exact").eq("completada", 1)
         if empresa_id:
             query_comp = query_comp.eq("empresa_id", empresa_id)
+        if agent_id:
+            query_comp = query_comp.eq("agent_id", agent_id)
+        if campaign_id:
+            query_comp = query_comp.eq("campaign_id", campaign_id)
         res_completed = query_comp.execute()
         completed_calls = res_completed.count if res_completed.count is not None else 0
         
@@ -227,6 +235,10 @@ async def get_dashboard_stats(empresa_id: Optional[int] = None):
         query_scores = supabase.table("encuestas").select("puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez").not_.is_("puntuacion_comercial", "null")
         if empresa_id:
             query_scores = query_scores.eq("empresa_id", empresa_id)
+        if agent_id:
+            query_scores = query_scores.eq("agent_id", agent_id)
+        if campaign_id:
+            query_scores = query_scores.eq("campaign_id", campaign_id)
         res_scores = query_scores.execute()
         
         avg_comercial = 0
@@ -245,10 +257,31 @@ async def get_dashboard_stats(empresa_id: Optional[int] = None):
             avg_rapidez = sum_rap / count
             avg_overall = (avg_comercial + avg_instalador + avg_rapidez) / 3
 
+        # Determinar si es basado en preguntas
+        is_question_based = False
+        try:
+            if agent_id:
+                agent_res = supabase.table("agent_config").select("instructions").eq("id", agent_id).maybeSingle().execute()
+                if agent_res.data:
+                    inst = agent_res.data.get("instructions", "").lower()
+                    if "pregunta 1" in inst or "pregunta 2" in inst or "pregunta:" in inst:
+                        is_question_based = True
+            elif campaign_id:
+                camp_res = supabase.table("campaigns").select("agent_id").eq("id", campaign_id).maybeSingle().execute()
+                if camp_res.data and camp_res.data.get("agent_id"):
+                    agent_res = supabase.table("agent_config").select("instructions").eq("id", camp_res.data["agent_id"]).maybeSingle().execute()
+                    if agent_res.data:
+                        inst = agent_res.data.get("instructions", "").lower()
+                        if "pregunta 1" in inst or "pregunta 2" in inst or "pregunta:" in inst:
+                            is_question_based = True
+        except Exception as e_qb:
+            print(f"Error checking question based: {e_qb}")
+
         return {
             "total_calls": total_calls,
             "completed_calls": completed_calls,
             "pending_calls": pending_calls,
+            "is_question_based": is_question_based,
             "avg_scores": {
                 "comercial": round(float(avg_comercial), 1),
                 "instalador": round(float(avg_instalador), 1),
@@ -261,12 +294,16 @@ async def get_dashboard_stats(empresa_id: Optional[int] = None):
         return {"total_calls": 0, "completed_calls": 0, "pending_calls": 0, "avg_scores": {}}
 
 @app.get("/api/dashboard/recent-calls")
-async def get_recent_calls(empresa_id: Optional[int] = None):
+async def get_recent_calls(empresa_id: Optional[int] = None, agent_id: Optional[int] = None, campaign_id: Optional[int] = None):
     if not supabase: return []
     try:
         query = supabase.table("encuestas").select("*")
         if empresa_id:
             query = query.eq("empresa_id", empresa_id)
+        if agent_id:
+            query = query.eq("agent_id", agent_id)
+        if campaign_id:
+            query = query.eq("campaign_id", campaign_id)
         response = query.order("fecha", desc=True).limit(50).execute()
         # Mapeamos los campos de la BD al formato que espera el frontend
         mapped = []
@@ -290,13 +327,17 @@ async def get_recent_calls(empresa_id: Optional[int] = None):
         return []
 
 @app.get("/api/results")
-async def get_all_results(empresa_id: Optional[int] = None):
+async def get_all_results(empresa_id: Optional[int] = None, agent_id: Optional[int] = None, campaign_id: Optional[int] = None):
     if not supabase: return []
     try:
         # Traemos todos los resultados de encuestas
         query = supabase.table("encuestas").select("*")
         if empresa_id:
             query = query.eq("empresa_id", empresa_id)
+        if agent_id:
+            query = query.eq("agent_id", agent_id)
+        if campaign_id:
+            query = query.eq("campaign_id", campaign_id)
         response = query.order("fecha", desc=True).execute()
         
         results = response.data

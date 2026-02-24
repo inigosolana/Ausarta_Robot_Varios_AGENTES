@@ -13,10 +13,19 @@ import { useAuth } from '../contexts/AuthContext';
 // API URL
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
 
+interface Props {
+    empresaId?: number;
+    agentId?: number;
+    campaignId?: number;
+    title?: string;
+    hideIntegrations?: boolean;
+}
+
 interface DashboardStats {
     total_calls: number;
     completed_calls: number;
     pending_calls: number;
+    is_question_based?: boolean;
     avg_scores: {
         comercial: number;
         instalador: number;
@@ -87,7 +96,7 @@ const IntegrationCard: React.FC<{ integ: Integration }> = ({ integ }) => (
     </div>
 );
 
-const DashboardView: React.FC = () => {
+const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, hideIntegrations }) => {
     const { profile } = useAuth();
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [recentCalls, setRecentCalls] = useState<Call[]>([]);
@@ -101,17 +110,24 @@ const DashboardView: React.FC = () => {
     const loadData = async () => {
         try {
             setIsLoading(true);
-            const queryParams = profile?.empresa_id ? `?empresa_id=${profile.empresa_id}` : '';
+            const params = new URLSearchParams();
+
+            const finalEmpresaId = empresaId || (profile?.empresa_id);
+            if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
+            if (agentId) params.append('agent_id', String(agentId));
+            if (campaignId) params.append('campaign_id', String(campaignId));
+
+            const queryStr = params.toString() ? `?${params.toString()}` : '';
 
             const [statsRes, callsRes, intRes] = await Promise.all([
-                fetch(`${API_URL}/dashboard/stats${queryParams}`),
-                fetch(`${API_URL}/dashboard/recent-calls${queryParams}`),
-                fetch(`${API_URL}/dashboard/integrations`)
+                fetch(`${API_URL}/dashboard/stats${queryStr}`),
+                fetch(`${API_URL}/dashboard/recent-calls${queryStr}`),
+                hideIntegrations ? Promise.resolve({ ok: true, json: () => [] }) : fetch(`${API_URL}/dashboard/integrations`)
             ]);
 
             if (statsRes.ok) setStats(await statsRes.json());
             if (callsRes.ok) setRecentCalls(await callsRes.json());
-            if (intRes.ok) setIntegrations(await intRes.json());
+            if (intRes.ok && !hideIntegrations) setIntegrations(await intRes.json());
 
         } catch (error) {
             console.error('Error loading dashboard data:', error);
@@ -127,13 +143,21 @@ const DashboardView: React.FC = () => {
     return (
         <div className="space-y-8 animate-fade-in">
             {/* Header */}
-            <div>
-                <div className="flex items-center gap-3">
-                    <img src="/ausarta.png" alt="Logo" className="h-10 w-auto object-contain" />
-                    <h2 className="text-3xl font-bold text-gray-900">Dashboard</h2>
+            {!title && (
+                <div>
+                    <div className="flex items-center gap-3">
+                        <img src="/ausarta.png" alt="Logo" className="h-10 w-auto object-contain" />
+                        <h2 className="text-3xl font-bold text-gray-900">Dashboard</h2>
+                    </div>
+                    <p className="text-gray-500 mt-1">Resumen de actividad de encuestas</p>
                 </div>
-                <p className="text-gray-500 mt-1">Resumen de actividad de encuestas</p>
-            </div>
+            )}
+            {title && (
+                <div>
+                    <h2 className="text-2xl font-bold text-gray-900">{title}</h2>
+                    <p className="text-gray-500 mt-1 text-sm">Resumen de actividad</p>
+                </div>
+            )}
 
             {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -149,14 +173,23 @@ const DashboardView: React.FC = () => {
                     icon={CheckCircle}
                     color="green"
                 />
+                {!stats?.is_question_based ? (
+                    <StatCard
+                        title="Nota Media"
+                        value={stats?.avg_scores?.overall || 0}
+                        icon={BarChart2}
+                        color="purple"
+                    />
+                ) : (
+                    <StatCard
+                        title="Encuesta Abierta"
+                        value="Ilimitada"
+                        icon={BarChart2}
+                        color="purple"
+                    />
+                )}
                 <StatCard
-                    title="Nota Media"
-                    value={stats?.avg_scores?.overall || 0}
-                    icon={BarChart2}
-                    color="purple"
-                />
-                <StatCard
-                    title="Fichas Pendientes"
+                    title="Pendientes"
                     value={stats?.pending_calls || 0}
                     icon={Timer}
                     color="yellow"
@@ -164,75 +197,61 @@ const DashboardView: React.FC = () => {
             </div>
 
             {/* Integrations Status */}
-            <div>
-                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                    <Zap size={20} className="text-yellow-500" /> Estado de Servicios (APIs)
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {integrations.map((intext, i) => (
-                        <IntegrationCard key={i} integ={intext} />
-                    ))}
-                </div>
-            </div>
-
-            {/* Scores & Graphs */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-                    <h3 className="text-lg font-bold text-gray-800 mb-4">Métricas de Calidad</h3>
-                    <div className="space-y-4">
-                        <div>
-                            <div className="flex justify-between mb-1">
-                                <span className="text-sm font-medium text-gray-600">Trato Comercial</span>
-                                <span className="text-sm font-bold text-gray-800">{stats?.avg_scores?.comercial || 0}/10</span>
-                            </div>
-                            <div className="w-full bg-gray-100 rounded-full h-2.5">
-                                <div
-                                    className="bg-blue-600 h-2.5 rounded-full"
-                                    style={{ width: `${(stats?.avg_scores?.comercial || 0) * 10}%` }}
-                                ></div>
-                            </div>
-                        </div>
-
-                        <div>
-                            <div className="flex justify-between mb-1">
-                                <span className="text-sm font-medium text-gray-600">Instalador</span>
-                                <span className="text-sm font-bold text-gray-800">{stats?.avg_scores?.instalador || 0}/10</span>
-                            </div>
-                            <div className="w-full bg-gray-100 rounded-full h-2.5">
-                                <div
-                                    className="bg-green-600 h-2.5 rounded-full"
-                                    style={{ width: `${(stats?.avg_scores?.instalador || 0) * 10}%` }}
-                                ></div>
-                            </div>
-                        </div>
-
-                        <div>
-                            <div className="flex justify-between mb-1">
-                                <span className="text-sm font-medium text-gray-600">Rapidez</span>
-                                <span className="text-sm font-bold text-gray-800">{stats?.avg_scores?.rapidez || 0}/10</span>
-                            </div>
-                            <div className="w-full bg-gray-100 rounded-full h-2.5">
-                                <div
-                                    className="bg-purple-600 h-2.5 rounded-full"
-                                    style={{ width: `${(stats?.avg_scores?.rapidez || 0) * 10}%` }}
-                                ></div>
-                            </div>
-                        </div>
+            {!hideIntegrations && integrations.length > 0 && (
+                <div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <Zap size={20} className="text-yellow-500" /> Estado de Servicios (APIs)
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {integrations.map((intext, i) => (
+                            <IntegrationCard key={i} integ={intext} />
+                        ))}
                     </div>
                 </div>
+            )}
 
-            </div>
+            {/* Scores Breakdown (Only if NOT question based) */}
+            {!stats?.is_question_based && stats?.avg_scores && (
+                <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm animate-fade-in">
+                    <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
+                        <BarChart2 className="text-blue-500" />
+                        Desglose de Puntuaciones
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                        {[
+                            { label: 'Punt. Comercial', value: stats.avg_scores.comercial, color: 'blue' },
+                            { label: 'Punt. Instalador', value: stats.avg_scores.instalador, color: 'green' },
+                            { label: 'Punt. Rapidez', value: stats.avg_scores.rapidez, color: 'purple' },
+                        ].map((item, idx) => (
+                            <div key={idx} className="space-y-3">
+                                <div className="flex justify-between items-end">
+                                    <span className="text-sm font-medium text-gray-500">{item.label}</span>
+                                    <span className="text-2xl font-bold text-gray-900">{item.value}/10</span>
+                                </div>
+                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                    <div
+                                        className={`h-full bg-${item.color}-500 transition-all duration-1000`}
+                                        style={{ width: `${item.value * 10}%` }}
+                                    />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Recent Activity */}
             <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm overflow-hidden">
                 <h3 className="text-lg font-bold text-gray-800 mb-4">Últimas Llamadas</h3>
-                <div className="overflow-y-auto max-h-[200px]">
+                <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
                             <tr>
                                 <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teléfono / Campaña</th>
                                 <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th>
-                                <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">C / I / R</th>
+                                <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    {stats?.is_question_based ? 'Respuestas' : 'C / I / R'}
+                                </th>
                                 <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IA / Modelo</th>
                                 <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
                             </tr>
@@ -253,7 +272,11 @@ const DashboardView: React.FC = () => {
                                         {new Date(call.date).toLocaleString()}
                                     </td>
                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-center font-mono font-bold text-gray-700">
-                                        {call.scores?.comercial ?? '-'} / {call.scores?.instalador ?? '-'} / {call.scores?.rapidez ?? '-'}
+                                        {stats?.is_question_based ? (
+                                            <span className="text-xs font-normal text-gray-400 italic">Ver en resultados</span>
+                                        ) : (
+                                            `${call.scores?.comercial ?? '-'} / ${call.scores?.instalador ?? '-'} / ${call.scores?.rapidez ?? '-'}`
+                                        )}
                                     </td>
                                     <td className="px-3 py-2 whitespace-nowrap">
                                         <div className="flex flex-col">
@@ -261,7 +284,7 @@ const DashboardView: React.FC = () => {
                                             <span className="text-[10px] text-gray-600 truncate max-w-[80px]">{(call.llm_model || 'Standard').replace('Groq ', '')}</span>
                                         </div>
                                     </td>
-                                    <td className="px-3 py-2 whitespace-nowrap text-sm">
+                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
                                         {(() => {
                                             switch (call.status) {
                                                 case 'completed':
@@ -273,8 +296,8 @@ const DashboardView: React.FC = () => {
                                                     return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-red-500 text-white uppercase shadow-sm">Rechazada</span>;
                                                 case 'failed':
                                                     return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-orange-400 text-white uppercase shadow-sm">Fallida</span>;
-                                                case 'initiated':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-yellow-400 text-white uppercase shadow-sm">En Curso</span>;
+                                                case 'unreached':
+                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-amber-400 text-white uppercase shadow-sm">No Contesta</span>;
                                                 default:
                                                     return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-400 text-white uppercase shadow-sm">Pendiente</span>;
                                             }
@@ -285,7 +308,7 @@ const DashboardView: React.FC = () => {
                         </tbody>
                     </table>
                     {recentCalls.length === 0 && (
-                        <p className="text-center text-gray-400 mt-4 text-sm">No hay llamadas recientes</p>
+                        <p className="text-center text-gray-400 py-8 text-sm">No hay llamadas recientes</p>
                     )}
                 </div>
             </div>
