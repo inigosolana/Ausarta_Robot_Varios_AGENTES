@@ -128,91 +128,68 @@ const UserManagementView: React.FC = () => {
                 }
                 return retVal;
             };
+
+            const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
             const tempPassword = newPassword || (generateRandomString(12) + '!Aa1');
 
-            // 1. Create the user with a temporary password (with timeout)
-            const signUpPromise = supabase.auth.signUp({
-                email: newEmail,
-                password: tempPassword,
-                options: {
-                    data: { full_name: newName, role: newRole },
-                    emailRedirectTo: undefined,
-                }
-            });
+            // Call n8n Webhook instead of Backend API
+            const N8N_WEBHOOK_URL = 'https://n8n.ausarta.net/webhook/invitar-ausarta-robot-v3';
 
-            // Add a timeout to avoid hanging forever
-            const timeout = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("La operación está tardando demasiado. Revisa si el email ya está registrado o tu conexión.")), 20000)
-            );
-
-            const { data, error } = await Promise.race([signUpPromise, timeout]) as any;
-
-            if (error) {
-                // If user already exists, we might want to just send the reset email
-                if (error.message.toLowerCase().includes("already registered") || error.status === 400) {
-                    const confirmResend = window.confirm("Este usuario ya parece estar registrado. ¿Quieres intentar reenviar el email de invitación?");
-                    if (confirmResend) {
-                        await handleResendInvite(newEmail);
-                        setShowCreate(false);
-                        return;
-                    }
-                }
-                throw error;
-            }
-
-            // 2. Create the profile
-            if (data.user) {
-                await supabase.from('user_profiles').upsert({
-                    id: data.user.id,
+            const res = await fetch(N8N_WEBHOOK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
                     email: newEmail,
+                    password: tempPassword,
                     full_name: newName,
                     role: newRole,
-                    empresa_id: finalEmpresaId || null,
-                    created_by: currentProfile?.id
-                });
+                    empresa_id: finalEmpresaId || null
+                })
+            });
 
-                // Set default permissions (all enabled by default)
-                const defaultPerms = ALL_MODULES.map(m => ({
-                    user_id: data.user!.id,
-                    module: m.key,
-                    enabled: true,
-                    granted_by: currentProfile?.id
-                }));
-
-                await supabase.from('user_permissions').insert(defaultPerms);
+            if (!res.ok) {
+                const errorText = await res.text();
+                throw new Error(errorText || 'Error al conectar con n8n');
             }
 
-            // 3. The user will receive a confirmation email. 
-            // Our updated LoginView and App.tsx will detect the 'type=signup' in the link 
-            // and force them to set a password upon first entry.
-            // No need to send a separate resetPassword email which causes confusion.
-            /*
-            if (!newPassword) {
-                const redirectBaseUrl = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')
-                    ? 'https://app.ausarta.net'
-                    : window.location.origin;
+            // The n8n workflow returns the Supabase response from the last node (or response node)
+            const responseData = await res.json();
+            // n8n might return results differently depending on the node, but usually Supabase Auth returns { id: "..." }
+            // If the response node returns all data, we look for the ID.
+            const newUserId = responseData.id || responseData[0]?.id || (responseData.json ? responseData.json.id : null);
 
-                await supabase.auth.resetPasswordForEmail(newEmail, {
-                    redirectTo: redirectBaseUrl,
-                });
-            }
-            */
+            // Actualizar estado local (con el tipo correcto que incluye permisos)
+            const newUser: UserProfile & { permissions: UserPermission[], empresas?: Empresa | null } = {
+                id: newUserId,
+                email: newEmail,
+                full_name: newName,
+                role: newRole,
+                empresa_id: finalEmpresaId || null,
+                permissions: [],
+                is_active: true,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                created_by: currentProfile?.id || null,
+                empresas: empresas.find(e => e.id === Number(finalEmpresaId)) || null
+            };
 
+            setUsers(prev => [newUser, ...prev]);
             setInviteSuccess(true);
 
-            // Reset form after a brief delay to show success
+            alert(`Usuario creado correctamente${!newPassword ? `. Contraseña temporal: ${tempPassword}` : ''}`);
+
+            // Reset form and close
             setTimeout(() => {
                 setShowCreate(false);
                 setNewEmail('');
                 setNewName('');
-                setNewRole('user');
-                setNewEmpresaId('');
                 setNewPassword('');
                 setInviteSuccess(false);
-                loadUsersAndEmpresas();
-            }, 2500);
+                loadUsersAndEmpresas(); // Refrescar para traer permisos completos si el backend los creó
+            }, 1000);
 
         } catch (err: any) {
+            console.error("Error creating user:", err);
             alert(`Error: ${err.message}`);
         } finally {
             setCreating(false);

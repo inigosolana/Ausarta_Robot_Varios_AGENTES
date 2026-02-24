@@ -47,16 +47,27 @@ const LoginView: React.FC = () => {
         setError('');
         setLoading(true);
 
-        const { error } = await supabase.auth.resetPasswordForEmail(email, {
-            redirectTo: window.location.origin,
-        });
+        try {
+            // Call n8n Recovery Webhook instead of Supabase public reset
+            const N8N_RECOVERY_URL = 'https://n8n.ausarta.net/webhook/recuperar-password-ausarta-v1';
 
-        if (error) {
-            setError(error.message);
-        } else {
+            const res = await fetch(N8N_RECOVERY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
+
+            if (!res.ok) {
+                const errorText = await res.text();
+                throw new Error(errorText || 'Error al conectar con el sistema de recuperación');
+            }
+
             setViewMode('forgot-sent');
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     const handleUpdatePassword = async (e: React.FormEvent) => {
