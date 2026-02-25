@@ -1334,16 +1334,15 @@ async def startup_event():
 # --- PROXY N8N ---
 @app.post("/api/n8n/invite")
 async def proxy_n8n_invite(request: Request):
-    """Proxy para el webhook de invitación de n8n (evita CORS)"""
     payload = await request.json()
     base_url = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
-    webhook_url = f"{base_url}/invitar-ausarta-robot-v3"
+    # Use Webhook ID directly for more reliability
+    webhook_url = f"{base_url}/d0952789-a4a1-4eae-b0db-494356a9e3fa"
     
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(webhook_url, json=payload, timeout=10) as resp:
                 data = await resp.json() if resp.content_type == 'application/json' else await resp.text()
-                # Return standard dict if it's text to prevent JSON errors on frontend
                 if not isinstance(data, dict):
                     data = {"message": data}
                 return JSONResponse(status_code=resp.status, content=data)
@@ -1353,10 +1352,10 @@ async def proxy_n8n_invite(request: Request):
 
 @app.post("/api/n8n/recover")
 async def proxy_n8n_recover(request: Request):
-    """Proxy para el webhook de recuperación de n8n (evita CORS)"""
     payload = await request.json()
     base_url = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
-    webhook_url = f"{base_url}/recuperar-password-ausarta-v1"
+    # Use Webhook ID directly for more reliability
+    webhook_url = f"{base_url}/fbdb6333-c473-493a-a1da-6c1756d5ae04"
     
     try:
         async with aiohttp.ClientSession() as session:
@@ -1368,4 +1367,3 @@ async def proxy_n8n_recover(request: Request):
     except Exception as e:
         logger.error(f"❌ Error en proxy n8n recover: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
-
