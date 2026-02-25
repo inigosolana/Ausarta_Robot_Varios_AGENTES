@@ -4,7 +4,7 @@
         {
             "parameters": {
                 "httpMethod": "POST",
-                "path": "invitar-ausarta-robot-v3",
+                "path": "",
                 "responseMode": "responseNode",
                 "onError": "continueRegularOutput"
             },
