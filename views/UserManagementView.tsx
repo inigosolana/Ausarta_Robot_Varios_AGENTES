@@ -129,13 +129,13 @@ const UserManagementView: React.FC = () => {
                 return retVal;
             };
 
-            const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+            const API_URL = import.meta.env.VITE_API_URL || '';
             const tempPassword = newPassword || (generateRandomString(12) + '!Aa1');
 
-            // Call n8n Webhook instead of Backend API
-            const N8N_WEBHOOK_URL = 'https://n8n.ausarta.net/webhook/invitar-ausarta-robot-v3';
+            // Call Backend Proxy instead of n8n directly to avoid CORS issues
+            const PROXY_URL = `${API_URL}/api/n8n/invite`;
 
-            const res = await fetch(N8N_WEBHOOK_URL, {
+            const res = await fetch(PROXY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -146,6 +146,7 @@ const UserManagementView: React.FC = () => {
                     empresa_id: finalEmpresaId || null
                 })
             });
+
 
             if (!res.ok) {
                 const errorText = await res.text();

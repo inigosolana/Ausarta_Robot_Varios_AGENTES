@@ -48,14 +48,16 @@ const LoginView: React.FC = () => {
         setLoading(true);
 
         try {
-            // Call n8n Recovery Webhook instead of Supabase public reset
-            const N8N_RECOVERY_URL = 'https://n8n.ausarta.net/webhook/recuperar-password-ausarta-v1';
+            // Call Backend Proxy instead of n8n directly to avoid CORS issues
+            const API_URL = import.meta.env.VITE_API_URL || '';
+            const PROXY_URL = `${API_URL}/api/n8n/recover`;
 
-            const res = await fetch(N8N_RECOVERY_URL, {
+            const res = await fetch(PROXY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email })
             });
+
 
             if (!res.ok) {
                 const errorText = await res.text();
