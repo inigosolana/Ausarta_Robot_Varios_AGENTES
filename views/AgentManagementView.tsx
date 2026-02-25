@@ -23,7 +23,11 @@ const AgentManagementView: React.FC = () => {
         setLoading(true);
         try {
             // Load empresas
-            const { data: empData } = await supabase.from("empresas").select("*").order("nombre");
+            let empQuery = supabase.from("empresas").select("*").order("nombre");
+            if (!isRole('superadmin') && profile?.empresa_id) {
+                empQuery = empQuery.eq('id', profile.empresa_id);
+            }
+            const { data: empData } = await empQuery;
             setEmpresas(empData || []);
 
             // Load agents - if admin of a company, filter by empresa_id

@@ -18,8 +18,8 @@ const LoginView: React.FC = () => {
 
     // Check URL params for password recovery or invitation
     React.useEffect(() => {
-        const hash = window.location.hash;
-        if (hash && (hash.includes('type=recovery') || hash.includes('type=signup') || hash.includes('type=invite'))) {
+        const urlParams = window.location.hash + window.location.search;
+        if (urlParams && (urlParams.includes('type=recovery') || urlParams.includes('type=signup') || urlParams.includes('type=invite'))) {
             setViewMode('update-password');
         }
     }, []);

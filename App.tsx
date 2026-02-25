@@ -72,9 +72,9 @@ const App: React.FC = () => {
   }
 
   // Show login if not authenticated or if in password recovery/invitation flow
-  const isAuthFlow = window.location.hash.includes('type=recovery') ||
-    window.location.hash.includes('type=signup') ||
-    window.location.hash.includes('type=invite');
+  const isAuthFlow = (window.location.hash + window.location.search).includes('type=recovery') ||
+    (window.location.hash + window.location.search).includes('type=signup') ||
+    (window.location.hash + window.location.search).includes('type=invite');
 
   if ((!user || !profile) || isAuthFlow) {
     return <LoginView />;
@@ -179,7 +179,7 @@ const App: React.FC = () => {
           <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
             Build
           </div>
-          {hasPermission('empresas') && (
+          {isRole('superadmin') && hasPermission('empresas') && (
             <SidebarItem
               icon={<Building2 size={18} />}
               label="Empresas"
@@ -215,7 +215,7 @@ const App: React.FC = () => {
               collapsed={!isSidebarOpen}
             />
           )}
-          {hasPermission('models') && (
+          {isRole('superadmin') && hasPermission('models') && (
             <SidebarItem
               icon={<Cpu size={18} />}
               label="AI Models"
@@ -224,7 +224,7 @@ const App: React.FC = () => {
               collapsed={!isSidebarOpen}
             />
           )}
-          {hasPermission('telephony') && (
+          {isRole('superadmin') && hasPermission('telephony') && (
             <SidebarItem
               icon={<PhoneCall size={18} />}
               label="Telephony"

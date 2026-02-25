@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
 
 const UsageView: React.FC = () => {
-    const { profile } = useAuth();
+    const { profile, isRole } = useAuth();
     const [integrations, setIntegrations] = useState<any[]>([]);
     const [usage, setUsage] = useState<any>(null);
     const [alerts, setAlerts] = useState<any[]>([]);
@@ -192,12 +192,12 @@ const UsageView: React.FC = () => {
                 </div>
             </div>
 
-            {/* Live Quota Status */}
-            {liveLimits && (
+            {/* Live Quota Status - Superadmin ONLY */}
+            {isRole('superadmin') && liveLimits && (
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm animate-in fade-in slide-in-from-bottom-2">
                     <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
                         <Zap size={20} className="text-yellow-500" />
-                        Capacidades y Límites en Tiempo Real
+                        Capacidades y Límites en Tiempo Real (Sistema)
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {/* Groq Card with Model Selector */}
@@ -506,49 +506,51 @@ const UsageView: React.FC = () => {
                     )}
                 </div>
 
-                {/* Real-time System/SIP Logs */}
-                <div className="bg-gray-900 p-6 rounded-xl border border-gray-800 shadow-xl overflow-hidden flex flex-col">
-                    <div className="flex justify-between items-center mb-6">
-                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                            <Terminal size={20} className="text-green-400" />
-                            Consola de Logs (SIP)
-                        </h3>
-                        <button
-                            onClick={loadSipLogs}
-                            disabled={isRefreshingLogs}
-                            className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 transition-colors disabled:opacity-50"
-                            title="Actualizar Logs"
-                        >
-                            <RefreshCw size={16} className={isRefreshingLogs ? "animate-spin" : ""} />
-                        </button>
-                    </div>
+                {/* Real-time System/SIP Logs - Superadmin ONLY */}
+                {isRole('superadmin') && (
+                    <div className="bg-gray-900 p-6 rounded-xl border border-gray-800 shadow-xl overflow-hidden flex flex-col">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                <Terminal size={20} className="text-green-400" />
+                                Consola de Logs (SIP)
+                            </h3>
+                            <button
+                                onClick={loadSipLogs}
+                                disabled={isRefreshingLogs}
+                                className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 transition-colors disabled:opacity-50"
+                                title="Actualizar Logs"
+                            >
+                                <RefreshCw size={16} className={isRefreshingLogs ? "animate-spin" : ""} />
+                            </button>
+                        </div>
 
-                    <div className="bg-black/50 rounded-lg p-4 font-mono text-[11px] text-green-500/90 h-[300px] overflow-y-auto space-y-1">
-                        {sipLogs.length === 0 ? (
-                            <div className="text-gray-600 italic">Esperando logs del sistema...</div>
-                        ) : (
-                            sipLogs.map((log, i) => {
-                                let color = "text-green-500/80";
-                                if (log.includes("ERROR") || log.includes("❌")) color = "text-red-400";
-                                if (log.includes("WARN") || log.includes("⚠️")) color = "text-yellow-400";
-                                if (log.includes("✅")) color = "text-emerald-400 font-bold";
-                                if (log.includes("☎️")) color = "text-blue-400 font-bold";
+                        <div className="bg-black/50 rounded-lg p-4 font-mono text-[11px] text-green-500/90 h-[300px] overflow-y-auto space-y-1">
+                            {sipLogs.length === 0 ? (
+                                <div className="text-gray-600 italic">Esperando logs del sistema...</div>
+                            ) : (
+                                sipLogs.map((log, i) => {
+                                    let color = "text-green-500/80";
+                                    if (log.includes("ERROR") || log.includes("❌")) color = "text-red-400";
+                                    if (log.includes("WARN") || log.includes("⚠️")) color = "text-yellow-400";
+                                    if (log.includes("✅")) color = "text-emerald-400 font-bold";
+                                    if (log.includes("☎️")) color = "text-blue-400 font-bold";
 
-                                return <div key={i} className={`${color} leading-relaxed border-b border-white/5 pb-1`}>
-                                    <span className="text-gray-600 mr-2">[{i}]</span>
-                                    {log}
-                                </div>;
-                            })
-                        )}
-                    </div>
-                    <div className="mt-4 flex justify-between items-center text-[10px] text-gray-500 uppercase tracking-widest font-bold">
-                        <span>Estado: Conectado</span>
-                        <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                            Live System
+                                    return <div key={i} className={`${color} leading-relaxed border-b border-white/5 pb-1`}>
+                                        <span className="text-gray-600 mr-2">[{i}]</span>
+                                        {log}
+                                    </div>;
+                                })
+                            )}
+                        </div>
+                        <div className="mt-4 flex justify-between items-center text-[10px] text-gray-500 uppercase tracking-widest font-bold">
+                            <span>Estado: Conectado</span>
+                            <div className="flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                Live System
+                            </div>
                         </div>
                     </div>
-                </div>
+                )}
             </div>
         </div>
     );

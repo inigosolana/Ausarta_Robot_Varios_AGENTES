@@ -5,7 +5,7 @@ import { useAuth } from "../contexts/AuthContext";
 import type { AgentConfig, AIConfig, Empresa, UserProfile } from "../types";
 
 const AgentListView: React.FC = () => {
-    const { isRole } = useAuth();
+    const { profile, isRole } = useAuth();
     const [empresas, setEmpresas] = useState<Empresa[]>([]);
     const [agents, setAgents] = useState<(AgentConfig & { ai_config?: AIConfig })[]>([]);
     const [companyUsers, setCompanyUsers] = useState<UserProfile[]>([]);
@@ -24,10 +24,13 @@ const AgentListView: React.FC = () => {
     const loadEmpresas = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
-                .from("empresas")
-                .select("*")
-                .order("created_at", { ascending: true });
+            let query = supabase.from("empresas").select("*").order("created_at", { ascending: true });
+
+            if (!isRole('superadmin') && profile?.empresa_id) {
+                query = query.eq('id', profile.empresa_id);
+            }
+
+            const { data, error } = await query;
             if (error) throw error;
             setEmpresas(data || []);
         } catch (err) {

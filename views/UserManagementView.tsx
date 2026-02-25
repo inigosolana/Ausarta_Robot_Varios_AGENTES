@@ -102,12 +102,6 @@ const UserManagementView: React.FC = () => {
         // Admins are locked to their company
         const finalEmpresaId = isRole('superadmin') ? newEmpresaId : currentProfile?.empresa_id;
 
-        // Validate role permissions
-        if (newRole === 'superadmin') {
-            alert('No puedes crear otro superadmin');
-            return;
-        }
-
         setCreating(true);
         setInviteSuccess(false);
         try {

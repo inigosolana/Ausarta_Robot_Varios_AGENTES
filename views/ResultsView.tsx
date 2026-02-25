@@ -42,7 +42,9 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
             const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
             const params = new URLSearchParams();
 
-            const finalEmpresaId = selectedEmpresaId !== 'all' ? selectedEmpresaId : (profile?.empresa_id);
+            const finalEmpresaId = selectedEmpresaId !== 'all'
+                ? selectedEmpresaId
+                : (isRole('superadmin') ? undefined : profile?.empresa_id);
             if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
             if (agentId) params.append('agent_id', String(agentId));
             if (campaignId) params.append('campaign_id', String(campaignId));
