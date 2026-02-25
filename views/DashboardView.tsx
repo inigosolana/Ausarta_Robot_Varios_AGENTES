@@ -112,7 +112,9 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
             setIsLoading(true);
             const params = new URLSearchParams();
 
-            const finalEmpresaId = empresaId || (isRole('superadmin') ? undefined : profile?.empresa_id);
+            const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
+            const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
+            const finalEmpresaId = empresaId || (isPlatformOwner ? undefined : profile?.empresa_id);
             if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
             if (agentId) params.append('agent_id', String(agentId));
             if (campaignId) params.append('campaign_id', String(campaignId));

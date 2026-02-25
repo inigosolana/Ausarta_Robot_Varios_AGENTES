@@ -6,6 +6,10 @@ import type { AgentConfig, AIConfig, Empresa, UserProfile } from "../types";
 
 const AgentListView: React.FC = () => {
     const { profile, isRole } = useAuth();
+
+    const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
+    const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
+
     const [empresas, setEmpresas] = useState<Empresa[]>([]);
     const [agents, setAgents] = useState<(AgentConfig & { ai_config?: AIConfig })[]>([]);
     const [companyUsers, setCompanyUsers] = useState<UserProfile[]>([]);
@@ -26,7 +30,7 @@ const AgentListView: React.FC = () => {
         try {
             let query = supabase.from("empresas").select("*").order("created_at", { ascending: true });
 
-            if (!isRole('superadmin') && profile?.empresa_id) {
+            if (!isPlatformOwner && profile?.empresa_id) {
                 query = query.eq('id', profile.empresa_id);
             }
 
@@ -238,7 +242,7 @@ const AgentListView: React.FC = () => {
                     <h1 className="text-2xl font-bold text-gray-900">Empresas y Clientes</h1>
                     <p className="text-gray-500 text-sm">Visualiza y gestiona la estructura multitenant</p>
                 </div>
-                {isRole('superadmin') && (
+                {isPlatformOwner && (
                     <button
                         onClick={handleCreateEmpresa}
                         className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-xl hover:bg-gray-800 transition-all font-medium text-sm shadow-lg shadow-gray-200"
@@ -251,7 +255,7 @@ const AgentListView: React.FC = () => {
 
             {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-3">
-                {isRole('superadmin') && (
+                {isPlatformOwner && (
                     <select
                         value={selectedResponsable}
                         onChange={(e) => setSelectedResponsable(e.target.value)}
@@ -294,7 +298,7 @@ const AgentListView: React.FC = () => {
                         )
                         .map((empresa) => (
                             <div key={empresa.id} onClick={() => { setSelectedEmpresa(empresa); loadCompanyData(empresa.id!); setSearch(""); }} className="group relative bg-white rounded-2xl border border-gray-100 p-8 flex flex-col items-center text-center space-y-4 hover:border-blue-400 hover:shadow-2xl hover:shadow-blue-500/10 transition-all cursor-pointer">
-                                {isRole('superadmin') && (
+                                {isPlatformOwner && (
                                     <div className="absolute top-4 right-4 flex gap-2">
                                         <button onClick={(e) => handleEditEmpresa(e, empresa)} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-blue-50 text-gray-300 hover:text-blue-500 rounded-xl transition-all">
                                             <Settings size={18} />

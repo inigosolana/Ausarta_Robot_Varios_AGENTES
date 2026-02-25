@@ -39,7 +39,10 @@ interface Agent {
 }
 
 export function CampaignsView() {
-  const { profile } = useAuth();
+  const { profile, isRole } = useAuth();
+  const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && (profile?.role === 'admin' || profile?.role === 'superadmin');
+  const isPlatformOwner = profile?.role === 'superadmin' || isAusartaAdmin;
+
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -118,7 +121,7 @@ export function CampaignsView() {
   const loadAgents = async () => {
     try {
       let url = `${API_URL}/api/agents`;
-      if (profile && profile.role !== 'superadmin' && profile.empresa_id) {
+      if (profile && !isPlatformOwner && profile.empresa_id) {
         url += `?empresa_id=${profile.empresa_id}`;
       }
       const res = await fetch(url);
@@ -136,7 +139,7 @@ export function CampaignsView() {
   const loadCampaigns = async () => {
     try {
       let url = `${API_URL}/api/campaigns`;
-      if (profile && profile.role !== 'superadmin' && profile.empresa_id) {
+      if (profile && !isPlatformOwner && profile.empresa_id) {
         url += `?empresa_id=${profile.empresa_id}`;
       }
       const res = await fetch(url);
@@ -230,11 +233,13 @@ export function CampaignsView() {
         if (leads.length === 0) throw new Error("Please enter at least one valid phone number");
       }
 
+      const selectedAgentData = agents.find(a => String(a.id) === String(selectedAgent));
+
       const payload = {
         campaign: {
           name,
           agent_id: selectedAgent,
-          empresa_id: profile?.empresa_id,
+          empresa_id: selectedAgentData ? (selectedAgentData as any).empresa_id : profile?.empresa_id,
           scheduled_time: scheduledTime ? new Date(scheduledTime).toISOString() : null,
           status: 'pending',
           retry_interval: retryInterval || 60

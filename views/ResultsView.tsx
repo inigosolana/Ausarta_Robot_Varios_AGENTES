@@ -29,6 +29,10 @@ interface Props {
 
 const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, hideHeader }) => {
     const { profile, isRole } = useAuth();
+
+    const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
+    const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
+
     const [results, setResults] = useState<SurveyResult[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -44,7 +48,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
 
             const finalEmpresaId = selectedEmpresaId !== 'all'
                 ? selectedEmpresaId
-                : (isRole('superadmin') ? undefined : profile?.empresa_id);
+                : (isPlatformOwner ? undefined : profile?.empresa_id);
             if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
             if (agentId) params.append('agent_id', String(agentId));
             if (campaignId) params.append('campaign_id', String(campaignId));
@@ -64,7 +68,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
 
     useEffect(() => {
         const fetchEmpresas = async () => {
-            if (isRole('superadmin')) {
+            if (isPlatformOwner) {
                 const { data } = await supabase.from('empresas').select('*').order('nombre');
                 setEmpresas(data || []);
             }
@@ -140,7 +144,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
 
             {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-4">
-                {isRole('superadmin') && !empresaId && (
+                {isPlatformOwner && !empresaId && (
                     <select
                         value={selectedEmpresaId}
                         onChange={(e) => setSelectedEmpresaId(e.target.value === 'all' ? 'all' : Number(e.target.value))}

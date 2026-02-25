@@ -36,7 +36,14 @@ const UsageView: React.FC = () => {
     const loadData = async () => {
         try {
             setIsLoading(true);
-            const queryParams = (isRole('superadmin')) ? '' : (profile?.empresa_id ? `?empresa_id=${profile.empresa_id}` : '');
+            const params = new URLSearchParams();
+            const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
+            const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
+
+            if (!isPlatformOwner && profile?.empresa_id) {
+                params.append('empresa_id', String(profile.empresa_id));
+            }
+            const queryParams = params.toString() ? `?${params.toString()}` : '';
 
             const [intRes, usageRes, limitsRes] = await Promise.all([
                 fetch(`${API_URL}/dashboard/integrations`),

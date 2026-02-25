@@ -7,6 +7,10 @@ import AgentFormView from "./AgentFormView";
 
 const AgentManagementView: React.FC = () => {
     const { profile, isRole } = useAuth();
+
+    const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
+    const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
+
     const [empresas, setEmpresas] = useState<Empresa[]>([]);
     const [agents, setAgents] = useState<(AgentConfig & { ai_config?: AIConfig; empresas?: Empresa })[]>([]);
     const [loading, setLoading] = useState(true);
@@ -24,7 +28,7 @@ const AgentManagementView: React.FC = () => {
         try {
             // Load empresas
             let empQuery = supabase.from("empresas").select("*").order("nombre");
-            if (!isRole('superadmin') && profile?.empresa_id) {
+            if (!isPlatformOwner && profile?.empresa_id) {
                 empQuery = empQuery.eq('id', profile.empresa_id);
             }
             const { data: empData } = await empQuery;
@@ -33,7 +37,7 @@ const AgentManagementView: React.FC = () => {
             // Load agents - if admin of a company, filter by empresa_id
             let query = supabase.from("agent_config").select("*, empresas(*)").order("created_at", { ascending: false });
 
-            if (isRole('admin') && !isRole('superadmin') && profile?.empresa_id) {
+            if (isRole('admin') && !isPlatformOwner && profile?.empresa_id) {
                 // Admin can only see their company's agents
                 query = query.eq("empresa_id", profile.empresa_id);
             }
@@ -60,7 +64,7 @@ const AgentManagementView: React.FC = () => {
 
     // Determine which empresa_id to use for new agents
     const getNewAgentEmpresaId = (): number | undefined => {
-        if (isRole('admin') && !isRole('superadmin') && profile?.empresa_id) {
+        if (isRole('admin') && !isPlatformOwner && profile?.empresa_id) {
             return profile.empresa_id;
         }
         if (selectedEmpresaId !== "all") {
@@ -93,8 +97,7 @@ const AgentManagementView: React.FC = () => {
         );
     }
 
-    const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
-    const isSuperadmin = isRole('superadmin') || isAusartaAdmin;
+    const isSuperadmin = isPlatformOwner;
     const canCreate = isSuperadmin || (isRole('admin') && profile?.empresa_id);
 
     return (

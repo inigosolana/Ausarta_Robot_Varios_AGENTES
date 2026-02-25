@@ -11,6 +11,10 @@ import { ALL_MODULES } from '../types';
 
 const UserManagementView: React.FC = () => {
     const { profile: currentProfile, isRole } = useAuth();
+
+    const isAusartaAdmin = currentProfile?.empresas?.nombre === 'Ausarta' && isRole('admin');
+    const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
+
     const [users, setUsers] = useState<(UserProfile & { permissions: UserPermission[], empresas?: Empresa | null })[]>([]);
     const [loading, setLoading] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
@@ -36,17 +40,15 @@ const UserManagementView: React.FC = () => {
             // 1. Load empresas based on role
             let empQuery = supabase.from('empresas').select('*').order('nombre');
 
-            // Non-superadmins and non-Ausarta-admins only see their own company
-            const isAusartaAdmin = currentProfile?.empresas?.nombre === 'Ausarta' && isRole('admin');
-            if (!isRole('superadmin') && !isAusartaAdmin && currentProfile?.empresa_id) {
+            if (!isPlatformOwner && currentProfile?.empresa_id) {
                 empQuery = empQuery.eq('id', currentProfile.empresa_id);
             }
 
             const { data: empData } = await empQuery;
             if (empData) setEmpresas(empData);
 
-            // Pre-select empresa for admins
-            if (isRole('admin') && !isRole('superadmin') && currentProfile?.empresa_id) {
+            // Pre-select empresa for regular admins only
+            if (isRole('admin') && !isPlatformOwner && currentProfile?.empresa_id) {
                 setNewEmpresaId(currentProfile.empresa_id);
             }
 
@@ -57,7 +59,7 @@ const UserManagementView: React.FC = () => {
                 .order('created_at', { ascending: false });
 
             // Non-superadmins and non-Ausarta-admins only see users from their own company
-            if (!isRole('superadmin') && !isAusartaAdmin && currentProfile?.empresa_id) {
+            if (!isPlatformOwner && currentProfile?.empresa_id) {
                 userQuery = userQuery.eq('empresa_id', currentProfile.empresa_id);
             }
 
@@ -100,9 +102,8 @@ const UserManagementView: React.FC = () => {
             return;
         }
 
-        // Admins are locked to their company
-        const isAusartaAdmin = currentProfile?.empresas?.nombre === 'Ausarta' && isRole('admin');
-        const finalEmpresaId = (isRole('superadmin') || isAusartaAdmin) ? newEmpresaId : currentProfile?.empresa_id;
+        // Admins are locked to their company unless platform owner
+        const finalEmpresaId = isPlatformOwner ? newEmpresaId : currentProfile?.empresa_id;
 
         // Check admin limit if newRole is admin
         if (newRole === 'admin') {
@@ -439,7 +440,7 @@ const UserManagementView: React.FC = () => {
                             {/* Expanded Permissions */}
                             {expandedUser === user.id && (
                                 <div className="px-4 pb-4 border-t border-gray-100 pt-4">
-                                    {(isRole('superadmin') || user.role === 'user') ? (
+                                    {(isPlatformOwner || user.role === 'user') ? (
                                         <>
                                             <div className="flex items-center justify-between mb-3">
                                                 <div className="flex items-center gap-2">
@@ -559,7 +560,7 @@ const UserManagementView: React.FC = () => {
                                             <option value="user">Usuario (Solo Resultados)</option>
                                         </select>
                                     </div>
-                                    {(isRole('superadmin') || (currentProfile?.empresas?.nombre === 'Ausarta' && isRole('admin'))) ? (
+                                    {isPlatformOwner ? (
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label>
                                             <select

@@ -26,6 +26,10 @@ const defaultAIConfig: AIConfig = {
 
 const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
     const { isRole, hasPermission, profile } = useAuth();
+
+    const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
+    const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
+
     const isEditing = !!agent?.id;
     const [empresas, setEmpresas] = useState<Empresa[]>([]);
 
@@ -56,10 +60,11 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
             loadAIConfig(agent.id);
         }
         loadTemplates();
-        if (isRole('superadmin')) {
+
+        if (isPlatformOwner) {
             loadEmpresas();
         }
-    }, []);
+    }, [isEditing, agent?.id, profile, isPlatformOwner]);
 
     const loadEmpresas = async () => {
         const { data } = await supabase.from('empresas').select('*').order('nombre');
@@ -297,7 +302,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
                                     />
                                 </div>
-                                {isRole('superadmin') ? (
+                                {isPlatformOwner ? (
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-1">Empresa / Proyecto *</label>
                                         <select
@@ -325,7 +330,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                 )}
                             </div>
 
-                            {isRole('superadmin') && (
+                            {isPlatformOwner && (
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-1">Caso de Uso</label>
                                     <input
@@ -370,7 +375,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                         <Brain size={20} className="text-purple-500" />
                                         Instrucciones (Prompt)
                                     </h3>
-                                    {(hasPermission('ai_prompt_generator') || isRole('superadmin')) && (
+                                    {(hasPermission('ai_prompt_generator') || isPlatformOwner) && (
                                         <button
                                             onClick={() => setShowAiPromptModal(true)}
                                             className="flex items-center gap-1.5 px-3 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-full border border-purple-200 transition-colors"

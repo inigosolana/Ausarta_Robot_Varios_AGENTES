@@ -35,6 +35,8 @@ import LoginView from './views/LoginView';
 
 const App: React.FC = () => {
   const { user, profile, loading, signOut, hasPermission, isRole } = useAuth();
+  const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
+  const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
   const [currentView, setCurrentView] = useState<ViewState | 'results'>('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isCalling, setIsCalling] = useState(false);
@@ -179,7 +181,7 @@ const App: React.FC = () => {
           <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
             Build
           </div>
-          {(isRole('superadmin') || (profile?.empresas?.nombre === 'Ausarta' && isRole('admin'))) && hasPermission('empresas') && (
+          {isPlatformOwner && hasPermission('empresas') && (
             <SidebarItem
               icon={<Building2 size={18} />}
               label="Empresas"
@@ -215,7 +217,7 @@ const App: React.FC = () => {
               collapsed={!isSidebarOpen}
             />
           )}
-          {(isRole('superadmin') || (profile?.empresas?.nombre === 'Ausarta' && isRole('admin'))) && hasPermission('models') && (
+          {isPlatformOwner && hasPermission('models') && (
             <SidebarItem
               icon={<Cpu size={18} />}
               label="AI Models"
@@ -224,7 +226,7 @@ const App: React.FC = () => {
               collapsed={!isSidebarOpen}
             />
           )}
-          {(isRole('superadmin') || (profile?.empresas?.nombre === 'Ausarta' && isRole('admin'))) && hasPermission('telephony') && (
+          {isPlatformOwner && hasPermission('telephony') && (
             <SidebarItem
               icon={<PhoneCall size={18} />}
               label="Telephony"
