@@ -1,0 +1,139 @@
+{
+    "name": "Invitacion_Usuarios_Ausarta_Robot_v3",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "invitar-ausarta-robot-v3",
+                "responseMode": "responseNode"
+            },
+            "id": "webhook-123456789",
+            "name": "Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://afrrxeibtrwjaiqmhytu.supabase.co/auth/v1/admin/users",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "apikey",
+                            "value": "[SUPABASE_SERVICE_ROLE_KEY]"
+                        },
+                        {
+                            "name": "Authorization",
+                            "value": "Bearer [SUPABASE_SERVICE_ROLE_KEY]"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json"
+            },
+            "id": "supabase-auth-123",
+            "name": "Supabase_Auth",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://afrrxeibtrwjaiqmhytu.supabase.co/rest/v1/user_profiles",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "apikey",
+                            "value": "[SUPABASE_SERVICE_ROLE_KEY]"
+                        },
+                        {
+                            "name": "Authorization",
+                            "value": "Bearer [SUPABASE_SERVICE_ROLE_KEY]"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json"
+            },
+            "id": "supabase-profile-123",
+            "name": "Supabase_Profile",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1
+        },
+        {
+            "parameters": {
+                "fromEmail": "instalaciones@ausarta.es",
+                "html": "<div style=\"font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;\">\n    <div style=\"background-color: #004a99; padding: 20px; text-align: center;\">\n        <img src=\"https://ausarta.es/wp-content/uploads/2023/06/Logo-Ausarta-Blanco.png\" alt=\"Ausarta\" style=\"height: 50px;\">\n    </div>\n    <div style=\"padding: 30px;\">\n        <h2 style=\"color: #004a99;\">¡Bienvenido a Ausarta Robot!</h2>\n        <p>Hola <strong>{{ $node['Webhook'].json.body.full_name }}</strong>,</p>\n        <p>Tu cuenta de acceso a la plataforma <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\n        <p>A continuación tienes tus credenciales de acceso temporales:</p>\n        <div style=\"background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd;\">\n            <p style=\"margin: 5px 0;\"><strong>Usuario:</strong> {{ $node['Webhook'].json.body.email }}</p>\n            <p style=\"margin: 5px 0;\"><strong>Contraseña temporal:</strong> {{ $node['Webhook'].json.body.password || 'Robot2025!' }}</p>\n        </div>\n        <p><strong>Pasos para comenzar:</strong></p>\n        <ol>\n            <li>Accede a la plataforma en <a href=\"https://app.ausarta.net\" style=\"color: #004a99; font-weight: bold;\">app.ausarta.net</a>.</li>\n            <li>Inicia sesión con las credenciales indicadas arriba.</li>\n            <li>Por seguridad, te recomendamos cambiar tu contraseña en el apartado de configuración una vez dentro.</li>\n        </ol>\n        <div style=\"text-align: center; margin-top: 30px;\">\n            <a href=\"https://app.ausarta.net\" style=\"background-color: #004a99; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold;\">Acceder a la Plataforma</a>\n        </div>\n        <hr style=\"border: 0; border-top: 1px solid #eee; margin: 30px 0;\">\n        <p style=\"font-size: 13px; color: #666;\">\n            Si tienes cualquier duda o problema técnico durante el acceso, por favor ponte en contacto con nosotros escribiendo un correo a <a href=\"mailto:clientes@ausarta.es\" style=\"color: #004a99;\">clientes@ausarta.es</a>.\n        </p>\n    </div>\n</div>",
+                "isHtml": true,
+                "subject": "Bienvenido a Ausarta Robot - Tu acceso está listo"
+            },
+            "id": "email-123456789",
+            "name": "Enviar_Email_Bienvenida",
+            "type": "n8n-nodes-base.emailSend",
+            "typeVersion": 2.1,
+            "credentials": {
+                "smtp": {
+                    "id": "D1gBpu0AEp8AueAF",
+                    "name": "SMTP account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "respondWith": "text"
+            },
+            "id": "respond-node-123",
+            "name": "Respond_to_Frontend",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Supabase_Auth",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Supabase_Auth": {
+            "main": [
+                [
+                    {
+                        "node": "Supabase_Profile",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Supabase_Profile": {
+            "main": [
+                [
+                    {
+                        "node": "Enviar_Email_Bienvenida",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Enviar_Email_Bienvenida": {
+            "main": [
+                [
+                    {
+                        "node": "Respond_to_Frontend",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}
