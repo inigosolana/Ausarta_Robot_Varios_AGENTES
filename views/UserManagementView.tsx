@@ -104,6 +104,20 @@ const UserManagementView: React.FC = () => {
         const isAusartaAdmin = currentProfile?.empresas?.nombre === 'Ausarta' && isRole('admin');
         const finalEmpresaId = (isRole('superadmin') || isAusartaAdmin) ? newEmpresaId : currentProfile?.empresa_id;
 
+        // Check admin limit if newRole is admin
+        if (newRole === 'admin') {
+            const selectedEmpresa = empresas.find(e => e.id === Number(finalEmpresaId));
+            // Ausarta (ID 1 usually, but check by name) can have many admins
+            if (selectedEmpresa && selectedEmpresa.nombre !== 'Ausarta') {
+                const existingAdmins = users.filter(u => u.empresa_id === selectedEmpresa.id && u.role === 'admin').length;
+                const limit = selectedEmpresa.max_admins || 1;
+                if (existingAdmins >= limit) {
+                    alert(`Esta empresa ya tiene el máximo permitido de administradores (${limit}). Para añadir más, el administrador principal debe habilitarlo (Servicio Premium).`);
+                    return;
+                }
+            }
+        }
+
         setCreating(true);
         setInviteSuccess(false);
         try {

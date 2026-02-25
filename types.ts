@@ -43,6 +43,7 @@ export interface Empresa {
   id?: number;
   nombre: string;
   responsable: string;
+  max_admins?: number;
   created_at?: string;
   updated_at?: string;
 }

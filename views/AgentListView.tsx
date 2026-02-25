@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect } from "react";
-import { Bot, Loader2, Search, Building2, ChevronRight, ArrowLeft, Users, Mail, Trash2 } from "lucide-react";
+import { Bot, Loader2, Search, Building2, ChevronRight, ArrowLeft, Users, Mail, Trash2, Settings } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import type { AgentConfig, AIConfig, Empresa, UserProfile } from "../types";
@@ -88,6 +88,27 @@ const AgentListView: React.FC = () => {
             loadEmpresas();
         } catch (err) {
             alert("Error al crear la empresa");
+        }
+    };
+
+    const handleEditEmpresa = async (e: React.MouseEvent, emp: Empresa) => {
+        e.stopPropagation();
+        const nombre = prompt("Editar nombre de la empresa:", emp.nombre);
+        if (nombre === null) return;
+        const responsable = prompt("Editar responsable:", emp.responsable);
+        if (responsable === null) return;
+        const maxAdminsVal = prompt("Editar límite de administradores:", String(emp.max_admins || 1));
+        if (maxAdminsVal === null) return;
+        const max_admins = parseInt(maxAdminsVal);
+
+        try {
+            const { error } = await supabase.from("empresas")
+                .update({ nombre, responsable, max_admins })
+                .eq("id", emp.id);
+            if (error) throw error;
+            loadEmpresas();
+        } catch (err) {
+            alert("Error al actualizar la empresa");
         }
     };
 
@@ -274,9 +295,14 @@ const AgentListView: React.FC = () => {
                         .map((empresa) => (
                             <div key={empresa.id} onClick={() => { setSelectedEmpresa(empresa); loadCompanyData(empresa.id!); setSearch(""); }} className="group relative bg-white rounded-2xl border border-gray-100 p-8 flex flex-col items-center text-center space-y-4 hover:border-blue-400 hover:shadow-2xl hover:shadow-blue-500/10 transition-all cursor-pointer">
                                 {isRole('superadmin') && (
-                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteEmpresa(empresa.id!); }} className="absolute top-4 right-4 p-2 opacity-0 group-hover:opacity-100 hover:bg-red-50 text-gray-300 hover:text-red-500 rounded-xl transition-all">
-                                        <Trash2 size={18} />
-                                    </button>
+                                    <div className="absolute top-4 right-4 flex gap-2">
+                                        <button onClick={(e) => handleEditEmpresa(e, empresa)} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-blue-50 text-gray-300 hover:text-blue-500 rounded-xl transition-all">
+                                            <Settings size={18} />
+                                        </button>
+                                        <button onClick={(e) => { e.stopPropagation(); handleDeleteEmpresa(empresa.id!); }} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-red-50 text-gray-300 hover:text-red-500 rounded-xl transition-all">
+                                            <Trash2 size={18} />
+                                        </button>
+                                    </div>
                                 )}
 
                                 <div className="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center group-hover:bg-blue-600 group-hover:rotate-6 transition-all duration-500 shadow-inner">
@@ -285,7 +311,10 @@ const AgentListView: React.FC = () => {
 
                                 <div>
                                     <h3 className="text-xl font-bold text-gray-900 group-hover:text-blue-600 transition-colors uppercase tracking-tight">{empresa.nombre}</h3>
-                                    <p className="text-sm text-gray-500 font-medium">Responsable: {empresa.responsable}</p>
+                                    <p className="text-sm text-gray-500 font-medium whitespace-nowrap overflow-hidden text-ellipsis">Responsable: {empresa.responsable}</p>
+                                    <p className="text-[10px] text-gray-400 mt-1 uppercase font-bold tracking-widest">
+                                        Límite Admins: {empresa.nombre === 'Ausarta' ? 'Ilimitado' : (empresa.max_admins || 1)}
+                                    </p>
                                 </div>
 
                                 <div className="pt-4 flex items-center gap-2 text-xs font-bold text-blue-500 opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all">
