@@ -545,7 +545,7 @@ const UserManagementView: React.FC = () => {
                                             <option value="user">Usuario (Solo Resultados)</option>
                                         </select>
                                     </div>
-                                    {isRole('superadmin') ? (
+                                    {(isRole('superadmin') || (currentProfile?.empresas?.nombre === 'Ausarta' && isRole('admin'))) ? (
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label>
                                             <select
