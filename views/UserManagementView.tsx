@@ -36,8 +36,9 @@ const UserManagementView: React.FC = () => {
             // 1. Load empresas based on role
             let empQuery = supabase.from('empresas').select('*').order('nombre');
 
-            // Non-superadmins only see their own company
-            if (!isRole('superadmin') && currentProfile?.empresa_id) {
+            // Non-superadmins and non-Ausarta-admins only see their own company
+            const isAusartaAdmin = currentProfile?.empresas?.nombre === 'Ausarta' && isRole('admin');
+            if (!isRole('superadmin') && !isAusartaAdmin && currentProfile?.empresa_id) {
                 empQuery = empQuery.eq('id', currentProfile.empresa_id);
             }
 
@@ -55,8 +56,8 @@ const UserManagementView: React.FC = () => {
                 .select('*, empresas(*)')
                 .order('created_at', { ascending: false });
 
-            // Non-superadmins only see users from their own company
-            if (!isRole('superadmin') && currentProfile?.empresa_id) {
+            // Non-superadmins and non-Ausarta-admins only see users from their own company
+            if (!isRole('superadmin') && !isAusartaAdmin && currentProfile?.empresa_id) {
                 userQuery = userQuery.eq('empresa_id', currentProfile.empresa_id);
             }
 
@@ -100,7 +101,8 @@ const UserManagementView: React.FC = () => {
         }
 
         // Admins are locked to their company
-        const finalEmpresaId = isRole('superadmin') ? newEmpresaId : currentProfile?.empresa_id;
+        const isAusartaAdmin = currentProfile?.empresas?.nombre === 'Ausarta' && isRole('admin');
+        const finalEmpresaId = (isRole('superadmin') || isAusartaAdmin) ? newEmpresaId : currentProfile?.empresa_id;
 
         setCreating(true);
         setInviteSuccess(false);
@@ -314,8 +316,19 @@ const UserManagementView: React.FC = () => {
     const canManageUser = (targetUser: UserProfile): boolean => {
         if (!currentProfile) return false;
         if (currentProfile.id === targetUser.id) return false; // Can't manage self
+
+        // Special case: Only Superadmins can manage Ausarta Admins
+        if (targetUser.role === 'admin' && targetUser.empresas?.nombre === 'Ausarta') {
+            return currentProfile.role === 'superadmin';
+        }
+
         if (currentProfile.role === 'superadmin') return true;
-        if (currentProfile.role === 'admin' && targetUser.role === 'user') return true;
+
+        // Admins can manage regular users of their own company
+        if (currentProfile.role === 'admin' && targetUser.role === 'user') {
+            return currentProfile.empresa_id === targetUser.empresa_id;
+        }
+
         return false;
     };
 

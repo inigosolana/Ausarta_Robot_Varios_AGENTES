@@ -179,7 +179,7 @@ const App: React.FC = () => {
           <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
             Build
           </div>
-          {isRole('superadmin') && hasPermission('empresas') && (
+          {(isRole('superadmin') || (profile?.empresas?.nombre === 'Ausarta' && isRole('admin'))) && hasPermission('empresas') && (
             <SidebarItem
               icon={<Building2 size={18} />}
               label="Empresas"
@@ -215,7 +215,7 @@ const App: React.FC = () => {
               collapsed={!isSidebarOpen}
             />
           )}
-          {isRole('superadmin') && hasPermission('models') && (
+          {(isRole('superadmin') || (profile?.empresas?.nombre === 'Ausarta' && isRole('admin'))) && hasPermission('models') && (
             <SidebarItem
               icon={<Cpu size={18} />}
               label="AI Models"
@@ -224,7 +224,7 @@ const App: React.FC = () => {
               collapsed={!isSidebarOpen}
             />
           )}
-          {isRole('superadmin') && hasPermission('telephony') && (
+          {(isRole('superadmin') || (profile?.empresas?.nombre === 'Ausarta' && isRole('admin'))) && hasPermission('telephony') && (
             <SidebarItem
               icon={<PhoneCall size={18} />}
               label="Telephony"
