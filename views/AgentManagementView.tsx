@@ -93,7 +93,8 @@ const AgentManagementView: React.FC = () => {
         );
     }
 
-    const isSuperadmin = isRole('superadmin');
+    const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
+    const isSuperadmin = isRole('superadmin') || isAusartaAdmin;
     const canCreate = isSuperadmin || (isRole('admin') && profile?.empresa_id);
 
     return (
@@ -128,7 +129,7 @@ const AgentManagementView: React.FC = () => {
 
             {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-3">
-                {/* Empresa filter (only for superadmin) */}
+                {/* Empresa filter (for superadmin and Ausarta admins) */}
                 {isSuperadmin && (
                     <select
                         value={selectedEmpresaId}
