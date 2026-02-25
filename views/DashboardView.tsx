@@ -97,7 +97,7 @@ const IntegrationCard: React.FC<{ integ: Integration }> = ({ integ }) => (
 );
 
 const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, hideIntegrations }) => {
-    const { profile } = useAuth();
+    const { profile, isRole } = useAuth();
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [recentCalls, setRecentCalls] = useState<Call[]>([]);
     const [integrations, setIntegrations] = useState<Integration[]>([]);
@@ -112,7 +112,7 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
             setIsLoading(true);
             const params = new URLSearchParams();
 
-            const finalEmpresaId = empresaId || (profile?.empresa_id);
+            const finalEmpresaId = empresaId || (isRole('superadmin') ? undefined : profile?.empresa_id);
             if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
             if (agentId) params.append('agent_id', String(agentId));
             if (campaignId) params.append('campaign_id', String(campaignId));

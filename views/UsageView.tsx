@@ -36,7 +36,7 @@ const UsageView: React.FC = () => {
     const loadData = async () => {
         try {
             setIsLoading(true);
-            const queryParams = profile?.empresa_id ? `?empresa_id=${profile.empresa_id}` : '';
+            const queryParams = (isRole('superadmin')) ? '' : (profile?.empresa_id ? `?empresa_id=${profile.empresa_id}` : '');
 
             const [intRes, usageRes, limitsRes] = await Promise.all([
                 fetch(`${API_URL}/dashboard/integrations`),
