@@ -54,16 +54,16 @@ const AgentListView: React.FC = () => {
                 .eq("empresa_id", empresaId)
                 .order("created_at", { ascending: false });
 
-            const agentsWithAI = await Promise.all(
-                (agentsData || []).map(async (agent: AgentConfig) => {
-                    const { data: aiData } = await supabase
-                        .from("ai_config")
-                        .select("*")
-                        .eq("agent_id", agent.id)
-                        .maybeSingle();
-                    return { ...agent, ai_config: aiData as AIConfig | undefined };
-                })
-            );
+            const agentIds = (agentsData || []).map(a => a.id);
+            const { data: aiConfigsData } = await supabase
+                .from("ai_config")
+                .select("*")
+                .in("agent_id", agentIds);
+
+            const agentsWithAI = (agentsData || []).map(agent => ({
+                ...agent,
+                ai_config: (aiConfigsData || []).find(c => c.agent_id === agent.id)
+            }));
             setAgents(agentsWithAI);
 
             // Load Users

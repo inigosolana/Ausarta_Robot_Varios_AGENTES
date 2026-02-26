@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from supabase import create_client, Client
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 # --- CONFIGURACIÓN DE LOGS ---
 logging.basicConfig(
@@ -43,6 +44,7 @@ else:
         supabase = None
 
 app = FastAPI(title="Ausarta Voice Agent API", version="1.0.0")
+executor = ThreadPoolExecutor(max_workers=20)
 
 # CORS
 app.add_middleware(
@@ -212,94 +214,78 @@ IMPORTANTE: El usuario quiere ACTUALIZAR este agente con el nuevo request. Modif
 async def get_dashboard_stats(empresa_id: Optional[int] = None, agent_id: Optional[int] = None, campaign_id: Optional[int] = None):
     if not supabase: return {"error": "Database not connected"}
     
-    try:
-        # Total llamadas
-        query_total = supabase.table("encuestas").select("count", count="exact")
+    def fetch_total():
+        q = supabase.table("encuestas").select("id", count="exact")
+        if empresa_id: q = q.eq("empresa_id", empresa_id)
+        if agent_id: q = q.eq("agent_id", agent_id)
+        if campaign_id: q = q.eq("campaign_id", campaign_id)
+        r = q.execute()
+        return r.count if r.count is not None else 0
+
+    def fetch_completed():
+        q = supabase.table("encuestas").select("id", count="exact").eq("completada", 1)
+        if empresa_id: q = q.eq("empresa_id", empresa_id)
+        if agent_id: q = q.eq("agent_id", agent_id)
+        if campaign_id: q = q.eq("campaign_id", campaign_id)
+        r = q.execute()
+        return r.count if r.count is not None else 0
+
+    def fetch_pending():
         if empresa_id:
-            query_total = query_total.eq("empresa_id", empresa_id)
-        if agent_id:
-            query_total = query_total.eq("agent_id", agent_id)
-        if campaign_id:
-            query_total = query_total.eq("campaign_id", campaign_id)
-        res_total = query_total.execute()
-        total_calls = res_total.count if res_total.count is not None else 0
-        
-        # Completadas
-        query_comp = supabase.table("encuestas").select("count", count="exact").eq("completada", 1)
-        if empresa_id:
-            query_comp = query_comp.eq("empresa_id", empresa_id)
-        if agent_id:
-            query_comp = query_comp.eq("agent_id", agent_id)
-        if campaign_id:
-            query_comp = query_comp.eq("campaign_id", campaign_id)
-        res_completed = query_comp.execute()
-        completed_calls = res_completed.count if res_completed.count is not None else 0
-        
-        # Pendientes (Campaign Leads)
-        # Para leads pendientes, buscamos los que pertenecen a campañas de esta empresa
-        if empresa_id:
-            # Primero obtenemos IDs de campañas de la empresa
             camps_res = supabase.table("campaigns").select("id").eq("empresa_id", empresa_id).execute()
             camp_ids = [c['id'] for c in camps_res.data]
             if camp_ids:
-                res_pending = supabase.table("campaign_leads").select("count", count="exact").eq("status", "pending").in_("campaign_id", camp_ids).execute()
-                pending_calls = res_pending.count if res_pending.count is not None else 0
-            else:
-                pending_calls = 0
-        else:
-            res_pending = supabase.table("campaign_leads").select("count", count="exact").eq("status", "pending").execute()
-            pending_calls = res_pending.count if res_pending.count is not None else 0
-        
-        # Promedios
-        query_scores = supabase.table("encuestas").select("puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez").not_.is_("puntuacion_comercial", "null")
-        if empresa_id:
-            query_scores = query_scores.eq("empresa_id", empresa_id)
-        if agent_id:
-            query_scores = query_scores.eq("agent_id", agent_id)
-        if campaign_id:
-            query_scores = query_scores.eq("campaign_id", campaign_id)
-        res_scores = query_scores.execute()
-        
-        avg_comercial = 0
-        avg_instalador = 0
-        avg_rapidez = 0
-        avg_overall = 0
-        count = len(res_scores.data)
-        
+                r = supabase.table("campaign_leads").select("id", count="exact").eq("status", "pending").in_("campaign_id", camp_ids).execute()
+                return r.count if r.count is not None else 0
+            return 0
+        r = supabase.table("campaign_leads").select("id", count="exact").eq("status", "pending").execute()
+        return r.count if r.count is not None else 0
+
+    def fetch_scores():
+        q = supabase.table("encuestas").select("puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez").not_.is_("puntuacion_comercial", "null")
+        if empresa_id: q = q.eq("empresa_id", empresa_id)
+        if agent_id: q = q.eq("agent_id", agent_id)
+        if campaign_id: q = q.eq("campaign_id", campaign_id)
+        return q.execute().data
+
+    def check_question_based():
+        try:
+            target_agent_id = agent_id
+            if not target_agent_id and campaign_id:
+                camp_res = supabase.table("campaigns").select("agent_id").eq("id", campaign_id).maybeSingle().execute()
+                if camp_res.data: target_agent_id = camp_res.data.get("agent_id")
+            if target_agent_id:
+                agent_res = supabase.table("agent_config").select("instructions").eq("id", target_agent_id).maybeSingle().execute()
+                if agent_res.data:
+                    inst = agent_res.data.get("instructions", "").lower()
+                    return "pregunta 1" in inst or "pregunta 2" in inst or "pregunta:" in inst
+        except: pass
+        return False
+
+    try:
+        loop = asyncio.get_event_loop()
+        results = await asyncio.gather(
+            loop.run_in_executor(executor, fetch_total),
+            loop.run_in_executor(executor, fetch_completed),
+            loop.run_in_executor(executor, fetch_pending),
+            loop.run_in_executor(executor, fetch_scores),
+            loop.run_in_executor(executor, check_question_based)
+        )
+        total_calls, completed_calls, pending_calls, scores_data, is_question_based = results
+
+        avg_comercial = 0; avg_instalador = 0; avg_rapidez = 0; avg_overall = 0
+        count = len(scores_data)
         if count > 0:
-            sum_com = sum(r['puntuacion_comercial'] or 0 for r in res_scores.data)
-            sum_ins = sum(r['puntuacion_instalador'] or 0 for r in res_scores.data)
-            sum_rap = sum(r['puntuacion_rapidez'] or 0 for r in res_scores.data)
-            
+            sum_com = sum(r['puntuacion_comercial'] or 0 for r in scores_data)
+            sum_ins = sum(r['puntuacion_instalador'] or 0 for r in scores_data)
+            sum_rap = sum(r['puntuacion_rapidez'] or 0 for r in scores_data)
             avg_comercial = sum_com / count
             avg_instalador = sum_ins / count
             avg_rapidez = sum_rap / count
             avg_overall = (avg_comercial + avg_instalador + avg_rapidez) / 3
 
-        # Determinar si es basado en preguntas
-        is_question_based = False
-        try:
-            if agent_id:
-                agent_res = supabase.table("agent_config").select("instructions").eq("id", agent_id).maybeSingle().execute()
-                if agent_res.data:
-                    inst = agent_res.data.get("instructions", "").lower()
-                    if "pregunta 1" in inst or "pregunta 2" in inst or "pregunta:" in inst:
-                        is_question_based = True
-            elif campaign_id:
-                camp_res = supabase.table("campaigns").select("agent_id").eq("id", campaign_id).maybeSingle().execute()
-                if camp_res.data and camp_res.data.get("agent_id"):
-                    agent_res = supabase.table("agent_config").select("instructions").eq("id", camp_res.data["agent_id"]).maybeSingle().execute()
-                    if agent_res.data:
-                        inst = agent_res.data.get("instructions", "").lower()
-                        if "pregunta 1" in inst or "pregunta 2" in inst or "pregunta:" in inst:
-                            is_question_based = True
-        except Exception as e_qb:
-            print(f"Error checking question based: {e_qb}")
-
         return {
-            "total_calls": total_calls,
-            "completed_calls": completed_calls,
-            "pending_calls": pending_calls,
+            "total_calls": total_calls, "completed_calls": completed_calls, "pending_calls": pending_calls,
             "is_question_based": is_question_based,
             "avg_scores": {
                 "comercial": round(float(avg_comercial), 1),
@@ -309,14 +295,16 @@ async def get_dashboard_stats(empresa_id: Optional[int] = None, agent_id: Option
             }
         }
     except Exception as e:
-        print(f"Error stats: {e}")
+        logger.error(f"Error stats: {e}")
         return {"total_calls": 0, "completed_calls": 0, "pending_calls": 0, "avg_scores": {}}
 
 @app.get("/api/dashboard/recent-calls")
 async def get_recent_calls(empresa_id: Optional[int] = None, agent_id: Optional[int] = None, campaign_id: Optional[int] = None):
     if not supabase: return []
     try:
-        query = supabase.table("encuestas").select("*")
+        # Load only necessary columns (excluding transcription which is huge)
+        cols = "id, telefono, campaign_name, nombre_cliente, fecha, status, llm_model, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez"
+        query = supabase.table("encuestas").select(cols)
         if empresa_id:
             query = query.eq("empresa_id", empresa_id)
         if agent_id:
@@ -350,7 +338,9 @@ async def get_all_results(empresa_id: Optional[int] = None, agent_id: Optional[i
     if not supabase: return []
     try:
         # Traemos todos los resultados de encuestas
-        query = supabase.table("encuestas").select("*")
+        # Exclude transcription from list view for performance
+        cols = "id, telefono, fecha, completada, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, campaign_id, campaign_name, agent_id, status, llm_model, seconds_used, empresa_id"
+        query = supabase.table("encuestas").select(cols)
         if empresa_id:
             query = query.eq("empresa_id", empresa_id)
         if agent_id:
@@ -431,7 +421,9 @@ async def get_usage_stats(empresa_id: Optional[int] = None):
         query = supabase.table("encuestas").select("llm_model, seconds_used, status")
         if empresa_id:
             query = query.eq("empresa_id", empresa_id)
-        res = query.execute()
+        
+        loop = asyncio.get_event_loop()
+        res = await loop.run_in_executor(executor, query.execute)
         
         total_seconds = sum(r.get('seconds_used') or 0 for r in res.data)
         
@@ -918,6 +910,18 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
         print(f"Error creando campaña: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@app.get("/api/results/{result_id}/transcription")
+async def get_result_transcription(result_id: int):
+    if not supabase: return {"error": "Database not connected"}
+    try:
+        res = supabase.table("encuestas").select("transcription").eq("id", result_id).maybeSingle().execute()
+        if res.data:
+            return {"transcription": res.data.get("transcription")}
+        return {"transcription": None}
+    except Exception as e:
+        logger.error(f"Error fetching transcription: {e}")
+        return {"error": str(e)}
+
 @app.get("/api/campaigns")
 async def list_campaigns(empresa_id: Optional[int] = None):
     if not supabase: return []
@@ -937,12 +941,17 @@ async def list_campaigns(empresa_id: Optional[int] = None):
 async def get_campaign_details(campaign_id: int):
     if not supabase: return {"error": "No DB"}
     try:
-        # 1. Obtener datos de la campaña
-        res_camp = supabase.table("campaigns").select("*").eq("id", campaign_id).execute()
+        loop = asyncio.get_event_loop()
+        res_camp, res_leads = await asyncio.gather(
+            loop.run_in_executor(executor, supabase.table("campaigns").select("*").eq("id", campaign_id).execute),
+            loop.run_in_executor(executor, supabase.table("campaign_leads").select("*").eq("campaign_id", campaign_id).execute)
+        )
+        
         if not res_camp.data:
             return JSONResponse(status_code=404, content={"error": "Campaign not found"})
         
         campaign = res_camp.data[0]
+        leads = res_leads.data
         
         # Check if agent is question-based
         is_question_based = False
@@ -952,36 +961,25 @@ async def get_campaign_details(campaign_id: int):
                 inst_lower = agent_res.data[0].get("instructions", "").lower()
                 if "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower:
                     is_question_based = True
-        except Exception as e:
-            print(f"Error fetching agent for question detection: {e}")
+        except: pass
             
         campaign["is_question_based"] = is_question_based
         
-        # 2. Obtener leads asociados
-        res_leads = supabase.table("campaign_leads").select("*").eq("campaign_id", campaign_id).execute()
-        leads = res_leads.data
-        
-        # 3. Obtener encuestas asociadas para enriquecer datos
+        # 3. Obtener encuestas asociadas para enriquecer datos (without transcription)
         call_ids = [l['call_id'] for l in leads if l.get('call_id')]
         surveys_map = {}
         if call_ids:
             try:
-                # Traer encuestas en batch (puede requerir paginación si son muchas, pero para MVP vale)
-                res_surveys = supabase.table("encuestas").select("*").in_("id", call_ids).execute()
+                cols = "id, status, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios"
+                res_surveys = await loop.run_in_executor(executor, supabase.table("encuestas").select(cols).in_("id", call_ids).execute)
                 for s in res_surveys.data:
                     surveys_map[s['id']] = s
             except Exception as e:
-                print(f"Error fetching surveys for campaign: {e}")
+                logger.error(f"Error fetching surveys for campaign: {e}")
 
         # 4. Calcular estadísticas y enriquecer leads
         stats = {
-            "total": len(leads),
-            "pending": 0,
-            "calling": 0,
-            "called": 0,
-            "completed": 0,
-            "failed": 0,
-            "incomplete": 0
+            "total": len(leads), "pending": 0, "calling": 0, "called": 0, "completed": 0, "failed": 0, "incomplete": 0
         }
         
         # Métricas de calidad (Promedios)
@@ -990,7 +988,6 @@ async def get_campaign_details(campaign_id: int):
         sum_rap = 0; count_rap = 0
         
         enriched_leads = []
-        
         for l in leads:
             status = l['status']
             if status in stats:

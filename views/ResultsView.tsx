@@ -287,7 +287,21 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                                 </button>
                                             )}
                                             <button
-                                                onClick={() => setViewingTranscript(row)}
+                                                onClick={async () => {
+                                                    if (!row.transcription) {
+                                                        try {
+                                                            const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api';
+                                                            const res = await fetch(`${API_URL}/results/${row.id}/transcription`);
+                                                            if (res.ok) {
+                                                                const data = await res.json();
+                                                                row.transcription = data.transcription;
+                                                            }
+                                                        } catch (e) {
+                                                            console.error("Error fetching transcript", e);
+                                                        }
+                                                    }
+                                                    setViewingTranscript({ ...row });
+                                                }}
                                                 className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1 text-xs"
                                             >
                                                 <FileText size={16} /> Transcript
