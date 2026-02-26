@@ -84,6 +84,7 @@ class DynamicAgent(Agent):
     def __init__(self, room_name: str, agent_config: dict) -> None:
         self.server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
         self.data_saved = False
+        self.room_name = room_name
         self.agent_config = agent_config
         self.greeting = agent_config.get("greeting", "Buenas, ¿tiene un momento?")
         
@@ -185,7 +186,7 @@ DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
 
     @function_tool(name="finalizar_llamada")
     async def _http_tool_finalizar_llamada(
-        self, context: RunContext, nombre_sala: str, mensaje_despedida: Optional[str] = None
+        self, context: RunContext, mensaje_despedida: Optional[str] = None
     ) -> str | None:
         """
         Herramienta para colgar la llamada.
@@ -195,14 +196,14 @@ DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
              logger.info(f"🗣️ Despedida (log): {mensaje_despedida}")
         
         async def delayed_hangup():
-            logger.info("⏳ Esperando 5.0s para asegurar que se escuche la despedida...")
+            logger.info(f"⏳ Esperando 5.0s para asegurar que se escuche la despedida en {self.room_name}...")
             await asyncio.sleep(5.0) 
             url = f"{self.server_url}/colgar"
-            payload = {"nombre_sala": nombre_sala}
+            payload = {"nombre_sala": self.room_name}
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.post(url, timeout=5, json=payload) as resp:
-                        logger.info(f"✂️ COLGANDO: {nombre_sala}")
+                        logger.info(f"✂️ COLGANDO: {self.room_name}")
             except Exception as e:
                 logger.error(f"Error Colgar: {e}")
                 
@@ -272,9 +273,9 @@ async def entrypoint(ctx: JobContext):
         # --- CONTROL DE DUPLICIDAD ---
         # Si ya hay otro agente (nosotros mismos u otra instancia) como participante, salimos.
         # LiveKit suele tener al agente como un participante de tipo AGENT.
-        agent_participants = [p for p in ctx.room.remote_participants.values() if p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT]
+        agent_participants = [p for p in ctx.room.remote_participants.values() if getattr(p, 'kind', None) == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT or p.identity.startswith("agent-")]
         if len(agent_participants) > 0:
-            logger.warning(f"⚠️ [{job_id}] Ya hay un agente en la sala {room_name}. Cancelando esta instancia para evitar doble voz.")
+            logger.warning(f"⚠️ [{job_id}] Ya hay un agente en la sala {room_name} ({agent_participants[0].identity}). Cancelando esta instancia para evitar doble voz.")
             return
 
         logger.info(f"✅ [{job_id}] Conectado (Instancia única).")
@@ -333,6 +334,21 @@ async def entrypoint(ctx: JobContext):
         def on_disconnect():
             logger.info(f"🔌 [{job_id}] Desconectado.")
             finished.set()
+
+        @ctx.room.on("participant_disconnected")
+        def on_participant_disconnected(participant: rtc.RemoteParticipant):
+            logger.info(f"[{job_id}] Participante {participant.identity} se desconectó.")
+            if not participant.identity.startswith("agent-"):
+                logger.info(f"[{job_id}] O Cliente se fue de la sala {room_name}. Procediendo a colgar la sala completamente.")
+                # Llamar API para destruir sala directamente, el servidor cortará a este agente de inmediato.
+                async def force_hangup_room():
+                    url = f"{agent_instance.server_url}/colgar"
+                    try:
+                         async with aiohttp.ClientSession() as http_sess:
+                             await http_sess.post(url, timeout=5, json={"nombre_sala": room_name})
+                    except Exception as he:
+                         logger.error(f"Error forzando cuelgue: {he}")
+                asyncio.create_task(force_hangup_room())
 
         # Iniciar sesión
         await session.start(agent=agent_instance, room=ctx.room)

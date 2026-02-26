@@ -1169,7 +1169,7 @@ async def process_campaigns():
                     print(f"📞 [Worker] Llamando a {phone} (Encuesta ID: {encuesta_id})...", flush=True)
                     
                     sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
-                    room_name = f"encuesta_{encuesta_id}"
+                    room_name = f"encuesta_{encuesta_id}_{int(time.time())}"
                     
                     try:
                         await lkapi.room.create_room(api.CreateRoomRequest(name=room_name))
