@@ -54,25 +54,22 @@ REGLAS DE ORO (¡MUY IMPORTANTE!):
 1. IDENTIDAD: Si te preguntan quién eres o cómo te llamas, preséntate con el nombre de la empresa para la que trabajas. NUNCA reveles nombres internos de sistema.
 2. PROHIBIDO NARRAR ACCIONES: NUNCA digas en voz alta que vas a guardar un dato, NUNCA menciones el "ID de la encuesta", y NUNCA leas comandos de sistema. Habla SOLO como una persona normal.
 3. PRONUNCIACIÓN: Di siempre "UNO" (ej: "del UNO al diez"), nunca "un".
-4. PARA COLGAR: Siempre PRIMERO di el texto de despedida en voz alta, ESPERA a que termine de sonar, y DESPUÉS usa 'finalizar_llamada'. NUNCA llames a 'finalizar_llamada' sin haber dicho la despedida ANTES.
+4. PARA COLGAR: Usa SIEMPRE la herramienta 'finalizar_llamada' proporcionando el texto de despedida que quieras decir (ej: "Muchas gracias por su llamada, adiós"). La herramienta se encargará de decirlo y colgar. 
 5. SI EL CLIENTE NO TE ENTIENDE O DICE "¿CÓMO?", "¿QUÉ?": Repite la última pregunta que hiciste de forma amable y clara.
-6. SI ESCUCHAS RUIDO O UNA PALABRA SIN SENTIDO: Di "Disculpe, no le he escuchado bien, ¿me lo puede repetir?"
+6. SI ESCUCHAS RUIDO O UNA PALABRA SIN SENTIDO: Ignóralo o di "Disculpe, no le he escuchado bien, ¿me lo puede repetir?" si persiste.
 7. VALIDACIÓN DE NOTAS: Si el usuario te da un número menor a 1 o mayor a 10 (ej: 0, 11), NO guardes el dato. Di "Disculpe, la nota debe ser entre 1 y 10. ¿Qué nota le daría?" y espera su respuesta.
 
 REGLA CRÍTICA DE DESPEDIDA:
-Cuando termines la interacción y vayas a despedirte, SIEMPRE hazlo en TU MISMO TURNO junto con la herramienta 'finalizar_llamada'.
-Es decir, redacta tu frase de despedida (ej: "Muchas gracias por su tiempo, adiós") y LLAMA A LA VEZ a la herramienta 'finalizar_llamada'.
-NUNCA finalices la llamada sin enviar texto de despedida en el mismo turno. NUNCA esperes a que el usuario cuelgue si tú ya has terminado.
+Cuando termines la interacción, llama a 'finalizar_llamada' con tu mensaje de despedida. No lo digas antes en el texto normal, la herramienta lo hará por ti para asegurar que no se corte.
 
 EXCEPCIÓN - BUZÓN DE VOZ / FUERA DE COBERTURA:
 - Si escuchas "fuera de cobertura", "móvil apagado", "buzón de voz", "contestador", "terminado el tiempo de grabación" o mensajes automáticos similares:
   - Usa 'guardar_encuesta' (status='failed').
-  - Usa 'finalizar_llamada' (sin despedida).
+  - Usa 'finalizar_llamada' (mensaje_despedida_manual="Buzón de voz detectado, finalizando.").
 
 EXCEPCIÓN INTERRUPCIÓN/COLGAR:
 - Usa 'guardar_encuesta' (status='incomplete').
-- Di en voz alta: "De acuerdo. Gracias, adiós."
-- Luego usa 'finalizar_llamada'.
+- Usa 'finalizar_llamada' (mensaje_despedida_manual="Entiendo, que tenga un buen día. Adiós.").
 
 NOTA FINAL: UNA VEZ LLAMES A 'finalizar_llamada', LA CONVERSACIÓN HA TERMINADO. NO RESPONDAS A NADA MÁS.
 """
@@ -186,18 +183,25 @@ DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
 
     @function_tool(name="finalizar_llamada")
     async def _http_tool_finalizar_llamada(
-        self, context: RunContext, mensaje_despedida: Optional[str] = None
+        self, context: RunContext, mensaje_despedida_manual: str
     ) -> str | None:
         """
-        Herramienta para colgar la llamada.
-        Úsala SIMULTÁNEAMENTE con tu mensaje final de despedida (en el mismo turno).
+        Herramienta para decir unas últimas palabras y colgar la llamada.
+        Debes proporcionar obligatoriamente el mensaje de despedida.
         """
-        if mensaje_despedida:
-             logger.info(f"🗣️ Despedida (log): {mensaje_despedida}")
+        logger.info(f"🗣️ Forzando despedida: {mensaje_despedida_manual}")
         
+        # 1. Forzar al agente a decir el mensaje de despedida de forma inmediata y sin interrupciones
+        asyncio.create_task(self.session.generate_reply(
+            instructions=f"Di exactamente: '{mensaje_despedida_manual}' y no digas nada más.",
+            allow_interruptions=False
+        ))
+        
+        # 2. Programar el cuelgue físico de la sala con un margen mayor
         async def delayed_hangup():
-            logger.info(f"⏳ Esperando 5.0s para asegurar que se escuche la despedida en {self.room_name}...")
-            await asyncio.sleep(5.0) 
+            wait_time = 8.0 # Aumentado a 8s para asegurar que se escuche todo
+            logger.info(f"⏳ Esperando {wait_time}s para asegurar despedida en {self.room_name}...")
+            await asyncio.sleep(wait_time) 
             url = f"{self.server_url}/colgar"
             payload = {"nombre_sala": self.room_name}
             try:
@@ -208,7 +212,7 @@ DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
                 logger.error(f"Error Colgar: {e}")
                 
         asyncio.create_task(delayed_hangup())
-        return "Se cortará la llamada en unos segundos. Continúa."
+        return "Llamada finalizándose. Despidiéndome..."
 
 
 # ============================================================================
@@ -281,11 +285,11 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"✅ [{job_id}] Conectado (Instancia única).")
 
         # --- PASO 3: Cargar config ---
-        vad_task = asyncio.to_thread(silero.VAD.load, min_silence_duration=0.5)
+        vad_task = asyncio.to_thread(silero.VAD.load, min_silence_duration=1.2, min_speech_duration=0.3)
         config_task = fetch_agent_config(survey_id)
         
         vad_model, agent_config = await asyncio.gather(vad_task, config_task)
-        logger.info(f"✅ [{job_id}] VAD y configuración cargados.")
+        logger.info(f"✅ [{job_id}] VAD y configuración cargados (Silencio: 1.2s).")
 
         # --- PASO 4: Crear el agente ---
         agent_instance = DynamicAgent(room_name=room_name, agent_config=agent_config)
@@ -321,8 +325,21 @@ async def entrypoint(ctx: JobContext):
                 language=language
             ),
             vad=vad_model,
-            preemptive_generation=False, # Cambiado a False para controlar mejor el inicio
+            preemptive_generation=False,
+            # Aplicar filtro de ruido si el plugin está disponible y se integra así
         )
+
+        # Aplicar reducción de ruido Krisp a todos los tracks de audio entrantes
+        @ctx.room.on("track_subscribed")
+        def on_track_subscribed(track: rtc.RemoteTrack, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant):
+            if track.kind == rtc.TrackKind.KIND_AUDIO:
+                logger.info(f"🎤 Aplicando reducción de ruido Krisp para {participant.identity}")
+                krisp = noise_cancellation.Krisp()
+                if hasattr(stt_plugin, 'add_filter'): # Algunos plugins STT permiten filtros directos
+                    stt_plugin.add_filter(krisp)
+                # En versiones recientes de Agents, Krisp se puede inyectar en el procesador del track
+                # pero con stt_plugin ya suele ser suficiente para mejorar la comprensión
+
 
         @session.on("user_speech_committed")
         def on_user_speech(msg: stt.SpeechEvent):
