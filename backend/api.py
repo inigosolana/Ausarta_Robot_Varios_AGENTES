@@ -561,9 +561,11 @@ import random
 
 @app.post("/api/calls/outbound")
 async def make_outbound_call(request: dict):
-    """Endpoint para llamadas de prueba desde el Dashboard"""
+    """Endpoint para llamadas de prueba o llamadas disparadas por Webhook de n8n"""
     phone = request.get("phoneNumber")
     agent_id = request.get("agentId", "1")
+    lead_id = request.get("leadId") # Pass empty if test call
+    campaign_id = request.get("campaignId")
     
     if not phone:
         return JSONResponse(status_code=400, content={"error": "Phone number is required"})
@@ -584,7 +586,7 @@ async def make_outbound_call(request: dict):
 
             encuesta_data = {
                 "telefono": phone,
-                "nombre_cliente": "Prueba Dashboard",
+                "nombre_cliente": request.get("customerName", "Prueba Dashboard"),
                 "fecha": datetime.now(timezone.utc).isoformat(),
                 "status": "initiated",
                 "completada": 0,
@@ -593,6 +595,15 @@ async def make_outbound_call(request: dict):
             }
             res_enc = supabase.table("encuestas").insert(encuesta_data).execute()
             encuesta_id = res_enc.data[0]['id']
+            
+            # --- n8n Integration: Ligar lead id a la encuesta
+            if lead_id:
+                supabase.table("campaign_leads").update({
+                    "call_id": encuesta_id,
+                    "status": "calling",
+                    "last_call_at": datetime.now(timezone.utc).isoformat()
+                }).eq("id", lead_id).execute()
+
         else:
             encuesta_id = random.randint(1000, 9999)
             
@@ -1082,251 +1093,10 @@ async def get_agent_config_by_survey(survey_id: int):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# --- WORKER DE LLAMADAS (Background) ---
-
-async def process_campaigns():
-    """Bucle principal que busca leads pendientes y lanza llamadas DE UNA EN UNA (Secuencial)"""
-    global supabase  # Necesario para poder recrear el cliente si se pierde la conexión
-    print("🚀 Iniciando Worker de Campañas SECUENCIAL (Supabase)...")
-    
-    while True:
-        try:
-            # 1. Buscar campañas activas
-            res_camps = supabase.table("campaigns").select("*").eq("status", "active").execute()
-            active_campaigns = res_camps.data
-            
-            for camp in active_campaigns:
-                campaign_id = camp['id']
-                max_retries = camp['retries_count']
-                retry_interval = camp['retry_interval'] or 3600 # Fallback
-
-                # 2. Buscar 1 LEAD pendiente (Limit 1 para secuencialidad estricta)
-                now_str = datetime.utcnow().isoformat()
-                
-                # Prioridad 1: Pending
-                res_leads = supabase.table("campaign_leads").select("*") \
-                    .eq("campaign_id", campaign_id) \
-                    .eq("status", "pending") \
-                    .limit(1).execute()
-                
-                leads_to_call = res_leads.data
-                
-                # Prioridad 2: Retries (si no hay pending)
-                # NOTA: 'rejected' NO se reintenta (el usuario dijo que no quiere).
-                # Solo se reintentan: failed (móvil apagado/buzón/ocupado), unreached (no contesta/cuelga antes), incomplete (encuesta a medias)
-                if not leads_to_call:
-                     res_retries = supabase.table("campaign_leads").select("*") \
-                        .eq("campaign_id", campaign_id) \
-                        .in_("status", ["failed", "unreached", "incomplete"]) \
-                        .lt("retries_attempted", max_retries) \
-                        .lt("next_retry_at", now_str) \
-                        .limit(1).execute()
-                     leads_to_call = res_retries.data
-
-                if not leads_to_call:
-                    continue # Siguiente campaña
-
-                # Procesar EL lead (solo 1)
-                lead = leads_to_call[0]
-                lead_id = lead['id']
-                phone = lead['phone_number']
-                name = lead['customer_name']
-                initial_status = lead['status']
-                
-                call_type = "REINTENTO" if initial_status in ['failed', 'unreached', 'incomplete'] else "LLAMADA NUEVA"
-                
-                print(f"🔄 [Worker] Procesando lead {phone} (Campaña {campaign_id}) | Tipo: {call_type}...")
-
-                # Actualizar a 'calling'
-                supabase.table("campaign_leads").update({
-                    "status": "calling", 
-                    "last_call_at": datetime.utcnow().isoformat(),
-                    "retries_attempted": lead['retries_attempted'] + 1
-                }).eq("id", lead_id).execute()
-                
-                # 1. Crear entrada en 'encuestas'
-                encuesta_data = {
-                    "telefono": phone,
-                    "nombre_cliente": name,
-                    "fecha": datetime.now(timezone.utc).isoformat(),
-                    "status": "initiated",
-                    "completada": 0,
-                    "agent_id": lead.get("agent_id") or camp.get("agent_id"),
-                    "empresa_id": camp.get("empresa_id")
-                }
-                res_enc = supabase.table("encuestas").insert(encuesta_data).execute()
-                encuesta_id = res_enc.data[0]['id']
-                
-                # 2. Vincular lead
-                supabase.table("campaign_leads").update({"call_id": encuesta_id}).eq("id", lead_id).execute()
-
-                # 3. Lanzar Llamada y ESPERAR
-                try:
-                    logger.info(f"📞 [Worker] Llamando a {phone} (Encuesta ID: {encuesta_id})...")
-                    print(f"📞 [Worker] Llamando a {phone} (Encuesta ID: {encuesta_id})...", flush=True)
-                    
-                    sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
-                    room_name = f"encuesta_{encuesta_id}_{int(time.time())}"
-                    
-                    try:
-                        await lkapi.room.create_room(api.CreateRoomRequest(name=room_name))
-                    except: pass 
-
-                    try:
-                        sip_res = await lkapi.sip.create_sip_participant(api.CreateSIPParticipantRequest(
-                            sip_trunk_id=sip_trunk_id,
-                            sip_call_to=phone,
-                            room_name=room_name,
-                            participant_identity=f"user_{phone}",
-                            participant_name=name or "Cliente"
-                        ))
-                        logger.info(f"✅ [Worker] SIP Marcado: {sip_res}")
-                        print(f"✅ [Worker] SIP Marcado: {sip_res}", flush=True)
-                    except Exception as sip_err:
-                        logger.error(f"❌ [Worker] Error SIP Participant: {sip_err}")
-                        print(f"❌ [Worker] Error SIP Participant: {sip_err}", flush=True)
-                        raise sip_err
-
-                    # 4. FORZAR UNIÓNN DEL AGENTE (Igual que en llamada de prueba)
-                    # Esto asegura que LiveKit mande al agente a la sala inmediatamente
-                    print(f"🚀 [Worker] Despachando agente genérico a sala {room_name}...")
-                    try:
-                        await lkapi.agent_dispatch.create_dispatch(api.CreateAgentDispatchRequest(
-                            agent_name="",
-                            room=room_name
-                        ))
-                    except Exception as e:
-                        print(f"⚠️ [Worker] No se pudo despachar agente (ya existe?): {e}")
-                    
-                    # --- WAIT LOOP (ESPERA ACTIVA) ---
-                    print(f"⏳ [Worker] Esperando finalización de llamada {encuesta_id}...")
-                    
-                    max_wait_seconds = 600 # 10 minutos máximo de llamada
-                    waited = 0
-                    call_finished = False
-                    room_gone_count = 0  # Contador de veces consecutivas que la sala no existe
-                    
-                    while waited < max_wait_seconds:
-                        await asyncio.sleep(5) # Polling cada 5s
-                        waited += 5
-                        
-                        try:
-                            # --- CHECK 1: Verificar si la sala LiveKit aún existe ---
-                            # Si la sala ya no existe, la llamada terminó (cuelgue temprano, no contesta, etc.)
-                            try:
-                                rooms = await lkapi.room.list_rooms(api.ListRoomsRequest(names=[room_name]))
-                                room_exists = len(rooms.rooms) > 0 if rooms and rooms.rooms else False
-                            except:
-                                room_exists = False  # Error consultando = asumimos que no existe
-                            
-                            if not room_exists:
-                                room_gone_count += 1
-                                # Esperamos 2 checks consecutivos (10s) para confirmar que realmente se fue
-                                if room_gone_count >= 2:
-                                    print(f"🔍 [Worker] Sala {room_name} NO existe (confirmado). Verificando estado final...")
-                                    # Dar 5s extra para que el fallback del agente grabe el status
-                                    await asyncio.sleep(5)
-                            else:
-                                room_gone_count = 0  # Reset si la sala existe
-                            
-                            # --- CHECK 2: Consultar estado en Supabase ---
-                            r_status = supabase.table("encuestas").select("status, completada").eq("id", encuesta_id).execute()
-                            if r_status.data:
-                                s = r_status.data[0]
-                                st = s.get('status')
-                                comp = s.get('completada')
-                                
-                                # Criterio de fin: status final O completada=1
-                                if comp == 1 or st in ['completed', 'failed', 'rejected', 'rejected_opt_out', 'incomplete', 'unreached']:
-                                    print(f"✅ [Worker] Llamada {encuesta_id} terminó con estado: {st}")
-                                    call_finished = True
-                                    
-                                    # --- PROPAGACIÓN DE ESTADO ---
-                                    lead_update_payload = {"status": st}
-                                    
-                                    # Solo reintentar: failed (apagado/buzón/ocupado), unreached (no contesta), incomplete (a medias)
-                                    # NO reintentar: rejected (usuario dijo no), completed (encuesta terminada)
-                                    if st in ['failed', 'unreached', 'incomplete']:
-                                        next_retry_time = (datetime.utcnow() + timedelta(seconds=retry_interval)).isoformat()
-                                        lead_update_payload["next_retry_at"] = next_retry_time
-                                        print(f"🔄 [Worker] Programando reintento para {phone} en {retry_interval}s")
-                                    
-                                    supabase.table("campaign_leads").update(lead_update_payload).eq("id", lead_id).execute()
-                                    break
-                                
-                                # Si la sala desapareció pero el status sigue en 'initiated', el agente no guardó nada
-                                # Esto pasa cuando cuelgan antes de coger (USER_REJECTED)
-                                if room_gone_count >= 2 and st == 'initiated':
-                                    print(f"⚠️ [Worker] Sala desaparecida + status 'initiated' = No contesta/Colgó antes")
-                                    # Marcar como unreached
-                                    supabase.table("encuestas").update({
-                                        "status": "unreached",
-                                        "comentarios": "No contestó o colgó antes de responder"
-                                    }).eq("id", encuesta_id).execute()
-                                    
-                                    lead_update_payload = {
-                                        "status": "unreached",
-                                        "next_retry_at": (datetime.utcnow() + timedelta(seconds=retry_interval)).isoformat()
-                                    }
-                                    supabase.table("campaign_leads").update(lead_update_payload).eq("id", lead_id).execute()
-                                    print(f"🔄 [Worker] Programando reintento para {phone} en {retry_interval}s (unreached)")
-                                    call_finished = True
-                                    break
-                        
-                        except Exception as poll_error:
-                            error_msg = str(poll_error)
-                            if 'ConnectionTerminated' in error_msg or 'ConnectionReset' in error_msg:
-                                print(f"⚠️ [Worker] Conexión Supabase perdida, reconectando...")
-                                # Recrear cliente Supabase
-                                try:
-                                    from supabase import create_client
-                                    supabase = create_client(
-                                        os.getenv("SUPABASE_URL"),
-                                        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-                                    )
-                                    print("✅ [Worker] Supabase reconectado")
-                                except Exception as reconn_err:
-                                    print(f"❌ [Worker] Error reconectando Supabase: {reconn_err}")
-                            else:
-                                print(f"⚠️ [Worker] Error en polling: {poll_error}")
-                    
-                    if not call_finished:
-                        print(f"⚠️ [Worker] Timeout esperando llamada {encuesta_id} (force break)")
-                        # Forzar status update
-                        try:
-                            supabase.table("encuestas").update({"status": "unreached"}).eq("id", encuesta_id).execute()
-                            supabase.table("campaign_leads").update({
-                                "status": "unreached",
-                                "next_retry_at": (datetime.utcnow() + timedelta(seconds=retry_interval)).isoformat()
-                            }).eq("id", lead_id).execute()
-                        except Exception as timeout_err:
-                            print(f"❌ [Worker] Error actualizando timeout: {timeout_err}")
-
-                except Exception as e:
-                    print(f"❌ [Worker] Error al llamar {phone}: {e}")
-                    # Marcar retry
-                    next_retry = (datetime.utcnow() + timedelta(seconds=retry_interval)).isoformat()
-                    supabase.table("campaign_leads").update({
-                        "status": "failed", 
-                        "next_retry_at": next_retry
-                    }).eq("id", lead_id).execute()
-
-                # --- COOLDOWN ENTRE LLAMADAS ---
-                # Esperamos 120s (2 min) para asegurar que Asterisk/LiveKit liberen totalmente los recursos
-                # y para dar tiempo entre llamadas.
-                print("⏳ [Worker] Cooldown de 120s (2 min) antes del siguiente lead...")
-                await asyncio.sleep(120)
-
-        except Exception as e:
-            print(f"⚠️ [Worker Loop Error]: {e}")
-            await asyncio.sleep(30)
-            
-        await asyncio.sleep(2) # Pequeña pausa entre iteraciones de campañas
-
 @app.on_event("startup")
 async def startup_event():
     print("🌅 Iniciando API (Supabase Integration)...")
-    asyncio.create_task(process_campaigns())
+    # Background worker stopped - moved entirely to n8n logic
 
 # --- PROXY N8N ---
 @app.post("/api/n8n/invite")
