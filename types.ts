@@ -14,7 +14,8 @@ export type ViewState =
   | 'developers'
   | 'usage'
   | 'results'
-  | 'admin';
+  | 'admin'
+  | 'assistant';
 
 export type UserRole = 'superadmin' | 'admin' | 'user';
 
@@ -44,6 +45,8 @@ export interface Empresa {
   nombre: string;
   responsable: string;
   max_admins?: number;
+  crm_type?: string | null;
+  crm_webhook_url?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -120,6 +123,7 @@ export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'telephony', label: 'Telefonía' },
   { key: 'results', label: 'Resultados' },
   { key: 'usage', label: 'Uso' },
+  { key: 'assistant', label: 'Ausarta Copilot' },
   { key: 'ai_prompt_generator', label: 'Generador de Agentes AI (Extra)' },
   { key: 'premium_voice', label: 'Voz Ausarta (Acceso Premium)' },
 ];

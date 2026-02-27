@@ -58,10 +58,10 @@ interface Integration {
 }
 
 const StatCard = ({ title, value, icon: Icon, color }: any) => (
-    <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
+    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm flex items-center justify-between dark:text-white">
         <div>
-            <p className="text-sm font-medium text-gray-500">{title}</p>
-            <h3 className="text-3xl font-bold text-gray-800 mt-2">{value}</h3>
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
+            <h3 className="text-3xl font-bold text-gray-800 dark:text-gray-100 mt-2">{value}</h3>
         </div>
         <div className={`p-3 rounded-full bg-${color}-50 text-${color}-600`}>
             <Icon size={24} />
@@ -70,14 +70,14 @@ const StatCard = ({ title, value, icon: Icon, color }: any) => (
 );
 
 const IntegrationCard: React.FC<{ integ: Integration }> = ({ integ }) => (
-    <div className={`p-4 rounded-xl border flex items-center justify-between ${integ.active ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}>
+    <div className={`p-4 rounded-xl border flex items-center justify-between ${integ.active ? 'bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800'}`}>
         <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-full ${integ.active ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+            <div className={`p-2 rounded-full ${integ.active ? 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400'}`}>
                 <Zap size={18} />
             </div>
             <div>
-                <h4 className="font-semibold text-gray-900 text-sm">{integ.name}</h4>
-                <p className="text-xs text-gray-500">{integ.provider} • {integ.model || 'Cloud'}</p>
+                <h4 className="font-semibold text-gray-900 dark:text-white text-sm">{integ.name}</h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{integ.provider} • {integ.model || 'Cloud'}</p>
                 {!integ.active && integ.env_var && (
                     <code className="text-[10px] bg-red-100 text-red-700 px-1 rounded block mt-1 w-fit">
                         Missing: {integ.env_var}
@@ -148,16 +148,16 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
             {!title && (
                 <div>
                     <div className="flex items-center gap-3">
-                        <img src="/ausarta.png" alt="Logo" className="h-10 w-auto object-contain" />
-                        <h2 className="text-3xl font-bold text-gray-900">Dashboard</h2>
+                        <img src="/ausarta.png" alt="Logo" className="h-10 w-auto object-contain dark:invert" />
+                        <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h2>
                     </div>
-                    <p className="text-gray-500 mt-1">Resumen de actividad de encuestas</p>
+                    <p className="text-gray-500 dark:text-gray-400 mt-1">Resumen de actividad de encuestas</p>
                 </div>
             )}
             {title && (
                 <div>
-                    <h2 className="text-2xl font-bold text-gray-900">{title}</h2>
-                    <p className="text-gray-500 mt-1 text-sm">Resumen de actividad</p>
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{title}</h2>
+                    <p className="text-gray-500 dark:text-gray-400 mt-1 text-sm">Resumen de actividad</p>
                 </div>
             )}
 
@@ -201,7 +201,7 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
             {/* Integrations Status */}
             {!hideIntegrations && integrations.length > 0 && (
                 <div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
                         <Zap size={20} className="text-yellow-500" /> Estado de Servicios (APIs)
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -214,8 +214,8 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
 
             {/* Scores Breakdown (Only if NOT question based) */}
             {!stats?.is_question_based && stats?.avg_scores && (
-                <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm animate-fade-in">
-                    <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm animate-fade-in">
+                    <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
                         <BarChart2 className="text-blue-500" />
                         Desglose de Puntuaciones
                     </h3>
@@ -243,13 +243,13 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
             )}
 
             {/* Recent Activity */}
-            <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                <h3 className="text-lg font-bold text-gray-800 mb-4">Últimas Llamadas</h3>
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+                <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4">Últimas Llamadas</h3>
                 <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
+                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead className="bg-gray-50 dark:bg-gray-800/50">
                             <tr>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teléfono / Campaña</th>
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Teléfono / Campaña</th>
                                 <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th>
                                 <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     {stats?.is_question_based ? 'Respuestas' : 'C / I / R'}
@@ -258,9 +258,9 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
                                 <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
                             </tr>
                         </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
+                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                             {recentCalls.map((call) => (
-                                <tr key={call.id}>
+                                <tr key={call.id} className="dark:text-gray-200">
                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 flex items-center gap-2">
                                         <div className="flex flex-col">
                                             <div className="flex items-center gap-1">

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Union, List
 from dotenv import load_dotenv
 from livekit import api
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -478,7 +478,7 @@ async def finalizar_llamada(req: CallEndRequest):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.post("/guardar-encuesta")
-async def guardar_encuesta(datos: EncuestaData):
+async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTasks):
     if not supabase: return {"status": "error", "message": "No DB connection"}
     
     print(f"📥 [API] Recibiendo datos encuesta {datos.id_encuesta}: {datos.model_dump(exclude_none=True)}")
@@ -503,18 +503,17 @@ async def guardar_encuesta(datos: EncuestaData):
         if datos.status == 'completed':
             es_completada = True
             update_data["completada"] = 1 # TINYINT 1
-    
-    # Si NO viene status, deducimos 'incomplete' si hay datos parciales y no estaba ya terminada
-    elif update_data: # Si hay algo que actualizar
-         # Primero verificamos estado actual para no sobrescribir 'completed'
-         curr = supabase.table("encuestas").select("status").eq("id", datos.id_encuesta).execute()
-         if curr.data and curr.data[0]['status'] not in ('completed', 'rejected_opt_out'):
-             update_data["status"] = 'incomplete'
+    # Obtenemos estado actual e info de empresa para el CRM Webhook
+    curr = supabase.table("encuestas").select("status, empresa_id, telefono").eq("id", datos.id_encuesta).execute()
+    curr_data = curr.data[0] if curr.data else {}
 
-    if not update_data:
+    # Si no viene status, deducimos 'incomplete' si hay datos parciales y no estaba ya terminada
+    if not update_data and not datos.status:
         return {"status": "ignored", "message": "No data to update"}
-
-    # update_data["updated_at"] = datetime.utcnow().isoformat()
+        
+    if not datos.status and curr_data:
+         if curr_data.get('status') not in ('completed', 'rejected_opt_out'):
+             update_data["status"] = 'incomplete'
 
     try:
         supabase.table("encuestas").update(update_data).eq("id", datos.id_encuesta).execute()
@@ -545,14 +544,51 @@ async def guardar_encuesta(datos: EncuestaData):
 
                  next_retry = (datetime.utcnow() + timedelta(seconds=retry_seconds)).isoformat()
                  lead_update["next_retry_at"] = next_retry
-             
              supabase.table("campaign_leads").update(lead_update).eq("call_id", datos.id_encuesta).execute()
+
+             # Disparar Sink al CRM si la llamada finalizó
+             if datos.status in ('completed', 'failed', 'rejected_opt_out') and curr_data.get('empresa_id'):
+                 # Datos a enviar
+                 result_data = {
+                     "nota_comercial": datos.nota_comercial,
+                     "nota_instalador": datos.nota_instalador,
+                     "nota_rapidez": datos.nota_rapidez,
+                     "comentarios": datos.comentarios,
+                     "transcription": datos.transcription,
+                     "seconds_used": datos.seconds_used,
+                     "llm_model": datos.llm_model
+                 }
+                 background_tasks.add_task(trigger_crm_webhook, datos.id_encuesta, datos.status, result_data, curr_data['empresa_id'], curr_data.get('telefono', ''))
 
         return {"status": "ok", "updated": update_data}
     except Exception as e:
         print(f"❌ Error DB al guardar: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+async def trigger_crm_webhook(encuesta_id: int, status: str, result_data: dict, empresa_id: int, telefono: str):
+    try:
+        emp_res = supabase.table("empresas").select("crm_webhook_url, crm_type").eq("id", empresa_id).execute()
+        if not emp_res.data or not emp_res.data[0].get("crm_webhook_url"): return
+        
+        cfg = emp_res.data[0]
+        url = cfg["crm_webhook_url"]
+        
+        payload = {
+            "event": "call_completed" if status in ("completed", "rejected_opt_out") else "call_failed",
+            "encuesta_id": encuesta_id,
+            "status": status,
+            "lead": {
+                "phone": telefono
+            },
+            "results": result_data,
+            "crm_type": cfg.get("crm_type", "custom")
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, timeout=10) as resp:
+                print(f"📡 CRM Webhook [{status}] sent to {url} -> {resp.status}")
+    except Exception as e:
+        print(f"⚠️ CRM Webhook Error: {e}")
 
 # --- CONFIGURACIÓN DEL AGENTE ---
 
