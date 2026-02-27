@@ -3,6 +3,8 @@ import {
   Plus, Upload, Clock, AlertCircle, History, Trash2, X, Edit2
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+import type { Empresa } from '../types';
 import DashboardView from './DashboardView';
 import ResultsView from './ResultsView';
 
@@ -46,6 +48,8 @@ export function CampaignsView() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [empresas, setEmpresas] = useState<Empresa[]>([]);
+  const [selectedEmpresa, setSelectedEmpresa] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -115,20 +119,38 @@ export function CampaignsView() {
 
   useEffect(() => {
     loadCampaigns();
+    if (isPlatformOwner) {
+      loadEmpresas();
+    }
+  }, [profile, isPlatformOwner]);
+
+  useEffect(() => {
     loadAgents();
-  }, [profile]);
+  }, [profile, isPlatformOwner, selectedEmpresa]);
+
+  const loadEmpresas = async () => {
+    const { data } = await supabase.from('empresas').select('*').order('nombre');
+    if (data) setEmpresas(data);
+  };
 
   const loadAgents = async () => {
     try {
       let url = `${API_URL}/api/agents`;
       if (profile && !isPlatformOwner && profile.empresa_id) {
         url += `?empresa_id=${profile.empresa_id}`;
+      } else if (isPlatformOwner && selectedEmpresa) {
+        url += `?empresa_id=${selectedEmpresa}`;
       }
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setAgents(Array.isArray(data) ? data : []);
-        if (Array.isArray(data) && data.length > 0) setSelectedAgent(data[0].id);
+        // Auto-select first agent if available and selected agent is not in the list
+        if (Array.isArray(data) && data.length > 0) {
+          setSelectedAgent(data[0].id);
+        } else {
+          setSelectedAgent('');
+        }
       }
     } catch (e) {
       console.error("Error loading agents:", e);
@@ -214,7 +236,7 @@ export function CampaignsView() {
 
   const handleCreate = async () => {
     if (!name || !selectedAgent) {
-      setError('Please fill required fields');
+      setError('Por favor, completa los campos requeridos');
       return;
     }
 
@@ -227,10 +249,10 @@ export function CampaignsView() {
       if (dataSource === 'csv' && csvFile) {
         leads = await parseCSV(csvFile);
       } else if (dataSource === 'csv' && !csvFile) {
-        throw new Error("Please upload a CSV file");
+        throw new Error("Por favor, sube un archivo CSV");
       } else if (dataSource === 'manual') {
         leads = parseLines(manualInput);
-        if (leads.length === 0) throw new Error("Please enter at least one valid phone number");
+        if (leads.length === 0) throw new Error("Por favor, introduce al menos un número de teléfono válido");
       }
 
       const selectedAgentData = agents.find(a => String(a.id) === String(selectedAgent));
@@ -239,7 +261,7 @@ export function CampaignsView() {
         campaign: {
           name,
           agent_id: selectedAgent,
-          empresa_id: selectedAgentData ? (selectedAgentData as any).empresa_id : profile?.empresa_id,
+          empresa_id: selectedAgentData ? (selectedAgentData as any).empresa_id : selectedEmpresa || profile?.empresa_id,
           scheduled_time: scheduledTime ? new Date(scheduledTime).toISOString() : null,
           status: 'pending',
           retry_interval: retryInterval || 60
@@ -254,13 +276,13 @@ export function CampaignsView() {
         body: JSON.stringify(payload)
       });
 
-      if (!res.ok) throw new Error('Failed to create campaign');
+      if (!res.ok) throw new Error('Error al crear la campaña');
 
       setShowCreate(false);
       setName('');
       setCsvFile(null);
       loadCampaigns();
-      alert('Campaign created successfully!');
+      alert('¡Campaña creada exitosamente!');
 
     } catch (err: any) {
       setError(err.message);
@@ -639,7 +661,7 @@ export function CampaignsView() {
     return (
       <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-          <h2 className="text-xl font-bold">Create Campaign</h2>
+          <h2 className="text-xl font-bold">Crear Campaña</h2>
           <button onClick={() => setShowCreate(false)} className="text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
@@ -654,24 +676,40 @@ export function CampaignsView() {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Campaign Name</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Nombre de la Campaña</label>
             <input
               type="text"
               className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent outline-none"
-              placeholder="e.g. Q1 Customer Survey"
+              placeholder="Ej: Encuesta Clientes Q1"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
           </div>
 
+          {isPlatformOwner && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Empresa / Proyecto</label>
+              <select
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent outline-none bg-white"
+                value={selectedEmpresa || ''}
+                onChange={(e) => setSelectedEmpresa(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">-- Todas las Empresas -- (No recomendado)</option>
+                {empresas.map(emp => (
+                  <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Agent</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Agente</label>
             <select
               className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent outline-none"
               value={selectedAgent}
               onChange={(e) => setSelectedAgent(e.target.value)}
             >
-              <option value="">Select an agent</option>
+              <option value="">Selecciona un agente</option>
               {agents.map(a => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
@@ -679,32 +717,32 @@ export function CampaignsView() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Data Source Type</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Método de Entrada de Datos</label>
             <select
               className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent outline-none"
               value={dataSource}
               onChange={(e) => setDataSource(e.target.value as 'csv' | 'api' | 'manual')}
             >
-              <option value="csv">CSV File</option>
-              <option value="manual">Manual Entry / Copy-Paste</option>
-              <option value="api">API Integration (Developer)</option>
+              <option value="csv">Archivo CSV</option>
+              <option value="manual">Entrada Manual / Copiar-Pegar</option>
+              <option value="api">Integración API (Desarrolladores)</option>
             </select>
           </div>
 
           {dataSource === 'manual' ? (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Enter Phones (and optional Names)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Introduce Teléfonos (y Nombres opcionales)</label>
               <textarea
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg h-32 font-mono text-sm focus:ring-2 focus:ring-black focus:border-transparent outline-none"
                 placeholder={"+34600112233, Juan Perez\n+34600445566, Maria"}
                 value={manualInput}
                 onChange={(e) => setManualInput(e.target.value)}
               />
-              <p className="text-xs text-gray-500 mt-1">One entry per line. Format: <code>Phone, Name</code> (Name is optional)</p>
+              <p className="text-xs text-gray-500 mt-1">Un registro por línea. Formato: <code>Teléfono, Nombre</code> (El nombre es opcional)</p>
             </div>
           ) : dataSource === 'csv' ? (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">CSV File</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Archivo CSV</label>
               <div className="border-2 border-dashed border-gray-200 rounded-lg p-8 text-center hover:border-black transition-colors cursor-pointer relative">
                 <input
                   type="file"
@@ -714,9 +752,9 @@ export function CampaignsView() {
                 />
                 <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
                 <p className="text-sm text-gray-600">
-                  {csvFile ? csvFile.name : 'Click to upload or drag and drop'}
+                  {csvFile ? csvFile.name : 'Haz clic para subir o arrastra y suelta'}
                 </p>
-                <p className="text-xs text-gray-400 mt-1">.csv files only</p>
+                <p className="text-xs text-gray-400 mt-1">Solo archivos .csv</p>
               </div>
               <div className="mt-2 text-right">
                 <a
@@ -734,14 +772,14 @@ export function CampaignsView() {
                   }}
                   className="text-xs text-blue-600 hover:underline flex items-center justify-end gap-1"
                 >
-                  <Upload className="w-3 h-3" /> Download Template
+                  <Upload className="w-3 h-3" /> Descargar Plantilla
                 </a>
               </div>
             </div>
           ) : (
             <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
               <p className="text-sm text-gray-600 mb-2">
-                Use our API to programmatically add leads to this campaign.
+                Usa nuestra API para agregar prospectos de forma programática a esta campaña.
               </p>
               <code className="text-xs bg-gray-100 p-2 block rounded overflow-x-auto">
                 curl -X POST {API_URL}/api/campaigns/{'{id}'}/leads \
@@ -753,31 +791,31 @@ export function CampaignsView() {
 
           <div className="border-t border-gray-100 pt-6">
             <button className="flex items-center justify-between w-full text-left font-medium text-gray-700">
-              <span>Advanced Settings / Scheduling</span>
+              <span>Ajustes Avanzados / Programación</span>
               <Clock className="w-4 h-4" />
             </button>
             <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Schedule Start Time (Optional)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Hora de Inicio Programada (Opcional)</label>
               <input
                 type="datetime-local"
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg"
                 value={scheduledTime}
                 onChange={(e) => setScheduledTime(e.target.value)}
               />
-              <p className="text-xs text-gray-500 mt-1">Leave empty to start immediately.</p>
+              <p className="text-xs text-gray-500 mt-1">Dejar en blanco para empezar inmediatamente.</p>
             </div>
 
             <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Retry Interval (minutes)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Intervalo de Reintento (minutos)</label>
               <input
                 type="number"
                 min="1"
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg"
                 value={retryInterval}
                 onChange={(e) => setRetryInterval(Number(e.target.value))}
-                placeholder="Default: 60"
+                placeholder="Por defecto: 60"
               />
-              <p className="text-xs text-gray-500 mt-1">Time to wait before retrying a failed call.</p>
+              <p className="text-xs text-gray-500 mt-1">Tiempo de espera antes de reintentar una llamada fallida.</p>
             </div>
           </div>
         </div>
@@ -787,14 +825,14 @@ export function CampaignsView() {
             onClick={() => setShowCreate(false)}
             className="px-4 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors"
           >
-            Cancel
+            Cancelar
           </button>
           <button
             onClick={handleCreate}
             disabled={loading}
             className="px-4 py-2 bg-black text-white font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-2 disabled:opacity-50"
           >
-            {loading ? 'Creating...' : 'Launch Campaign'}
+            {loading ? 'Creando...' : 'Lanzar Campaña'}
           </button>
         </div>
       </div>

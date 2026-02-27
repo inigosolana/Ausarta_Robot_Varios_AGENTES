@@ -18,6 +18,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { ViewState } from './types';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from './contexts/AuthContext';
 import SidebarItem from './components/SidebarItem';
 import TelephonyView from './views/TelephonyView';
@@ -35,6 +36,7 @@ import LoginView from './views/LoginView';
 
 const App: React.FC = () => {
   const { user, profile, loading, signOut, hasPermission, isRole } = useAuth();
+  const { t, i18n } = useTranslation();
   const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
   const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
   const [currentView, setCurrentView] = useState<ViewState | 'results'>('overview');
@@ -171,7 +173,7 @@ const App: React.FC = () => {
           {hasPermission('overview') && (
             <SidebarItem
               icon={<LayoutDashboard size={18} />}
-              label="Overview"
+              label={t('Dashboard')}
               isActive={currentView === 'overview'}
               onClick={() => setCurrentView('overview')}
               collapsed={!isSidebarOpen}
@@ -184,7 +186,7 @@ const App: React.FC = () => {
           {isPlatformOwner && hasPermission('empresas') && (
             <SidebarItem
               icon={<Building2 size={18} />}
-              label="Empresas"
+              label={t('Empresas')}
               isActive={currentView === 'empresas' || currentView === 'create-agents'}
               onClick={() => setCurrentView('empresas')}
               collapsed={!isSidebarOpen}
@@ -193,7 +195,7 @@ const App: React.FC = () => {
           {hasPermission('agents') && (
             <SidebarItem
               icon={<Bot size={18} />}
-              label="Agentes"
+              label={t('Agents')}
               isActive={currentView === 'agents'}
               onClick={() => setCurrentView('agents')}
               collapsed={!isSidebarOpen}
@@ -202,7 +204,7 @@ const App: React.FC = () => {
           {hasPermission('test-call') && (
             <SidebarItem
               icon={<Phone size={18} />}
-              label="Llamada Prueba"
+              label={t('Test Call')}
               isActive={currentView === 'test-call'}
               onClick={() => setCurrentView('test-call')}
               collapsed={!isSidebarOpen}
@@ -211,7 +213,7 @@ const App: React.FC = () => {
           {hasPermission('campaigns') && (
             <SidebarItem
               icon={<Megaphone size={18} />}
-              label="Campañas"
+              label={t('Campaigns')}
               isActive={currentView === 'campaigns'}
               onClick={() => setCurrentView('campaigns')}
               collapsed={!isSidebarOpen}
@@ -242,7 +244,7 @@ const App: React.FC = () => {
           {hasPermission('results') && (
             <SidebarItem
               icon={<ClipboardList size={18} />}
-              label="Results"
+              label={t('Results')}
               isActive={currentView === 'results'}
               onClick={() => setCurrentView('results')}
               collapsed={!isSidebarOpen}
@@ -293,8 +295,17 @@ const App: React.FC = () => {
             className={`flex items-center gap-2 text-sm text-gray-500 hover:text-red-600 w-full px-2 py-1 hover:bg-red-50 rounded-lg transition-colors ${!isSidebarOpen && 'justify-center'}`}
           >
             <LogOut size={16} />
-            {isSidebarOpen && "Cerrar Sesión"}
+            {isSidebarOpen && t("Logout")}
           </button>
+
+          {isSidebarOpen && (
+            <div className="flex justify-center gap-2 mt-4 pt-2 border-t border-gray-50">
+              <button onClick={() => i18n.changeLanguage('es')} className={`text-xs px-2 py-1 rounded ${i18n.language === 'es' ? 'bg-blue-100 text-blue-700 font-bold' : 'text-gray-500 hover:bg-gray-100'}`}>ES</button>
+              <button onClick={() => i18n.changeLanguage('en')} className={`text-xs px-2 py-1 rounded ${i18n.language === 'en' ? 'bg-blue-100 text-blue-700 font-bold' : 'text-gray-500 hover:bg-gray-100'}`}>EN</button>
+              <button onClick={() => i18n.changeLanguage('eu')} className={`text-xs px-2 py-1 rounded ${i18n.language === 'eu' ? 'bg-blue-100 text-blue-700 font-bold' : 'text-gray-500 hover:bg-gray-100'}`}>EU</button>
+              <button onClick={() => i18n.changeLanguage('gl')} className={`text-xs px-2 py-1 rounded ${i18n.language === 'gl' ? 'bg-blue-100 text-blue-700 font-bold' : 'text-gray-500 hover:bg-gray-100'}`}>GL</button>
+            </div>
+          )}
         </div>
       </aside>
 

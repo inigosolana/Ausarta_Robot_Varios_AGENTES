@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Download, Search, RefreshCw, FileText } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -29,6 +30,7 @@ interface Props {
 
 const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, hideHeader }) => {
     const { profile, isRole } = useAuth();
+    const { t } = useTranslation();
 
     const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
     const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
@@ -43,7 +45,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     const loadResults = async () => {
         setLoading(true);
         try {
-            const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
+            const BASE_URL = import.meta.env.VITE_API_URL || window.location.origin;
             const params = new URLSearchParams();
 
             const finalEmpresaId = selectedEmpresaId !== 'all'
@@ -54,7 +56,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
             if (campaignId) params.append('campaign_id', String(campaignId));
 
             const queryStr = params.toString() ? `?${params.toString()}` : '';
-            const res = await fetch(`${API_URL}/results${queryStr}`);
+            const res = await fetch(`${BASE_URL}/api/results${queryStr}`);
             if (res.ok) {
                 const data = await res.json();
                 setResults(data);
@@ -121,8 +123,8 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
             {!hideHeader && (
                 <header className="flex justify-between items-center">
                     <div>
-                        <h1 className="text-2xl font-bold text-gray-900">{title || 'Survey Results'}</h1>
-                        <p className="text-gray-500 text-sm mt-1">Detailed view of all agent interactions</p>
+                        <h1 className="text-2xl font-bold text-gray-900">{title || t('Survey Results')}</h1>
+                        <p className="text-gray-500 text-sm mt-1">{t('Detailed view of all agent interactions')}</p>
                     </div>
                     <div className="flex gap-2">
                         <button
@@ -136,7 +138,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                             className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
                         >
                             <Download size={16} />
-                            Export CSV
+                            {t('Export CSV')}
                         </button>
                     </div>
                 </header>
@@ -150,7 +152,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                         onChange={(e) => setSelectedEmpresaId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
                         className="px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white"
                     >
-                        <option value="all">Todas las empresas</option>
+                        <option value="all">{t('Todas las empresas')}</option>
                         {empresas.map(emp => (
                             <option key={emp.id} value={emp.id}>{emp.nombre}</option>
                         ))}
@@ -160,7 +162,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
                     <input
                         type="text"
-                        placeholder="Search by phone, comments or transcript..."
+                        placeholder={t('Search by phone, comments or transcript...')}
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-black/20"
@@ -174,21 +176,21 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                     <table className="w-full text-sm text-left text-gray-700">
                         <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-100">
                             <tr>
-                                <th className="px-6 py-3 w-16">ID</th>
-                                <th className="px-6 py-3">Phone / Campaign</th>
-                                <th className="px-6 py-3">Date</th>
-                                <th className="px-6 py-3 text-center">Status</th>
-                                <th className="px-6 py-3 text-center">Results / Scores</th>
-                                <th className="px-6 py-3">Model</th>
-                                <th className="px-6 py-3">Comments</th>
-                                <th className="px-6 py-3 text-right">More</th>
+                                <th className="px-6 py-3 w-16">{t('ID')}</th>
+                                <th className="px-6 py-3">{t('Phone / Campaign')}</th>
+                                <th className="px-6 py-3">{t('Date')}</th>
+                                <th className="px-6 py-3 text-center">{t('Status')}</th>
+                                <th className="px-6 py-3 text-center">{t('Results / Scores')}</th>
+                                <th className="px-6 py-3">{t('Model')}</th>
+                                <th className="px-6 py-3">{t('Comments')}</th>
+                                <th className="px-6 py-3 text-right">{t('More')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                             {filteredResults.length === 0 ? (
                                 <tr>
                                     <td colSpan={8} className="px-6 py-12 text-center text-gray-400">
-                                        No results found
+                                        {t('No results found')}
                                     </td>
                                 </tr>
                             ) : filteredResults.map((row) => (
@@ -206,17 +208,17 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                     <td className="px-6 py-4 text-center">
                                         {(() => {
                                             if (row.status === 'completed') {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-green-500 text-white uppercase shadow-sm">Completa</span>;
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-green-500 text-white uppercase shadow-sm">{t('Completa')}</span>;
                                             } else if (row.status === 'incomplete') {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-blue-400 text-white uppercase shadow-sm">Incompleta</span>;
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-blue-400 text-white uppercase shadow-sm">{t('Incompleta')}</span>;
                                             } else if (row.status === 'rejected_opt_out' || row.status === 'rejected') {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-red-600 text-white uppercase shadow-sm" title="Rechazada por Cliente">Rechazada</span>;
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-red-600 text-white uppercase shadow-sm" title="Rechazada por Cliente">{t('Rechazada')}</span>;
                                             } else if (row.status === 'failed') {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-purple-500 text-white uppercase shadow-sm">Fallida</span>;
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-purple-500 text-white uppercase shadow-sm">{t('Fallida')}</span>;
                                             } else if (row.status === 'unreached') {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-amber-400 text-white uppercase shadow-sm">No Contesta</span>;
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-amber-400 text-white uppercase shadow-sm">{t('No Contesta')}</span>;
                                             } else {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-gray-400 text-white uppercase shadow-sm">Pendiente</span>;
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-gray-400 text-white uppercase shadow-sm">{t('Pendiente')}</span>;
                                             }
                                         })()}
                                     </td>
@@ -224,7 +226,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                         {row.is_question_based ? (
                                             <div className="flex justify-center items-center">
                                                 <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-1 rounded-full border border-gray-200">
-                                                    Preguntas Abiertas
+                                                    {t('Preguntas Abiertas')}
                                                 </span>
                                             </div>
                                         ) : (
@@ -260,7 +262,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                                 "{row.comentarios}"
                                             </div>
                                         ) : (
-                                            <span className="text-gray-300 italic text-xs">None</span>
+                                            <span className="text-gray-300 italic text-xs">{t('None')}</span>
                                         )}
                                     </td>
                                     <td className="px-6 py-4 text-right">
@@ -268,8 +270,8 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                             {(row.status === 'failed' || row.status === 'incomplete') && (
                                                 <button
                                                     onClick={() => {
-                                                        const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api';
-                                                        fetch(`${API_URL}/calls/outbound`, {
+                                                        const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+                                                        fetch(`${API_URL}/api/calls/outbound`, {
                                                             method: 'POST',
                                                             headers: { 'Content-Type': 'application/json' },
                                                             body: JSON.stringify({ phoneNumber: row.telefono })
@@ -283,15 +285,15 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                                     className="p-2 text-orange-600 hover:bg-orange-50 rounded-lg transition-colors flex items-center gap-1 text-xs"
                                                     title="Reintentar llamada ahora"
                                                 >
-                                                    <RefreshCw size={16} /> Retry
+                                                    <RefreshCw size={16} /> {t('Retry')}
                                                 </button>
                                             )}
                                             <button
                                                 onClick={async () => {
                                                     if (!row.transcription) {
                                                         try {
-                                                            const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api';
-                                                            const res = await fetch(`${API_URL}/results/${row.id}/transcription`);
+                                                            const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+                                                            const res = await fetch(`${API_URL}/api/results/${row.id}/transcription`);
                                                             if (res.ok) {
                                                                 const data = await res.json();
                                                                 row.transcription = data.transcription;
@@ -304,7 +306,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                                 }}
                                                 className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1 text-xs"
                                             >
-                                                <FileText size={16} /> Transcript
+                                                <FileText size={16} /> {t('Transcript')}
                                             </button>
                                         </div>
                                     </td>
