@@ -239,6 +239,20 @@ async def fetch_agent_config(survey_id: str) -> dict:
 
 
 # ============================================================================
+# FUNCIÓN PARA ENVIAR ALERTAS A N8N
+# ============================================================================
+async def notify_n8n_alert(message: str, details: dict = None):
+    webhook_url = os.getenv("N8N_WEBHOOK_URL_ALERTS")
+    if not webhook_url:
+        return
+    try:
+        async with aiohttp.ClientSession() as session:
+            payload = {"message": message, "details": details or {}}
+            await session.post(webhook_url, json=payload, timeout=5)
+    except Exception as e:
+        logger.error(f"❌ Error sending alert to n8n: {e}")
+
+# ============================================================================
 # SERVIDOR Y ENTRYPOINT DINÁMICO
 # ============================================================================
 server = AgentServer()
@@ -253,10 +267,12 @@ async def entrypoint(ctx: JobContext):
     
     def handle_error(error):
         msg = str(error)
-        if "429" in msg: 
+        if "429" in msg or "Rate Limit" in msg or "insufficient_quota" in msg: 
             logger.error(f"🚨🚨🚨 ALERTA (Job {job_id}): Límite de API Alcanzado")
+            asyncio.create_task(notify_n8n_alert("Límite de API Alcanzado (Error 429)", {"job_id": job_id, "error": msg}))
         else:
             logger.error(f"⚠️ ERROR DEL AGENTE (Job {job_id}): {error}")
+            asyncio.create_task(notify_n8n_alert("Error en Agente LiveKit", {"job_id": job_id, "error": msg}))
 
     # --- PASO 1: Extraer survey_id ---
     survey_id = "0"

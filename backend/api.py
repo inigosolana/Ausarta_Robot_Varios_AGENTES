@@ -1062,10 +1062,10 @@ async def get_agent_config_by_survey(survey_id: int):
             return JSONResponse(status_code=404, content={"error": "Survey not found"})
             
         agent_id = res_survey.data[0].get("agent_id")
+        nombre_cliente = res_survey.data[0].get("nombre_cliente")
         
         # If no agent explicitly mapped, return default
         if not agent_id:
-            # Fallback to Dakota id=1 or just returning default values
             return {"name": "Bot", "greeting": "Buenas, le llamo...", "instructions": "Eres un asistente...", "voice_id": "cefcb124-080b-4655-b31f-932f3ee743de", "llm_model": "llama-3.3-70b-versatile"}
             
         res_agent = supabase.table("agent_config").select("*").eq("id", agent_id).execute()
@@ -1078,11 +1078,20 @@ async def get_agent_config_by_survey(survey_id: int):
         res_ai = supabase.table("ai_config").select("*").eq("agent_id", agent_id).execute()
         ai_data = res_ai.data[0] if res_ai.data else {}
 
+        # Get Lead CRM Context
+        res_lead = supabase.table("campaign_leads").select("comentarios").eq("call_id", survey_id).execute()
+        contexto_adicional = ""
+        if res_lead.data and res_lead.data[0].get("comentarios"):
+            contexto_adicional = f"\nDATOS CRM DEL CLIENTE: {res_lead.data[0].get('comentarios')}"
+
+        greeting_processed = agent_data.get("greeting", "Buenas, ¿tiene un momento?").replace("{nombre}", nombre_cliente or "Cliente")
+        instructions_base = agent_data.get("instructions", "Eres un asistente")
+
         # Return sensible defaults for missing fields
         return {
             "name": agent_data.get("name", "Bot"),
-            "greeting": agent_data.get("greeting", "Buenas, ¿tiene un momento?"),
-            "instructions": agent_data.get("instructions", "Eres un asistente"),
+            "greeting": greeting_processed,
+            "instructions": f"{instructions_base}{contexto_adicional}",
             "critical_rules": agent_data.get("critical_rules", ""),
             "voice_id": ai_data.get("tts_voice") or "cefcb124-080b-4655-b31f-932f3ee743de",
             "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
