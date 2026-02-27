@@ -462,17 +462,52 @@ async def get_usage_stats(empresa_id: Optional[int] = None):
 
 @app.get("/api/ai/limits")
 async def get_ai_limits():
-    """Mock de límites para el frontend"""
-    return {
+    """Obtén límites y consumo real desde el cache de Supabase (actualizado por n8n)"""
+    default_limits = {
         "groq_models": {
             "llama-3.3-70b-versatile": {"tokens_remaining": 60000, "tokens_limit": 100000, "requests_remaining": 950, "requests_limit": 1000},
             "llama-3.1-8b-instant": {"tokens_remaining": 25000, "tokens_limit": 30000, "requests_remaining": 480, "requests_limit": 500}
         },
         "openai": {"active": True, "tokens_remaining": 850000, "tokens_limit": 1000000, "requests_remaining": 4500, "requests_limit": 5000, "info": "Tier 1 Account"},
-        "deepgram": {"balances": [{"amount": "12.45", "units": "USD"}]},
-        "cartesia": {"active": True, "info": "Enterprise Plan - Unlimited Credits", "dashboard_url": "https://play.cartesia.ai/"},
+        "deepgram": {"balances": [{"amount": "0.00", "units": "USD"}]},
+        "cartesia": {"active": True, "tokens_used": 0, "tokens_limit": 100000},
         "google": {"active": True}
     }
+
+    if not supabase:
+        return default_limits
+
+    try:
+        # Consultamos el cache guardado por n8n
+        res = supabase.table("api_usage_cache").select("*").execute()
+        if res.data:
+            cache_map = {item["service_name"]: item["data"] for item in res.data}
+            
+            # Actualizamos Deepgram
+            if "deepgram" in cache_map:
+                default_limits["deepgram"] = cache_map["deepgram"]
+            
+            # Actualizamos Groq
+            if "groq" in cache_map:
+                default_limits["groq_models"] = cache_map["groq"]
+
+            # Actualizamos Cartesia (Calculado asíncronamente por n8n o devuelto aquí)
+            if "cartesia" in cache_map:
+                default_limits["cartesia"] = cache_map["cartesia"]
+            else:
+                # Si n8n no lo ha calculado, tratamos de dar un valor basado en encuestas
+                enc_res = supabase.table("encuestas").select("seconds_used").not_.is_("seconds_used", "null").execute()
+                total_seconds = sum(r["seconds_used"] for r in enc_res.data) if enc_res.data else 0
+                # Estimación: 15 tokens por segundo
+                tokens_used = total_seconds * 15
+                default_limits["cartesia"]["tokens_used"] = tokens_used
+                default_limits["cartesia"]["tokens_remaining"] = max(0, 100000 - tokens_used)
+
+        return default_limits
+    except Exception as e:
+        logger.error(f"Error fetching AI limits from cache: {e}")
+        return default_limits
+
 
 # --- CALL CONTROL ---
 
@@ -630,6 +665,15 @@ async def make_outbound_call(request: dict):
                         emp_id = agent_res.data[0].get("empresa_id")
                 except: pass
 
+            # Obtener nombre de la campaña si hay ID
+            campaign_name = request.get("campaignName")
+            if campaign_id and not campaign_name:
+                try:
+                    camp_res = supabase.table("campaigns").select("name").eq("id", campaign_id).execute()
+                    if camp_res.data:
+                        campaign_name = camp_res.data[0].get("name")
+                except: pass
+
             encuesta_data = {
                 "telefono": phone,
                 "nombre_cliente": request.get("customerName", "Prueba Dashboard"),
@@ -637,7 +681,9 @@ async def make_outbound_call(request: dict):
                 "status": "initiated",
                 "completada": 0,
                 "agent_id": agent_id,
-                "empresa_id": emp_id
+                "empresa_id": emp_id,
+                "campaign_id": campaign_id,
+                "campaign_name": campaign_name
             }
             res_enc = supabase.table("encuestas").insert(encuesta_data).execute()
             encuesta_id = res_enc.data[0]['id']
