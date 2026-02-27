@@ -149,6 +149,21 @@ LIVEKIT_API_KEY = os.getenv('LIVEKIT_API_KEY')
 LIVEKIT_API_SECRET = os.getenv('LIVEKIT_API_SECRET')
 lkapi = api.LiveKitAPI(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
 
+# --- CACHE HELPER ---
+async def get_ui_cache(key: str, max_age_minutes: int = 5):
+    """Obtiene datos de ui_cache si tienen menos de X minutos"""
+    if not supabase: return None
+    try:
+        res = supabase.table("ui_cache").select("*").eq("key", key).maybeSingle().execute()
+        if res.data:
+            updated_at = datetime.fromisoformat(res.data["updated_at"].replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) - updated_at < timedelta(minutes=max_age_minutes):
+                logger.info(f"🚀 Cache HIT for {key}")
+                return res.data["data"]
+    except Exception as e:
+        logger.error(f"Error reading cache {key}: {e}")
+    return None
+
 # --- ENDPOINTS ---
 
 @app.get("/")
@@ -385,6 +400,35 @@ async def get_all_results(empresa_id: Optional[int] = None, agent_id: Optional[i
         return []
 
 
+@app.get("/api/users")
+async def get_users_list():
+    """Lista de usuarios (con cache)"""
+    cached = await get_ui_cache("users_list")
+    if cached: return cached
+    
+    # Fallback si no hay cache
+    if not supabase: return []
+    try:
+        res = supabase.table("user_profiles").select("*, empresas(*)").order("created_at", desc=True).execute()
+        return res.data
+    except Exception as e:
+        logger.error(f"Error users list: {e}")
+        return []
+
+@app.get("/api/empresas")
+async def get_empresas_list():
+    """Lista de empresas (con cache)"""
+    cached = await get_ui_cache("empresas_list")
+    if cached: return cached
+    
+    if not supabase: return []
+    try:
+        res = supabase.table("empresas").select("*").order("nombre").execute()
+        return res.data
+    except Exception as e:
+        logger.error(f"Error empresas list: {e}")
+        return []
+
 # --- ALERTAS ---
 @app.get("/api/alerts")
 async def get_alerts(empresa_id: Optional[int] = None):
@@ -462,50 +506,34 @@ async def get_usage_stats(empresa_id: Optional[int] = None):
 
 @app.get("/api/ai/limits")
 async def get_ai_limits():
-    """Obtén límites y consumo real desde el cache de Supabase (actualizado por n8n)"""
+    """Obtén límites y consumo real centralizado"""
+    # Intentamos primero del cache de n8n total
+    cached_all = await get_ui_cache("api_limits_all", max_age_minutes=60)
+    if cached_all: return cached_all
+
     default_limits = {
         "groq_models": {
             "llama-3.3-70b-versatile": {"tokens_remaining": 60000, "tokens_limit": 100000, "requests_remaining": 950, "requests_limit": 1000},
-            "llama-3.1-8b-instant": {"tokens_remaining": 25000, "tokens_limit": 30000, "requests_remaining": 480, "requests_limit": 500}
         },
-        "openai": {"active": True, "tokens_remaining": 850000, "tokens_limit": 1000000, "requests_remaining": 4500, "requests_limit": 5000, "info": "Tier 1 Account"},
+        "openai": {"status": "Active", "usage_usd": 0, "limit_usd": 5},
         "deepgram": {"balances": [{"amount": "0.00", "units": "USD"}]},
-        "cartesia": {"active": True, "tokens_used": 0, "tokens_limit": 100000},
-        "google": {"active": True}
+        "cartesia": {"tokens_used": 0, "tokens_limit": 100000},
+        "elevenlabs": {"character_count": 0, "character_limit": 10000}
     }
 
-    if not supabase:
-        return default_limits
+    if not supabase: return default_limits
 
     try:
-        # Consultamos el cache guardado por n8n
+        # Consultamos el cache guardado por n8n (api_usage_cache)
         res = supabase.table("api_usage_cache").select("*").execute()
         if res.data:
             cache_map = {item["service_name"]: item["data"] for item in res.data}
-            
-            # Actualizamos Deepgram
-            if "deepgram" in cache_map:
-                default_limits["deepgram"] = cache_map["deepgram"]
-            
-            # Actualizamos Groq
-            if "groq" in cache_map:
-                default_limits["groq_models"] = cache_map["groq"]
-
-            # Actualizamos Cartesia (Calculado asíncronamente por n8n o devuelto aquí)
-            if "cartesia" in cache_map:
-                default_limits["cartesia"] = cache_map["cartesia"]
-            else:
-                # Si n8n no lo ha calculado, tratamos de dar un valor basado en encuestas
-                enc_res = supabase.table("encuestas").select("seconds_used").not_.is_("seconds_used", "null").execute()
-                total_seconds = sum(r["seconds_used"] for r in enc_res.data) if enc_res.data else 0
-                # Estimación: 15 tokens por segundo
-                tokens_used = total_seconds * 15
-                default_limits["cartesia"]["tokens_used"] = tokens_used
-                default_limits["cartesia"]["tokens_remaining"] = max(0, 100000 - tokens_used)
-
+            for svc, data in cache_map.items():
+                if svc == "groq": default_limits["groq_models"] = data
+                elif svc in default_limits: default_limits[svc] = data
         return default_limits
     except Exception as e:
-        logger.error(f"Error fetching AI limits from cache: {e}")
+        logger.error(f"Error fetching AI limits: {e}")
         return default_limits
 
 
@@ -746,7 +774,12 @@ async def make_outbound_call(request: dict):
 
 @app.get("/api/agents")
 async def get_agents(empresa_id: Optional[int] = None):
-    """Endpoint compatible con frontend que espera lista de agentes"""
+    """Endpoint con cache para lista de agentes"""
+    # Si no hay empresa_id, podemos usar el cache global
+    if not empresa_id:
+        cached = await get_ui_cache("agents_list")
+        if cached: return cached
+
     if not supabase: return [{"name": "Dakota", "instructions": "Default"}]
     try:
         query = supabase.table("agent_config").select("*")
@@ -754,19 +787,13 @@ async def get_agents(empresa_id: Optional[int] = None):
             query = query.eq("empresa_id", empresa_id)
         
         res = query.execute()
-        
-        if res.data:
-            # Frontend espera 'instructions' en el objeto principal
-            # Y 'id' como string si es posible
-            agents = []
-            for agent in res.data:
-                agent['id'] = str(agent['id'])
-                agents.append(agent)
-            return agents # Devolvemos lista
-        else:
-            return []
+        agents = []
+        for agent in (res.data or []):
+            agent['id'] = str(agent['id'])
+            agents.append(agent)
+        return agents
     except Exception as e:
-        print(f"Error getting agents: {e}")
+        logger.error(f"Error getting agents: {e}")
         return []
 
 @app.get("/api/prompts")

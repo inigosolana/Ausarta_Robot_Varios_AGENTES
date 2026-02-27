@@ -10,6 +10,19 @@ import { useAuth } from '../contexts/AuthContext';
 import type { UserProfile, UserPermission, UserRole, Empresa } from '../types';
 import { ALL_MODULES } from '../types';
 
+const SkeletonRow = () => (
+    <div className="flex items-center gap-4 p-4 border-b border-gray-100 animate-pulse">
+        <div className="w-10 h-10 rounded-full bg-gray-200" />
+        <div className="flex-1 space-y-2">
+            <div className="h-4 bg-gray-200 rounded w-1/4" />
+            <div className="h-3 bg-gray-100 rounded w-1/3" />
+        </div>
+        <div className="w-20 h-6 bg-gray-100 rounded-full" />
+        <div className="w-32 h-6 bg-gray-100 rounded-full" />
+        <div className="w-8 h-8 rounded-lg bg-gray-100" />
+    </div>
+);
+
 const UserManagementView: React.FC = () => {
     const { profile: currentProfile, isRole } = useAuth();
     const { t } = useTranslation();
@@ -39,50 +52,45 @@ const UserManagementView: React.FC = () => {
     const loadUsersAndEmpresas = async () => {
         setLoading(true);
         try {
-            // 1. Load empresas based on role
-            let empQuery = supabase.from('empresas').select('*').order('nombre');
+            // 1. Load empresas using API (Cache-friendly)
+            const empRes = await fetch(`${process.env.REACT_APP_API_URL || ''}/api/empresas`);
+            const empData = await empRes.json();
 
-            if (!isPlatformOwner && currentProfile?.empresa_id) {
-                empQuery = empQuery.eq('id', currentProfile.empresa_id);
+            if (Array.isArray(empData)) {
+                let filteredEmp = empData;
+                if (!isPlatformOwner && currentProfile?.empresa_id) {
+                    filteredEmp = empData.filter(e => e.id === currentProfile.empresa_id);
+                }
+                setEmpresas(filteredEmp);
             }
 
-            const { data: empData } = await empQuery;
-            if (empData) setEmpresas(empData);
+            // 2. Load user profiles using API (Cache-friendly)
+            const userRes = await fetch(`${process.env.REACT_APP_API_URL || ''}/api/users`);
+            const usersData = await userRes.json();
 
-            // Pre-select empresa for regular admins only
-            if (isRole('admin') && !isPlatformOwner && currentProfile?.empresa_id) {
-                setNewEmpresaId(currentProfile.empresa_id);
+            if (Array.isArray(usersData)) {
+                let filteredUsers = usersData;
+                if (!isPlatformOwner && currentProfile?.empresa_id) {
+                    filteredUsers = usersData.filter(u => u.empresa_id === currentProfile.empresa_id);
+                }
+
+                // Enrichment still needed for current profile details unless backend does it
+                // But the API already does `select("*, empresas(*)")`
+                const usersWithPerms = await Promise.all(
+                    filteredUsers.map(async (u: any) => {
+                        const { data: perms } = await supabase
+                            .from('user_permissions')
+                            .select('*')
+                            .eq('user_id', u.id);
+                        return { ...u, permissions: (perms || []) as UserPermission[] };
+                    })
+                );
+                setUsers(usersWithPerms);
             }
-
-            // 2. Load user profiles based on role
-            let userQuery = supabase
-                .from('user_profiles')
-                .select('*, empresas(*)')
-                .order('created_at', { ascending: false });
-
-            // Non-superadmins and non-Ausarta-admins only see users from their own company
-            if (!isPlatformOwner && currentProfile?.empresa_id) {
-                userQuery = userQuery.eq('empresa_id', currentProfile.empresa_id);
-            }
-
-            const { data: usersData, error } = await userQuery;
-            if (error) throw error;
-
-            const usersWithPerms = await Promise.all(
-                (usersData || []).map(async (u: UserProfile) => {
-                    const { data: perms } = await supabase
-                        .from('user_permissions')
-                        .select('*')
-                        .eq('user_id', u.id);
-                    return { ...u, permissions: (perms || []) as UserPermission[] };
-                })
-            );
-
-            setUsers(usersWithPerms);
         } catch (err) {
             console.error('Error loading users:', err);
         } finally {
-            setLoading(false);
+            setTimeout(() => setLoading(false), 300); // Small delay for smooth transition
         }
     };
 
@@ -372,14 +380,21 @@ const UserManagementView: React.FC = () => {
             </div>
 
             {/* Users Table / Cards */}
-            {loading ? (
-                <div className="flex justify-center py-20">
-                    <Loader2 className="animate-spin text-gray-400" size={32} />
-                </div>
-            ) : (
-                <div className="space-y-3">
-                    {users.map((user) => (
-                        <div key={user.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="space-y-3">
+                {loading ? (
+                    <>
+                        {[1, 2, 3, 4, 5].map(i => <SkeletonRow key={i} />)}
+                    </>
+                ) : users.length === 0 ? (
+                    <div className="p-12 text-center bg-white rounded-xl border border-gray-100 shadow-sm">
+                        <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <Users size={32} className="text-gray-300" />
+                        </div>
+                        <p className="text-gray-500 font-medium">{t('No users found', 'No se encontraron usuarios')}</p>
+                    </div>
+                ) : (
+                    users.map((user) => (
+                        <div key={user.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
                             {/* User Row */}
                             <div
                                 className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors"
@@ -488,9 +503,9 @@ const UserManagementView: React.FC = () => {
                                 </div>
                             )}
                         </div>
-                    ))}
-                </div>
-            )}
+                    ))
+                )}
+            </div>
 
             {/* Create / Invite User Modal */}
             {showCreate && (
