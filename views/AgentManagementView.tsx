@@ -2,11 +2,13 @@ import React, { useState, useEffect } from "react";
 import { Plus, Bot, Edit2, Trash2, Loader2, Search, Building2, ArrowLeft } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
+import { useTranslation } from "react-i18next";
 import type { AgentConfig, AIConfig, Empresa } from "../types";
 import AgentFormView from "./AgentFormView";
 
 const AgentManagementView: React.FC = () => {
     const { profile, isRole } = useAuth();
+    const { t } = useTranslation();
 
     const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
     const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
@@ -52,13 +54,13 @@ const AgentManagementView: React.FC = () => {
     };
 
     const handleDeleteAgent = async (id: number) => {
-        if (!confirm("¿Estás seguro de que quieres eliminar este agente?")) return;
+        if (!confirm(t("Are you sure you want to delete this agent?", "¿Estás seguro de que quieres eliminar este agente?"))) return;
         try {
             await supabase.from("ai_config").delete().eq("agent_id", id);
             await supabase.from("agent_config").delete().eq("id", id);
             setAgents(prev => prev.filter(a => a.id !== id));
         } catch (err) {
-            alert("Error al eliminar el agente");
+            alert(t("Error deleting agent", "Error al eliminar el agente"));
         }
     };
 
@@ -105,11 +107,11 @@ const AgentManagementView: React.FC = () => {
             {/* Header */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Gestión de Agentes</h1>
+                    <h1 className="text-2xl font-bold text-gray-900">{t("Agent Management", "Gestión de Agentes")}</h1>
                     <p className="text-gray-500 text-sm">
                         {isSuperadmin
-                            ? "Crea y gestiona agentes de todas las empresas"
-                            : "Crea y gestiona agentes de tu empresa"
+                            ? t("Create and manage agents from all companies", "Crea y gestiona agentes de todas las empresas")
+                            : t("Create and manage agents from your company", "Crea y gestiona agentes de tu empresa")
                         }
                     </p>
                 </div>
@@ -117,7 +119,7 @@ const AgentManagementView: React.FC = () => {
                     <button
                         onClick={() => {
                             if (isSuperadmin && selectedEmpresaId === "all") {
-                                alert("Selecciona una empresa antes de crear un agente");
+                                alert(t("Select a company before creating an agent", "Selecciona una empresa antes de crear un agente"));
                                 return;
                             }
                             setIsCreatingAgent(true);
@@ -125,7 +127,7 @@ const AgentManagementView: React.FC = () => {
                         className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-500 shadow-lg shadow-blue-500/20 font-medium text-sm transition-all hover:scale-105"
                     >
                         <Plus size={18} />
-                        Crear Agente
+                        {t("Create Agent", "Crear Agente")}
                     </button>
                 )}
             </div>
@@ -139,7 +141,7 @@ const AgentManagementView: React.FC = () => {
                         onChange={(e) => setSelectedEmpresaId(e.target.value === "all" ? "all" : Number(e.target.value))}
                         className="px-4 py-2.5 border border-gray-200 rounded-xl outline-none focus:border-blue-400 bg-white text-sm font-medium"
                     >
-                        <option value="all">🏢 Todas las empresas</option>
+                        <option value="all">🏢 {t("All companies", "Todas las empresas")}</option>
                         {empresas.map(emp => (
                             <option key={emp.id} value={emp.id}>🏢 {emp.nombre}</option>
                         ))}
@@ -151,7 +153,7 @@ const AgentManagementView: React.FC = () => {
                     <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
                         type="text"
-                        placeholder="Buscar agentes..."
+                        placeholder={t("Search agents...", "Buscar agentes...")}
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl outline-none focus:border-blue-400 transition-all"
@@ -166,10 +168,10 @@ const AgentManagementView: React.FC = () => {
                 <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200">
                     <Bot size={48} className="mx-auto text-gray-300 mb-4" />
                     <h3 className="text-lg font-semibold text-gray-700">
-                        {search ? "No se encontraron agentes" : "Sin agentes aún"}
+                        {search ? t("No agents found", "No se encontraron agentes") : t("No agents yet", "Sin agentes aún")}
                     </h3>
                     <p className="text-gray-400 text-sm">
-                        {search ? "Prueba con otra búsqueda" : "Crea tu primer agente para empezar"}
+                        {search ? t("Try another search", "Prueba con otra búsqueda") : t("Create your first agent to start", "Crea tu primer agente para empezar")}
                     </p>
                 </div>
             ) : (
@@ -187,7 +189,7 @@ const AgentManagementView: React.FC = () => {
                                     </div>
                                     <div>
                                         <h3 className="font-semibold text-gray-900 group-hover:text-blue-600">{agent.name}</h3>
-                                        <p className="text-xs text-gray-400">{agent.use_case || "Sin caso de uso"}</p>
+                                        <p className="text-xs text-gray-400">{agent.use_case || t("No use case", "Sin caso de uso")}</p>
                                     </div>
                                 </div>
                                 <button
@@ -197,7 +199,7 @@ const AgentManagementView: React.FC = () => {
                                     <Trash2 size={16} />
                                 </button>
                             </div>
-                            <p className="text-sm text-gray-500 my-3 line-clamp-2">{agent.description || "Sin descripción"}</p>
+                            <p className="text-sm text-gray-500 my-3 line-clamp-2">{agent.description || t("No description", "Sin descripción")}</p>
 
                             {/* Company badge */}
                             {agent.empresas && (

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Save, ArrowLeft, Loader2, Bot, Mic, Speaker, Brain, Sparkles, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { AgentConfig, AIConfig, Empresa } from '../types';
@@ -26,6 +27,7 @@ const defaultAIConfig: AIConfig = {
 
 const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
     const { isRole, hasPermission, profile } = useAuth();
+    const { t } = useTranslation();
 
     const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
     const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
@@ -94,7 +96,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
     const handleSave = async () => {
         if (!formData.name.trim()) {
-            alert('El nombre del agente es obligatorio');
+            alert(t('Agent name is mandatory', 'El nombre del agente es obligatorio'));
             return;
         }
 
@@ -158,7 +160,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
             onSave();
         } catch (err: any) {
             console.error('Error saving agent:', err);
-            alert(`Error al guardar: ${err.message}`);
+            alert(`${t('Error saving', 'Error al guardar')}: ${err.message}`);
         } finally {
             setIsSaving(false);
         }
@@ -200,17 +202,17 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                 setShowAiPromptModal(false);
                 setAiPromptRequest('');
             } else {
-                alert(`Error al generar prompt: ${result.error || 'Error desconocido'}`);
+                alert(`${t('Error generating prompt', 'Error al generar prompt')}: ${result.error || t('Unknown error', 'Error desconocido')}`);
             }
         } catch (err) {
             console.error(err);
-            alert('Error al contactar con el generador de IA');
+            alert(t('Error contacting AI generator', 'Error al contactar con el generador de IA'));
         } finally {
             setIsGeneratingPrompt(false);
         }
     };
 
-    if (isLoading) return <div className="p-8 text-center text-gray-500">Cargando configuración...</div>;
+    if (isLoading) return <div className="p-8 text-center text-gray-500">{t('Loading configuration...', 'Cargando configuración...')}</div>;
 
     return (
         <div className="space-y-6 max-w-4xl mx-auto pb-20">
@@ -225,9 +227,9 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                     </button>
                     <div>
                         <h1 className="text-2xl font-bold text-gray-900">
-                            {isEditing ? `Editar: ${agent?.name}` : 'Crear Nuevo Agente'}
+                            {isEditing ? `${t('Edit', 'Editar')}: ${agent?.name}` : t('Create New Agent', 'Crear Nuevo Agente')}
                         </h1>
-                        <p className="text-gray-500 text-sm">Configuración del Agente y Modelos AI</p>
+                        <p className="text-gray-500 text-sm">{t('Agent and AI Models Configuration', 'Configuración del Agente y Modelos AI')}</p>
                     </div>
                 </div>
                 <button
@@ -236,7 +238,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                     className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-medium rounded-xl hover:from-blue-500 hover:to-blue-400 transition-all disabled:opacity-50 shadow-lg shadow-blue-500/20"
                 >
                     {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                    {isEditing ? 'Guardar Cambios' : 'Crear Agente'}
+                    {isEditing ? t('Save Changes', 'Guardar Cambios') : t('Create Agent', 'Crear Agente')}
                 </button>
             </header>
 
@@ -247,19 +249,19 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                         onClick={() => setActiveTab('config')}
                         className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeTab === 'config' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
                     >
-                        Configuración
+                        {t('Configuration', 'Configuración')}
                     </button>
                     <button
                         onClick={() => setActiveTab('overview')}
                         className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeTab === 'overview' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
                     >
-                        Overview
+                        {t('Overview')}
                     </button>
                     <button
                         onClick={() => setActiveTab('results')}
                         className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeTab === 'results' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
                     >
-                        Resultados
+                        {t('Results', 'Resultados')}
                     </button>
                 </div>
             )}
@@ -275,7 +277,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
             {activeTab === 'results' && isEditing && agent?.id && (
                 <ResultsView
                     agentId={agent.id}
-                    title={`Resultados: ${agent.name}`}
+                    title={`${t('Results', 'Resultados')}: ${agent.name}`}
                     hideHeader={true}
                 />
             )}
@@ -288,29 +290,29 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                         <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
                             <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                                 <Bot size={20} className="text-blue-500" />
-                                Identidad del Agente
+                                {t('Agent Identity', 'Identidad del Agente')}
                             </h3>
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Nombre del Agente *</label>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Agent Name', 'Nombre del Agente')} *</label>
                                     <input
                                         type="text"
                                         value={formData.name}
                                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                        placeholder="Ej: Dakota, Luna, Carlos..."
+                                        placeholder={t('Example: Dakota, Luna, Carlos...', 'Ej: Dakota, Luna, Carlos...')}
                                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
                                     />
                                 </div>
                                 {isPlatformOwner ? (
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-1">Empresa / Proyecto *</label>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Company / Project', 'Empresa / Proyecto')} *</label>
                                         <select
                                             value={formData.empresa_id || ''}
                                             onChange={(e) => setFormData({ ...formData, empresa_id: e.target.value ? Number(e.target.value) : null })}
                                             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none bg-white"
                                         >
-                                            <option value="" disabled>-- Selecciona Empresa --</option>
+                                            <option value="" disabled>-- {t('Select Company', 'Selecciona Empresa')} --</option>
                                             {empresas.map(emp => (
                                                 <option key={emp.id} value={emp.id}>{emp.nombre}</option>
                                             ))}
@@ -318,12 +320,12 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                     </div>
                                 ) : (
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-1">Caso de Uso</label>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Use Case', 'Caso de Uso')}</label>
                                         <input
                                             type="text"
                                             value={formData.use_case}
                                             onChange={(e) => setFormData({ ...formData, use_case: e.target.value })}
-                                            placeholder="Ej: Encuesta de satisfacción"
+                                            placeholder={t('Example: Satisfaction Survey', 'Ej: Encuesta de satisfacción')}
                                             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
                                         />
                                     </div>
@@ -332,36 +334,36 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
                             {isPlatformOwner && (
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Caso de Uso</label>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Use Case', 'Caso de Uso')}</label>
                                     <input
                                         type="text"
                                         value={formData.use_case}
                                         onChange={(e) => setFormData({ ...formData, use_case: e.target.value })}
-                                        placeholder="Ej: Encuesta de satisfacción"
+                                        placeholder={t('Example: Satisfaction Survey', 'Ej: Encuesta de satisfacción')}
                                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
                                     />
                                 </div>
                             )}
 
                             <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Saludo Inicial</label>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Initial Greeting', 'Saludo Inicial')}</label>
                                 <input
                                     type="text"
                                     value={formData.greeting}
                                     onChange={(e) => setFormData({ ...formData, greeting: e.target.value })}
-                                    placeholder="Hola, soy..."
+                                    placeholder={t('Hello, I am...', 'Hola, soy...')}
                                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
                                 />
-                                <p className="text-xs text-gray-400 mt-1">Lo primero que dirá el agente al contestar.</p>
+                                <p className="text-xs text-gray-400 mt-1">{t('The first thing the agent will say when answering.', 'Lo primero que dirá el agente al contestar.')}</p>
                             </div>
 
                             <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Descripción</label>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Description', 'Descripción')}</label>
                                 <textarea
                                     rows={2}
                                     value={formData.description}
                                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                    placeholder="Breve descripción del propósito del agente"
+                                    placeholder={t('Brief description of the agent\'s purpose', 'Breve descripción del propósito del agente')}
                                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none resize-none"
                                 />
                             </div>
@@ -373,7 +375,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                 <div className="flex items-center gap-3">
                                     <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                                         <Brain size={20} className="text-purple-500" />
-                                        Instrucciones (Prompt)
+                                        {t('Instructions (Prompt)', 'Instrucciones (Prompt)')}
                                     </h3>
                                     {(hasPermission('ai_prompt_generator') || isPlatformOwner) && (
                                         <button
@@ -381,7 +383,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                             className="flex items-center gap-1.5 px-3 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-full border border-purple-200 transition-colors"
                                         >
                                             <Sparkles size={14} />
-                                            Mago IA Extra
+                                            {t('Extra AI Wizard', 'Mago IA Extra')}
                                         </button>
                                     )}
                                 </div>
@@ -392,14 +394,14 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                         onChange={(e) => {
                                             const template = templates.find(t => t.id === Number(e.target.value));
                                             if (template) {
-                                                if (confirm('¿Reemplazar las instrucciones actuales con esta plantilla?')) {
+                                                if (confirm(t('Replace current instructions with this template?', '¿Reemplazar las instrucciones actuales con esta plantilla?'))) {
                                                     setFormData({ ...formData, instructions: template.content });
                                                 }
                                             }
                                         }}
                                         value=""
                                     >
-                                        <option value="" disabled>📂 Cargar Plantilla...</option>
+                                        <option value="" disabled>📂 {t('Load Template...', 'Cargar Plantilla...')}</option>
                                         {templates.map(t => (
                                             <option key={t.id} value={t.id}>{t.name}</option>
                                         ))}
@@ -407,7 +409,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
                                     <button
                                         onClick={async () => {
-                                            const name = prompt('Nombre para la nueva plantilla:');
+                                            const name = prompt(t('Name for the new template:', 'Nombre para la nueva plantilla:'));
                                             if (name) {
                                                 const { error } = await supabase.from('prompt_templates').insert({
                                                     name,
@@ -415,16 +417,16 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                                     content: formData.instructions
                                                 });
                                                 if (!error) {
-                                                    alert('Plantilla guardada!');
+                                                    alert(t('Template saved!', 'Plantilla guardada!'));
                                                     loadTemplates();
                                                 } else {
-                                                    alert('Error al guardar plantilla');
+                                                    alert(t('Error saving template', 'Error al guardar plantilla'));
                                                 }
                                             }
                                         }}
                                         className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg border border-gray-200 transition-colors"
                                     >
-                                        💾 Guardar como Plantilla
+                                        💾 {t('Save as Template', 'Guardar como Plantilla')}
                                     </button>
                                 </div>
                             </div>
@@ -433,26 +435,26 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                 rows={15}
                                 value={formData.instructions}
                                 onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
-                                placeholder="Define aquí la personalidad, misión y reglas del agente..."
+                                placeholder={t('Define the agent\'s personality, mission, and rules here...', 'Define aquí la personalidad, misión y reglas del agente...')}
                                 className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500/20 outline-none font-mono text-sm bg-gray-50"
                             />
-                            <p className="text-xs text-gray-500">Define aquí la personalidad, misión y reglas del agente.</p>
+                            <p className="text-xs text-gray-500">{t('Define the agent\'s personality, mission, and rules here.', 'Define aquí la personalidad, misión y reglas del agente.')}</p>
                         </section>
 
                         {/* Critical Rules */}
                         <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
                             <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                                 <X size={20} className="text-red-500" />
-                                Reglas Críticas (No negociables)
+                                {t('Critical Rules (Non-negotiable)', 'Reglas Críticas (No negociables)')}
                             </h3>
                             <textarea
                                 rows={5}
                                 value={formData.critical_rules}
                                 onChange={(e) => setFormData({ ...formData, critical_rules: e.target.value })}
-                                placeholder="Ej: No colgar sin antes agradecer. No dar información técnica. Repetir si el cliente no entiende..."
+                                placeholder={t('Ex: Do not hang up without thanking first. Do not give technical information. Repeat if the client does not understand...', 'Ej: No colgar sin antes agradecer. No dar información técnica. Repetir si el cliente no entiende...')}
                                 className="w-full px-4 py-3 border border-red-100 rounded-lg focus:ring-2 focus:ring-red-500/20 outline-none font-mono text-sm bg-red-50/20"
                             />
-                            <p className="text-xs text-gray-500">Estas reglas se aplicarán con máxima prioridad sobre cualquier otra instrucción.</p>
+                            <p className="text-xs text-gray-500">{t('These rules will be applied with maximum priority over any other instruction.', 'Estas reglas se aplicarán con máxima prioridad sobre cualquier otra instrucción.')}</p>
                         </section>
                     </div>
 
@@ -461,10 +463,10 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                         {/* LLM Config */}
                         <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
                             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                                <Brain size={16} /> Modelo de Lenguaje (LLM)
+                                <Brain size={16} /> {t('Language Model (LLM)', 'Modelo de Lenguaje (LLM)')}
                             </h3>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
                                 <select
                                     value={aiConfig.llm_provider}
                                     onChange={(e) => {
@@ -485,21 +487,21 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Idioma del Agente</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Agent Language', 'Idioma del Agente')}</label>
                                 <select
                                     value={aiConfig.language || 'es'}
                                     onChange={(e) => setAiConfig({ ...aiConfig, language: e.target.value })}
                                     className="w-full px-3 py-2 border rounded-lg bg-white"
                                 >
-                                    <option value="es">Español (es)</option>
-                                    <option value="en">Inglés (en)</option>
-                                    <option value="eu">Euskera (eu)</option>
-                                    <option value="gl">Gallego (gl)</option>
+                                    <option value="es">{t('Spanish', 'Español')} (es)</option>
+                                    <option value="en">{t('English', 'Inglés')} (en)</option>
+                                    <option value="eu">{t('Basque', 'Euskera')} (eu)</option>
+                                    <option value="gl">{t('Galician', 'Gallego')} (gl)</option>
                                 </select>
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
                                 <select
                                     value={aiConfig.llm_model}
                                     onChange={(e) => setAiConfig({ ...aiConfig, llm_model: e.target.value })}
@@ -537,10 +539,10 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                         {/* TTS Config */}
                         <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
                             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                                <Speaker size={16} /> Voz (TTS)
+                                <Speaker size={16} /> {t('Voice (TTS)', 'Voz (TTS)')}
                             </h3>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
                                 <select
                                     value={aiConfig.tts_provider}
                                     onChange={(e) => setAiConfig({ ...aiConfig, tts_provider: e.target.value })}
@@ -552,7 +554,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
                                 <input
                                     type="text"
                                     value={aiConfig.tts_model}
@@ -561,16 +563,16 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Voz (Voice ID)</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Voice (Voice ID)', 'Voz (Voice ID)')}</label>
                                 {aiConfig.tts_provider === 'elevenlabs' ? (
                                     <select
                                         value={aiConfig.tts_voice}
                                         onChange={(e) => setAiConfig({ ...aiConfig, tts_voice: e.target.value })}
                                         className="w-full px-3 py-2 border rounded-lg font-mono text-xs bg-white"
                                     >
-                                        <option value="gD1lexrzCvxYPHUuTDs3">Española (Gisela)</option>
+                                        <option value="gD1lexrzCvxYPHUuTDs3">{t('Spanish (Gisela)', 'Española (Gisela)')}</option>
                                         {hasPermission('premium_voice') && (
-                                            <option value="a2f12ebd-80df-4de7-83f3-809599135b1d">Voz Ausarta (Premium)</option>
+                                            <option value="a2f12ebd-80df-4de7-83f3-809599135b1d">{t('Ausarta Voice (Premium)', 'Voz Ausarta (Premium)')}</option>
                                         )}
                                         {/* Fallback for custom IDs if already set */}
                                         {!["gD1lexrzCvxYPHUuTDs3", "a2f12ebd-80df-4de7-83f3-809599135b1d"].includes(aiConfig.tts_voice) && (
@@ -583,19 +585,19 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                         onChange={(e) => setAiConfig({ ...aiConfig, tts_voice: e.target.value })}
                                         className="w-full px-3 py-2 border rounded-lg font-mono text-xs bg-white"
                                     >
-                                        <option value="cefcb124-080b-4655-b31f-932f3ee743de">Castellano - Chica</option>
-                                        <option value="3380a516-6acc-4389-97c8-68273b540dd3">Castellano - Chico</option>
+                                        <option value="cefcb124-080b-4655-b31f-932f3ee743de">{t('Spanish - Female', 'Castellano - Chica')}</option>
+                                        <option value="3380a516-6acc-4389-97c8-68273b540dd3">{t('Spanish - Male', 'Castellano - Chico')}</option>
                                         {hasPermission('premium_voice') && (
-                                            <option value="44c5567b-1b68-4873-8231-4e7660f749ad">Castellano - Chica (Ausarta)</option>
+                                            <option value="44c5567b-1b68-4873-8231-4e7660f749ad">{t('Spanish - Female (Ausarta)', 'Castellano - Chica (Ausarta)')}</option>
                                         )}
-                                        <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">Euskera - Chica</option>
-                                        <option value="a62209c3-9f0a-4474-9b51-84b191593f49">Euskera - Chico</option>
-                                        <option value="96eade6e-d863-4f9a-8b08-5d7b74d1643b">Gallego - Chica</option>
-                                        <option value="4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2">Gallego - Chico</option>
-                                        <option value="62ae83ad-4f6a-430b-af41-a9bede9286ca">Inglés - Chica</option>
-                                        <option value="0ad65e7f-006c-47cf-bd31-52279d487913">Inglés - Chico</option>
+                                        <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">{t('Basque - Female', 'Euskera - Chica')}</option>
+                                        <option value="a62209c3-9f0a-4474-9b51-84b191593f49">{t('Basque - Male', 'Euskera - Chico')}</option>
+                                        <option value="96eade6e-d863-4f9a-8b08-5d7b74d1643b">{t('Galician - Female', 'Gallego - Chica')}</option>
+                                        <option value="4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2">{t('Galician - Male', 'Gallego - Chico')}</option>
+                                        <option value="62ae83ad-4f6a-430b-af41-a9bede9286ca">{t('English - Female', 'Inglés - Chica')}</option>
+                                        <option value="0ad65e7f-006c-47cf-bd31-52279d487913">{t('English - Male', 'Inglés - Chico')}</option>
                                         {!["cefcb124-080b-4655-b31f-932f3ee743de", "3380a516-6acc-4389-97c8-68273b540dd3", "44c5567b-1b68-4873-8231-4e7660f749ad", "a62209c3-9f0a-4474-9b51-84b191593f49", "99543693-cf6e-4e1d-9259-2e5cc9a0f76b", "4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2", "96eade6e-d863-4f9a-8b08-5d7b74d1643b", "62ae83ad-4f6a-430b-af41-a9bede9286ca", "0ad65e7f-006c-47cf-bd31-52279d487913"].includes(aiConfig.tts_voice) && (
-                                            <option value={aiConfig.tts_voice}>Custom: {aiConfig.tts_voice}</option>
+                                            <option value={aiConfig.tts_voice}>{t('Custom', 'Personalizado')}: {aiConfig.tts_voice}</option>
                                         )}
                                     </select>
                                 ) : (
@@ -604,7 +606,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                         value={aiConfig.tts_voice}
                                         onChange={(e) => setAiConfig({ ...aiConfig, tts_voice: e.target.value })}
                                         className="w-full px-3 py-2 border rounded-lg font-mono text-xs"
-                                        placeholder="Escribe el ID de voz"
+                                        placeholder={t('Type voice ID', 'Escribe el ID de voz')}
                                     />
                                 )}
                             </div>
@@ -613,10 +615,10 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                         {/* STT Config */}
                         <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
                             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                                <Mic size={16} /> Transcripción (STT)
+                                <Mic size={16} /> {t('Transcription (STT)', 'Transcripción (STT)')}
                             </h3>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
                                 <select
                                     value={aiConfig.stt_provider}
                                     onChange={(e) => setAiConfig({ ...aiConfig, stt_provider: e.target.value })}
@@ -627,7 +629,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
                                 <input
                                     type="text"
                                     value={aiConfig.stt_model}
@@ -646,7 +648,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg border border-purple-100 overflow-hidden transform transition-all">
                         <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4 flex justify-between items-center">
                             <h2 className="text-white font-bold text-lg flex items-center gap-2">
-                                <Sparkles size={20} /> Asistente Mago IA
+                                <Sparkles size={20} /> {t('AI Wizard Assistant', 'Asistente Mago IA')}
                             </h2>
                             <button onClick={() => setShowAiPromptModal(false)} className="text-white/80 hover:text-white transition-colors">
                                 <X size={20} />
@@ -654,14 +656,14 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                         </div>
                         <div className="p-6 space-y-4">
                             <p className="text-sm text-gray-600">
-                                Describe cómo quieres que sea tu agente o qué preguntas debe realizar.
-                                La Inteligencia Artificial estructurará las reglas y el prompt por ti.
+                                {t('Describe how you want your agent to be or what questions it should ask.', 'Describe cómo quieres que sea tu agente o qué preguntas debe realizar.')}
+                                {t('Artificial Intelligence will structure the rules and prompt for you.', 'La Inteligencia Artificial estructurará las reglas y el prompt por ti.')}
                             </p>
                             <textarea
                                 value={aiPromptRequest}
                                 onChange={(e) => setAiPromptRequest(e.target.value)}
                                 rows={5}
-                                placeholder="Ej: Quiero que actúe como una secretaria amable y haga una encuesta de satisfacción con 3 preguntas..."
+                                placeholder={t('Ex: I want it to act like a friendly secretary and do a satisfaction survey with 3 questions...', 'Ej: Quiero que actúe como una secretaria amable y haga una encuesta de satisfacción con 3 preguntas...')}
                                 className="w-full px-4 py-3 border border-purple-200 rounded-xl focus:ring-2 focus:ring-purple-500/30 outline-none text-sm resize-none bg-purple-50/30"
                             />
 
@@ -670,7 +672,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                     onClick={() => setShowAiPromptModal(false)}
                                     className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
                                 >
-                                    Cancelar
+                                    {t('Cancel', 'Cancelar')}
                                 </button>
                                 <button
                                     onClick={handleGenerateAIPrompt}
@@ -678,7 +680,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                     className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-sm font-semibold rounded-lg shadow-md shadow-purple-500/20 transition-all disabled:opacity-50"
                                 >
                                     {isGeneratingPrompt ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                                    {isGeneratingPrompt ? 'Creando Magia...' : 'Generar Prompt'}
+                                    {isGeneratingPrompt ? t('Creating Magic...', 'Creando Magia...') : t('Generate Prompt', 'Generar Prompt')}
                                 </button>
                             </div>
                         </div>

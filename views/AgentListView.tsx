@@ -2,10 +2,12 @@
 import { Bot, Loader2, Search, Building2, ChevronRight, ArrowLeft, Users, Mail, Trash2, Settings } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
+import { useTranslation } from "react-i18next";
 import type { AgentConfig, AIConfig, Empresa, UserProfile } from "../types";
 
 const AgentListView: React.FC = () => {
     const { profile, isRole } = useAuth();
+    const { t } = useTranslation();
 
     const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
     const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
@@ -81,9 +83,9 @@ const AgentListView: React.FC = () => {
     };
 
     const handleCreateEmpresa = async () => {
-        const nombre = prompt("Nombre de la nueva Empresa / Proyecto:");
+        const nombre = prompt(t("New Company / Project Name:", "Nombre de la nueva Empresa / Proyecto:"));
         if (!nombre) return;
-        const responsable = prompt("Nombre del Responsable:");
+        const responsable = prompt(t("Manager Name:", "Nombre del Responsable:"));
         if (!responsable) return;
 
         try {
@@ -91,17 +93,17 @@ const AgentListView: React.FC = () => {
             if (error) throw error;
             loadEmpresas();
         } catch (err) {
-            alert("Error al crear la empresa");
+            alert(t("Error creating company", "Error al crear la empresa"));
         }
     };
 
     const handleEditEmpresa = async (e: React.MouseEvent, emp: Empresa) => {
         e.stopPropagation();
-        const nombre = prompt("Editar nombre de la empresa:", emp.nombre);
+        const nombre = prompt(t("Edit company name:", "Editar nombre de la empresa:"), emp.nombre);
         if (nombre === null) return;
-        const responsable = prompt("Editar responsable:", emp.responsable);
+        const responsable = prompt(t("Edit manager:", "Editar responsable:"), emp.responsable);
         if (responsable === null) return;
-        const maxAdminsVal = prompt("Editar límite de administradores:", String(emp.max_admins || 1));
+        const maxAdminsVal = prompt(t("Edit admin limit:", "Editar límite de administradores:"), String(emp.max_admins || 1));
         if (maxAdminsVal === null) return;
         const max_admins = parseInt(maxAdminsVal);
 
@@ -112,17 +114,17 @@ const AgentListView: React.FC = () => {
             if (error) throw error;
             loadEmpresas();
         } catch (err) {
-            alert("Error al actualizar la empresa");
+            alert(t("Error updating company", "Error al actualizar la empresa"));
         }
     };
 
     const handleDeleteEmpresa = async (id: number) => {
-        if (!confirm("¿Seguro que quieres eliminar esta empresa y TODOS sus agentes?")) return;
+        if (!confirm(t("Are you sure you want to delete this company and ALL its agents?", "¿Seguro que quieres eliminar esta empresa y TODOS sus agentes?"))) return;
         try {
             await supabase.from("empresas").delete().eq("id", id);
             loadEmpresas();
         } catch (err) {
-            alert("Error al eliminar");
+            alert(t("Error deleting", "Error al eliminar"));
         }
     };
 
@@ -133,13 +135,13 @@ const AgentListView: React.FC = () => {
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div className="animate-in fade-in slide-in-from-left-4 duration-500">
                         <button onClick={() => setSelectedEmpresa(null)} className="flex items-center gap-1 text-sm text-gray-500 hover:text-blue-600 mb-2 transition-colors">
-                            <ArrowLeft size={16} /> Volver a Empresas
+                            <ArrowLeft size={16} /> {t("Back to Companies", "Volver a Empresas")}
                         </button>
                         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
                             <Building2 size={24} className="text-blue-500" />
                             {selectedEmpresa.nombre}
                         </h1>
-                        <p className="text-gray-500 text-sm">Responsable: {selectedEmpresa.responsable}</p>
+                        <p className="text-gray-500 text-sm">{t("Manager", "Responsable")}: {selectedEmpresa.responsable}</p>
                     </div>
                 </div>
 
@@ -149,13 +151,13 @@ const AgentListView: React.FC = () => {
                         onClick={() => setActiveTab("agents")}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === "agents" ? "bg-white text-blue-600 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
                     >
-                        <Bot size={18} /> Agentes ({agents.length})
+                        <Bot size={18} /> {t("Agents")} ({agents.length})
                     </button>
                     <button
                         onClick={() => setActiveTab("users")}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === "users" ? "bg-white text-blue-600 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
                     >
-                        <Users size={18} /> Usuarios ({companyUsers.length})
+                        <Users size={18} /> {t("Users", "Usuarios")} ({companyUsers.length})
                     </button>
                 </div>
 
@@ -163,7 +165,7 @@ const AgentListView: React.FC = () => {
                     <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
                         type="text"
-                        placeholder={activeTab === "agents" ? "Buscar agentes..." : "Buscar usuarios..."}
+                        placeholder={activeTab === "agents" ? t("Search agents...", "Buscar agentes...") : t("Search users...", "Buscar usuarios...")}
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl outline-none focus:border-blue-400 transition-all"
@@ -177,8 +179,8 @@ const AgentListView: React.FC = () => {
                         {agents.length === 0 ? (
                             <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-gray-200">
                                 <Bot size={40} className="mx-auto text-gray-300 mb-3" />
-                                <p className="text-gray-500 font-medium">Esta empresa no tiene agentes aún</p>
-                                <p className="text-gray-400 text-sm mt-1">Ve a la pestaña "Agentes" del menú lateral para crear uno.</p>
+                                <p className="text-gray-500 font-medium">{t("This company has no agents yet", "Esta empresa no tiene agentes aún")}</p>
+                                <p className="text-gray-400 text-sm mt-1">{t("Go to the 'Agents' tab in the side menu to create one.", "Ve a la pestaña \"Agentes\" del menú lateral para crear uno.")}</p>
                             </div>
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -190,10 +192,10 @@ const AgentListView: React.FC = () => {
                                             </div>
                                             <div>
                                                 <h3 className="font-semibold text-gray-900">{agent.name}</h3>
-                                                <p className="text-xs text-gray-400">{agent.use_case || "Sin caso de uso"}</p>
+                                                <p className="text-xs text-gray-400">{agent.use_case || t("No use case", "Sin caso de uso")}</p>
                                             </div>
                                         </div>
-                                        <p className="text-sm text-gray-500 my-4 line-clamp-2">{agent.description || "Sin descripción"}</p>
+                                        <p className="text-sm text-gray-500 my-4 line-clamp-2">{agent.description || t("No description", "Sin descripción")}</p>
                                         {agent.ai_config && (
                                             <div className="flex flex-wrap gap-1.5 text-[10px]">
                                                 <span className="px-2 py-0.5 bg-purple-50 text-purple-600 rounded-full font-medium">
@@ -239,8 +241,8 @@ const AgentListView: React.FC = () => {
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Empresas y Clientes</h1>
-                    <p className="text-gray-500 text-sm">Visualiza y gestiona la estructura multitenant</p>
+                    <h1 className="text-2xl font-bold text-gray-900">{t("Companies and Clients", "Empresas y Clientes")}</h1>
+                    <p className="text-gray-500 text-sm">{t("View and manage multitenant structure", "Visualiza y gestiona la estructura multitenant")}</p>
                 </div>
                 {isPlatformOwner && (
                     <button
@@ -248,7 +250,7 @@ const AgentListView: React.FC = () => {
                         className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-xl hover:bg-gray-800 transition-all font-medium text-sm shadow-lg shadow-gray-200"
                     >
                         <Building2 size={18} />
-                        Crear Nueva Empresa
+                        {t("Create New Company", "Crear Nueva Empresa")}
                     </button>
                 )}
             </div>
@@ -261,7 +263,7 @@ const AgentListView: React.FC = () => {
                         onChange={(e) => setSelectedResponsable(e.target.value)}
                         className="px-4 py-2.5 border border-gray-200 rounded-xl outline-none focus:border-blue-400 bg-white text-sm font-medium"
                     >
-                        <option value="all">👤 Todos los responsables</option>
+                        <option value="all">👤 {t("All managers", "Todos los responsables")}</option>
                         {Array.from(new Set(empresas.map(e => e.responsable).filter(Boolean))).sort().map(resp => (
                             <option key={resp} value={resp}>👤 {resp}</option>
                         ))}
@@ -272,7 +274,7 @@ const AgentListView: React.FC = () => {
                     <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
                         type="text"
-                        placeholder="Buscar empresa o responsable..."
+                        placeholder={t("Search company or manager...", "Buscar empresa o responsable...")}
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl outline-none focus:border-blue-400 transition-all bg-white text-sm"
@@ -286,8 +288,8 @@ const AgentListView: React.FC = () => {
                 ) : empresas.length === 0 ? (
                     <div className="col-span-full text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200">
                         <Building2 size={48} className="mx-auto text-gray-300 mb-4" />
-                        <h3 className="text-lg font-semibold text-gray-700">Comienza creando una empresa</h3>
-                        <p className="text-gray-400 text-sm">Podrás separar agentes y usuarios por cada cliente.</p>
+                        <h3 className="text-lg font-semibold text-gray-700">{t("Start by creating a company", "Comienza creando una empresa")}</h3>
+                        <p className="text-gray-400 text-sm">{t("You will be able to separate agents and users for each client.", "Podrás separar agentes y usuarios por cada cliente.")}</p>
                     </div>
                 ) : (
                     empresas
@@ -315,14 +317,14 @@ const AgentListView: React.FC = () => {
 
                                 <div>
                                     <h3 className="text-xl font-bold text-gray-900 group-hover:text-blue-600 transition-colors uppercase tracking-tight">{empresa.nombre}</h3>
-                                    <p className="text-sm text-gray-500 font-medium whitespace-nowrap overflow-hidden text-ellipsis">Responsable: {empresa.responsable}</p>
+                                    <p className="text-sm text-gray-500 font-medium whitespace-nowrap overflow-hidden text-ellipsis">{t("Manager", "Responsable")}: {empresa.responsable}</p>
                                     <p className="text-[10px] text-gray-400 mt-1 uppercase font-bold tracking-widest">
-                                        Límite Admins: {empresa.nombre === 'Ausarta' ? 'Ilimitado' : (empresa.max_admins || 1)}
+                                        {t("Admin Limit", "Límite Admins")}: {empresa.nombre === 'Ausarta' ? t('Unlimited', 'Ilimitado') : (empresa.max_admins || 1)}
                                     </p>
                                 </div>
 
                                 <div className="pt-4 flex items-center gap-2 text-xs font-bold text-blue-500 opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all">
-                                    VER EMPRESA <ChevronRight size={14} />
+                                    {t("VIEW COMPANY", "VER EMPRESA")} <ChevronRight size={14} />
                                 </div>
                             </div>
                         ))

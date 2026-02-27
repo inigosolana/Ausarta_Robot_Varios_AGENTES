@@ -42,6 +42,7 @@ import AgentManagementView from './views/AgentManagementView';
 import LoginView from './views/LoginView';
 import CrmIntegrationView from './views/CrmIntegrationView';
 import AssistantView from './views/AssistantView';
+import AssistantPanel from './components/AssistantPanel';
 
 const App: React.FC = () => {
   const { user, profile, loading, signOut, hasPermission, isRole } = useAuth();
@@ -50,6 +51,7 @@ const App: React.FC = () => {
   const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
   const [currentView, setCurrentView] = useState<ViewState | 'results' | 'admin' | 'crm'>('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isChatOpen, setIsChatOpen] = useState(false);
   const [isCalling, setIsCalling] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const queryClient = useQueryClient();
@@ -163,7 +165,7 @@ const App: React.FC = () => {
     switch (profile.role) {
       case 'superadmin': return 'Superadmin';
       case 'admin': return 'Admin';
-      default: return 'Usuario';
+      default: return t('User', 'Usuario');
     }
   };
 
@@ -198,12 +200,12 @@ const App: React.FC = () => {
             )}
 
             <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
-              Build
+              {t('Build', 'Construcción')}
             </div>
             {isPlatformOwner && hasPermission('empresas') && (
               <SidebarItem
                 icon={<Building2 size={18} />}
-                label={t('Empresas')}
+                label={t('Companies', 'Empresas')}
                 isActive={currentView === 'empresas' || currentView === 'create-agents'}
                 onClick={() => setCurrentView('empresas')}
                 collapsed={!isSidebarOpen}
@@ -239,7 +241,7 @@ const App: React.FC = () => {
             {isPlatformOwner && hasPermission('models') && (
               <SidebarItem
                 icon={<Cpu size={18} />}
-                label="AI Models"
+                label={t('AI Models', 'Modelos AI')}
                 isActive={currentView === 'models'}
                 onClick={() => setCurrentView('models')}
                 collapsed={!isSidebarOpen}
@@ -248,7 +250,7 @@ const App: React.FC = () => {
             {isPlatformOwner && hasPermission('telephony') && (
               <SidebarItem
                 icon={<PhoneCall size={18} />}
-                label="Telephony"
+                label={t('Telephony', 'Telefonía')}
                 isActive={currentView === 'telephony'}
                 onClick={() => setCurrentView('telephony')}
                 collapsed={!isSidebarOpen}
@@ -256,7 +258,7 @@ const App: React.FC = () => {
             )}
 
             <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
-              Observe
+              {t('Observe', 'Observación')}
             </div>
             {hasPermission('results') && (
               <SidebarItem
@@ -270,7 +272,7 @@ const App: React.FC = () => {
             {hasPermission('assistant') && (
               <SidebarItem
                 icon={<BotMessageSquare size={18} />}
-                label="Ausarta Copilot"
+                label={t('Ausarta Copilot', 'Ausarta Copilot')}
                 isActive={currentView === 'assistant'}
                 onClick={() => setCurrentView('assistant')}
                 collapsed={!isSidebarOpen}
@@ -279,7 +281,7 @@ const App: React.FC = () => {
             {hasPermission('usage') && (
               <SidebarItem
                 icon={<BarChart3 size={18} />}
-                label="Usage"
+                label={t('Usage', 'Uso')}
                 isActive={currentView === 'usage'}
                 onClick={() => setCurrentView('usage')}
                 collapsed={!isSidebarOpen}
@@ -290,18 +292,18 @@ const App: React.FC = () => {
             {isRole('superadmin', 'admin') && (
               <>
                 <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
-                  Admin
+                  {t('Admin', 'Administración')}
                 </div>
                 <SidebarItem
                   icon={<Users size={18} />}
-                  label="Usuarios"
+                  label={t('Users', 'Usuarios')}
                   isActive={currentView === 'admin'}
                   onClick={() => setCurrentView('admin')}
                   collapsed={!isSidebarOpen}
                 />
                 <SidebarItem
                   icon={<Building2 size={18} />}
-                  label="Integraciones CRM"
+                  label={t('CRM Integration', 'Integración CRM')}
                   isActive={currentView === 'crm'}
                   onClick={() => setCurrentView('crm')}
                   collapsed={!isSidebarOpen}
@@ -351,34 +353,42 @@ const App: React.FC = () => {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-y-auto p-8 relative">
+        <main className={`flex-1 overflow-y-auto p-8 relative transition-all duration-300 ${isChatOpen ? 'mr-0 sm:mr-[400px]' : 'mr-0'}`}>
           <div className="max-w-6xl mx-auto">
             {alerts.length > 0 && (
               <div className="mb-6 space-y-2">
                 {alerts.map((alert: any) => (
-                  <div key={alert.id} className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg flex items-center justify-between shadow-sm animate-pulse">
+                  <div key={alert.id} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 p-4 rounded-xl flex items-center justify-between shadow-sm animate-pulse">
                     <div className="flex items-center gap-3">
-                      <div className="bg-red-100 p-2 rounded-full">
-                        <Zap className="w-5 h-5 text-red-600" />
+                      <div className="bg-red-100 dark:bg-red-800/40 p-2 rounded-full">
+                        <Zap className="w-5 h-5 text-red-600 dark:text-red-400" />
                       </div>
                       <div>
-                        <h3 className="font-bold text-sm uppercase">{alert.type === 'api_limit' ? '⚠️ API Limit Reached' : 'System Alert'}</h3>
-                        <p className="text-sm">{alert.message}</p>
+                        <p className="font-bold text-sm">{alert.type === 'error' ? t('Critical System Error', 'Error Crítico del Sistema') : t('System Alert', 'Alerta del Sistema')}</p>
+                        <p className="text-xs opacity-80">{alert.message}</p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => resolveAlert(alert.id)}
-                      className="px-3 py-1 bg-red-100 rounded text-xs hover:bg-red-200"
-                    >
-                      Dismiss
-                    </button>
+                    <button onClick={() => resolveAlert(alert.id)} className="text-xs font-bold hover:underline">{t('Resolve', 'Resolver')}</button>
                   </div>
                 ))}
               </div>
             )}
             {renderContent()}
           </div>
+
+          {/* Floating Bot Button */}
+          {!isChatOpen && (
+            <button
+              onClick={() => setIsChatOpen(true)}
+              className="fixed bottom-8 right-8 w-16 h-16 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-2xl hover:bg-blue-700 transition-all hover:scale-110 active:scale-95 z-40 group overflow-hidden"
+            >
+              <div className="absolute inset-0 bg-blue-500 rounded-full animate-ping opacity-20 pointer-events-none group-hover:block"></div>
+              <Bot size={28} />
+            </button>
+          )}
         </main>
+
+        <AssistantPanel isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
 
         {/* Live Call Overlay */}
         {isCalling && (

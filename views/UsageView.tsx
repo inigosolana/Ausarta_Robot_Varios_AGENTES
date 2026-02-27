@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart3, Globe, Cpu, Mic, Volume2, AlertTriangle, XCircle, Zap, Terminal, RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
 
 const UsageView: React.FC = () => {
     const { profile, isRole } = useAuth();
+    const { t } = useTranslation();
     const [integrations, setIntegrations] = useState<any[]>([]);
     const [usage, setUsage] = useState<any>(null);
     const [alerts, setAlerts] = useState<any[]>([]);
@@ -68,7 +70,7 @@ const UsageView: React.FC = () => {
         }
     };
 
-    if (isLoading) return <div className="p-8 text-center text-gray-500">Cargando datos de uso...</div>;
+    if (isLoading) return <div className="p-8 text-center text-gray-500">{t('Loading usage data...', 'Cargando datos de uso...')}</div>;
 
     return (
         <div className="space-y-8 animate-fade-in">
@@ -76,16 +78,16 @@ const UsageView: React.FC = () => {
             <div>
                 <div className="flex items-center gap-3">
                     <BarChart3 className="text-blue-600" size={32} />
-                    <h2 className="text-3xl font-bold text-gray-900">Uso y APIs</h2>
+                    <h2 className="text-3xl font-bold text-gray-900">{t('Usage and APIs', 'Uso y APIs')}</h2>
                 </div>
-                <p className="text-gray-500 mt-1">Monitorización de servicios externos y consumo real</p>
+                <p className="text-gray-500 mt-1">{t('Monitoring of external services and real consumption', 'Monitorización de servicios externos y consumo real')}</p>
             </div>
 
             {/* API Status Section */}
             <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
                 <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
                     <Globe size={20} className="text-blue-500" />
-                    Estado de Integraciones
+                    {t('Integration Status', 'Estado de Integraciones')}
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     {integrations.map((int, i) => (
@@ -107,7 +109,7 @@ const UsageView: React.FC = () => {
                             <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">{int.name}</div>
                             <div className="text-xl font-bold text-gray-900">{int.provider}</div>
                             <div className="text-sm text-gray-500 mt-2 font-mono bg-white px-2 py-1 rounded border border-gray-50 truncate">
-                                {int.model || int.url || 'API Activa'}
+                                {int.model || int.url || t('API Active', 'API Activa')}
                             </div>
                         </div>
                     ))}
@@ -123,7 +125,7 @@ const UsageView: React.FC = () => {
                     <div className="text-2xl font-black text-gray-900">
                         {usage?.total_tokens?.toLocaleString() || 0}
                     </div>
-                    <h4 className="text-sm font-bold text-gray-500 uppercase tracking-wider">Total Tokens</h4>
+                    <h4 className="text-sm font-bold text-gray-500 uppercase tracking-wider">{t('Total Tokens', 'Total Tokens')}</h4>
                 </div>
 
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
@@ -133,7 +135,7 @@ const UsageView: React.FC = () => {
                     <div className="text-2xl font-black text-gray-900">
                         {usage?.total_minutes?.toLocaleString() || 0}
                     </div>
-                    <h4 className="text-sm font-bold text-gray-500 uppercase tracking-wider">Minutos Totales</h4>
+                    <h4 className="text-sm font-bold text-gray-500 uppercase tracking-wider">{t('Total Minutes', 'Minutos Totales')}</h4>
                 </div>
 
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
@@ -143,7 +145,7 @@ const UsageView: React.FC = () => {
                     <div className="text-2xl font-black text-gray-900">
                         {usage?.per_model_stats?.length || 0}
                     </div>
-                    <h4 className="text-sm font-bold text-gray-500 uppercase tracking-wider">Modelos Usados</h4>
+                    <h4 className="text-sm font-bold text-gray-500 uppercase tracking-wider">{t('Used Models', 'Modelos Usados')}</h4>
                 </div>
             </div>
 
@@ -152,18 +154,18 @@ const UsageView: React.FC = () => {
                 <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50">
                     <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
                         <Cpu size={16} className="text-blue-500" />
-                        DESGLOSE DE CONSUMO POR MODELO
+                        {t('CONSUMPTION BREAKDOWN PER MODEL', 'DESGLOSE DE CONSUMO POR MODELO')}
                     </h3>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="bg-white text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-50">
-                                <th className="px-6 py-3">Modelo / Motor</th>
-                                <th className="px-6 py-3">Llamadas</th>
-                                <th className="px-6 py-3">Tokens Totales</th>
-                                <th className="px-6 py-3">Tiempo (Min)</th>
-                                <th className="px-6 py-3">Eficiencia (T/min)</th>
+                                <th className="px-6 py-3">{t('Model / Engine', 'Modelo / Motor')}</th>
+                                <th className="px-6 py-3">{t('Calls', 'Llamadas')}</th>
+                                <th className="px-6 py-3">{t('Total Tokens', 'Tokens Totales')}</th>
+                                <th className="px-6 py-3">{t('Time (Min)', 'Tiempo (Min)')}</th>
+                                <th className="px-6 py-3">{t('Efficiency (T/min)', 'Eficiencia (T/min)')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
@@ -181,7 +183,7 @@ const UsageView: React.FC = () => {
                                     </td>
                                     <td className="px-6 py-4 text-sm text-gray-600 font-mono">{stat.calls}</td>
                                     <td className="px-6 py-4 text-sm font-bold text-blue-600 font-mono">{stat.tokens.toLocaleString()}</td>
-                                    <td className="px-6 py-4 text-sm text-gray-600 font-mono">{Math.round(stat.seconds / 60)} min</td>
+                                    <td className="px-6 py-4 text-sm text-gray-600 font-mono">{Math.round(stat.seconds / 60)} {t('min', 'min')}</td>
                                     <td className="px-6 py-4 text-sm text-gray-400 font-mono">
                                         {stat.seconds > 0 ? Math.round(stat.tokens / (stat.seconds / 60)) : 0}
                                     </td>
@@ -190,7 +192,7 @@ const UsageView: React.FC = () => {
                             {(!usage?.per_model_stats || usage.per_model_stats.length === 0) && (
                                 <tr>
                                     <td colSpan={5} className="px-6 py-8 text-center text-gray-400 text-sm italic">
-                                        No hay datos de consumo detallados todavía.
+                                        {t('No detailed consumption data available yet.', 'No hay datos de consumo detallados todavía.')}
                                     </td>
                                 </tr>
                             )}
@@ -204,7 +206,7 @@ const UsageView: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm animate-in fade-in slide-in-from-bottom-2">
                     <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
                         <Zap size={20} className="text-yellow-500" />
-                        Capacidades y Límites en Tiempo Real (Sistema)
+                        {t('Real-Time Capacities and Limits (System)', 'Capacidades y Límites en Tiempo Real (Sistema)')}
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {/* Groq Card with Model Selector */}
@@ -223,7 +225,7 @@ const UsageView: React.FC = () => {
                                             <div className="text-[10px] font-bold text-gray-400 truncate mb-2">{model}</div>
                                             <div className="space-y-2">
                                                 <div className="flex justify-between text-[11px]">
-                                                    <span className="text-gray-500 font-bold">Tokens (TPM):</span>
+                                                    <span className="text-gray-500 font-bold">{t('Tokens (TPM):', 'Tokens (TPM):')}</span>
                                                     <span className="font-mono">
                                                         <span className="font-bold text-blue-600">{Number(data.tokens_remaining).toLocaleString()}</span>
                                                         <span className="text-[10px] text-gray-400"> / {data.tokens_limit ? Number(data.tokens_limit).toLocaleString() : 'Limit'}</span>
@@ -236,7 +238,7 @@ const UsageView: React.FC = () => {
                                                     ></div>
                                                 </div>
                                                 <div className="flex justify-between text-[11px]">
-                                                    <span className="text-gray-500 font-bold">Peticiones (RPM):</span>
+                                                    <span className="text-gray-500 font-bold">{t('Requests (RPM):', 'Peticiones (RPM):')}</span>
                                                     <span className="font-mono">
                                                         <span className="font-bold text-gray-700">{data.requests_remaining}</span>
                                                         <span className="text-[10px] text-gray-400"> / {data.requests_limit || 'Limit'}</span>
@@ -260,7 +262,7 @@ const UsageView: React.FC = () => {
                                 </div>
                                 <div className="space-y-3">
                                     <div className="flex justify-between items-center text-xs">
-                                        <span className="text-gray-500">Tokens (TPM):</span>
+                                        <span className="text-gray-500">{t('Tokens (TPM):', 'Tokens (TPM):')}</span>
                                         <span className="font-mono">
                                             <span className="font-bold text-green-600">{liveLimits.openai.tokens_remaining ? Number(liveLimits.openai.tokens_remaining).toLocaleString() : '---'}</span>
                                             <span className="text-gray-400"> / {liveLimits.openai.tokens_limit ? Number(liveLimits.openai.tokens_limit).toLocaleString() : 'Limit'}</span>
@@ -273,7 +275,7 @@ const UsageView: React.FC = () => {
                                         ></div>
                                     </div>
                                     <div className="flex justify-between items-center text-xs">
-                                        <span className="text-gray-500">Peticiones (RPM):</span>
+                                        <span className="text-gray-500">{t('Requests (RPM):', 'Peticiones (RPM):')}</span>
                                         <span className="font-mono">
                                             <span className="font-bold text-gray-700">{liveLimits.openai.requests_remaining || '---'}</span>
                                             <span className="text-gray-400"> / {liveLimits.openai.requests_limit || 'Limit'}</span>
@@ -298,7 +300,7 @@ const UsageView: React.FC = () => {
                                 </div>
                                 <div className="space-y-3">
                                     <div className="flex justify-between items-center text-xs">
-                                        <span className="text-gray-500">Tokens (TPM):</span>
+                                        <span className="text-gray-500">{t('Tokens (TPM):', 'Tokens (TPM):')}</span>
                                         <span className="font-mono">
                                             <span className="font-bold text-blue-600">{liveLimits.deepseek.tokens_remaining ? Number(liveLimits.deepseek.tokens_remaining).toLocaleString() : '---'}</span>
                                             <span className="text-gray-400"> / {liveLimits.deepseek.tokens_limit ? Number(liveLimits.deepseek.tokens_limit).toLocaleString() : 'Limit'}</span>
@@ -311,7 +313,7 @@ const UsageView: React.FC = () => {
                                         ></div>
                                     </div>
                                     <div className="flex justify-between items-center text-xs">
-                                        <span className="text-gray-500">Peticiones (RPM):</span>
+                                        <span className="text-gray-500">{t('Requests (RPM):', 'Peticiones (RPM):')}</span>
                                         <span className="font-mono">
                                             <span className="font-bold text-gray-700">{liveLimits.deepseek.requests_remaining || '---'}</span>
                                             <span className="text-gray-400"> / {liveLimits.deepseek.requests_limit || 'Limit'}</span>
@@ -337,7 +339,7 @@ const UsageView: React.FC = () => {
                                     {liveLimits.deepgram.balances?.map((b: any, i: number) => (
                                         <div key={i} className="flex flex-col gap-1">
                                             <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
-                                                {b.units === 'USD' ? 'Créditos Disponibles' : 'Balance'}
+                                                {b.units === 'USD' ? t('Available Credits', 'Créditos Disponibles') : t('Balance', 'Balance')}
                                             </div>
                                             <div className="text-3xl font-black text-gray-900">
                                                 {b.units === 'USD' ? `$${Number(b.amount).toFixed(2)}` : `${b.amount} ${b.units}`}
@@ -345,7 +347,7 @@ const UsageView: React.FC = () => {
                                         </div>
                                     ))}
                                     <div className="text-[10px] text-gray-500 italic bg-white p-2 rounded border border-gray-100">
-                                        Este saldo se usa para transcripción en tiempo real (STT).
+                                        {t('This balance is used for real-time transcription (STT).', 'Este saldo se usa para transcripción en tiempo real (STT).')}
                                     </div>
                                 </div>
                             </div>
@@ -363,7 +365,7 @@ const UsageView: React.FC = () => {
                                 </div>
                                 <div className="space-y-3">
                                     <div className="flex justify-between items-center text-xs">
-                                        <span className="text-gray-500">Sobrantes:</span>
+                                        <span className="text-gray-500">{t('Remaining:', 'Sobrantes:')}</span>
                                         <span className="font-mono font-bold text-purple-600">
                                             {Number(liveLimits.elevenlabs.characters_remaining).toLocaleString()}
                                         </span>
@@ -375,7 +377,7 @@ const UsageView: React.FC = () => {
                                         ></div>
                                     </div>
                                     <div className="text-[10px] text-gray-400 text-center font-medium italic">
-                                        Total: {Number(liveLimits.elevenlabs.characters_limit / 1000).toLocaleString()}k chars
+                                        {t('Total:', 'Total:')} {Number(liveLimits.elevenlabs.characters_limit / 1000).toLocaleString()}k chars
                                     </div>
                                 </div>
                             </div>
@@ -400,7 +402,7 @@ const UsageView: React.FC = () => {
                                         rel="noopener noreferrer"
                                         className="block w-full text-center py-2 bg-white border border-purple-200 text-[10px] text-purple-600 font-bold rounded hover:bg-purple-50 transition-colors uppercase"
                                     >
-                                        Ver Saldo Cartesia
+                                        {t('View Cartesia Balance', 'Ver Saldo Cartesia')}
                                     </a>
                                 </div>
                             </div>
@@ -417,7 +419,7 @@ const UsageView: React.FC = () => {
                                 </div>
                                 <div className="space-y-3">
                                     <div className="flex justify-between items-center text-xs">
-                                        <span className="text-gray-500 font-bold">Capacidad estimada:</span>
+                                        <span className="text-gray-500 font-bold">{t('Estimated capacity:', 'Capacidad estimada:')}</span>
                                     </div>
                                     <div className="p-3 bg-blue-50 rounded border border-blue-100 space-y-2">
                                         <div className="flex justify-between text-[11px]">
@@ -429,7 +431,7 @@ const UsageView: React.FC = () => {
                                             <span className="font-bold text-blue-800">15</span>
                                         </div>
                                     </div>
-                                    <div className="text-[10px] text-gray-500 italic">Google no expone límites live vía API simple, se usan valores de Tier Standard.</div>
+                                    <div className="text-[10px] text-gray-500 italic">{t('Google does not expose live limits via simple API, Tier Standard values are used.', 'Google no expone límites live vía API simple, se usan valores de Tier Standard.')}</div>
                                     <button
                                         onClick={async () => {
                                             const res = await fetch(`${API_URL}/ai/diagnose-google`);
@@ -438,7 +440,7 @@ const UsageView: React.FC = () => {
                                         }}
                                         className="w-full py-2 border border-blue-200 text-[10px] text-blue-600 font-bold rounded hover:bg-blue-50 transition-colors uppercase"
                                     >
-                                        Diagnostar Modelos
+                                        {t('Diagnose Models', 'Diagnostar Modelos')}
                                     </button>
                                 </div>
                             </div>
@@ -454,9 +456,9 @@ const UsageView: React.FC = () => {
                         <Cpu size={24} />
                     </div>
                     <div>
-                        <h3 className="text-lg font-bold text-gray-900">Check Remaining Quota & Limits</h3>
+                        <h3 className="text-lg font-bold text-gray-900">{t('Check Remaining Quota & Limits', 'Check Remaining Quota & Limits')}</h3>
                         <p className="text-sm text-gray-600 mb-4">
-                            The metrics above show usage consumed by this agent. To see your exact remaining balance, credits, or rate limits, please visit your provider's dashboard:
+                            {t('The metrics above show usage consumed by this agent. To see your exact remaining balance, credits, or rate limits, please visit your provider\'s dashboard:', 'Las métricas anteriores muestran el uso consumido por este agente. Para ver su saldo restante exacto, créditos o límites de velocidad, visite el panel de su proveedor:')}
                         </p>
                         <div className="flex flex-wrap gap-3">
                             <a href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer" className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors">
@@ -489,10 +491,10 @@ const UsageView: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
                     <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
                         <AlertTriangle size={20} className="text-orange-500" />
-                        Alertas de Negocio
+                        {t('Business Alerts', 'Alertas de Negocio')}
                     </h3>
                     {alerts.length === 0 ? (
-                        <p className="text-gray-500 text-sm italic">No hay alertas activas en el sistema.</p>
+                        <p className="text-gray-500 text-sm italic">{t('No active alerts in the system.', 'No hay alertas activas en el sistema.')}</p>
                     ) : (
                         <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
                             {alerts.map((alert) => (
@@ -519,13 +521,13 @@ const UsageView: React.FC = () => {
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="text-lg font-bold text-white flex items-center gap-2">
                                 <Terminal size={20} className="text-green-400" />
-                                Consola de Logs (SIP)
+                                {t('Log Console (SIP)', 'Consola de Logs (SIP)')}
                             </h3>
                             <button
                                 onClick={loadSipLogs}
                                 disabled={isRefreshingLogs}
                                 className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 transition-colors disabled:opacity-50"
-                                title="Actualizar Logs"
+                                title={t('Update Logs', 'Actualizar Logs')}
                             >
                                 <RefreshCw size={16} className={isRefreshingLogs ? "animate-spin" : ""} />
                             </button>
@@ -533,7 +535,7 @@ const UsageView: React.FC = () => {
 
                         <div className="bg-black/50 rounded-lg p-4 font-mono text-[11px] text-green-500/90 h-[300px] overflow-y-auto space-y-1">
                             {sipLogs.length === 0 ? (
-                                <div className="text-gray-600 italic">Esperando logs del sistema...</div>
+                                <div className="text-gray-600 italic">{t('Waiting for system logs...', 'Esperando logs del sistema...')}</div>
                             ) : (
                                 sipLogs.map((log, i) => {
                                     let color = "text-green-500/80";
@@ -550,7 +552,7 @@ const UsageView: React.FC = () => {
                             )}
                         </div>
                         <div className="mt-4 flex justify-between items-center text-[10px] text-gray-500 uppercase tracking-widest font-bold">
-                            <span>Estado: Conectado</span>
+                            <span>{t('Status: Connected', 'Estado: Conectado')}</span>
                             <div className="flex items-center gap-2">
                                 <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
                                 Live System

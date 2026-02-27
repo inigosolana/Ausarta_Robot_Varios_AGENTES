@@ -9,6 +9,7 @@ import {
     Zap
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from 'react-i18next';
 
 // API URL
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
@@ -69,35 +70,39 @@ const StatCard = ({ title, value, icon: Icon, color }: any) => (
     </div>
 );
 
-const IntegrationCard: React.FC<{ integ: Integration }> = ({ integ }) => (
-    <div className={`p-4 rounded-xl border flex items-center justify-between ${integ.active ? 'bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800'}`}>
-        <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-full ${integ.active ? 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400'}`}>
-                <Zap size={18} />
+const IntegrationCard: React.FC<{ integ: Integration }> = ({ integ }) => {
+    const { t } = useTranslation();
+    return (
+        <div className={`p-4 rounded-xl border flex items-center justify-between ${integ.active ? 'bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800'}`}>
+            <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-full ${integ.active ? 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400'}`}>
+                    <Zap size={18} />
+                </div>
+                <div>
+                    <h4 className="font-semibold text-gray-900 dark:text-white text-sm">{integ.name}</h4>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{integ.provider} • {integ.model || 'Cloud'}</p>
+                    {!integ.active && integ.env_var && (
+                        <code className="text-[10px] bg-red-100 text-red-700 px-1 rounded block mt-1 w-fit">
+                            {t('Missing', 'Falta')}: {integ.env_var}
+                        </code>
+                    )}
+                    {integ.active && integ.env_var && (
+                        <code className="text-[10px] bg-green-100 text-green-700 px-1 rounded block mt-1 w-fit">
+                            {t('active', 'activo')}: {integ.env_var}
+                        </code>
+                    )}
+                </div>
             </div>
-            <div>
-                <h4 className="font-semibold text-gray-900 dark:text-white text-sm">{integ.name}</h4>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{integ.provider} • {integ.model || 'Cloud'}</p>
-                {!integ.active && integ.env_var && (
-                    <code className="text-[10px] bg-red-100 text-red-700 px-1 rounded block mt-1 w-fit">
-                        Missing: {integ.env_var}
-                    </code>
-                )}
-                {integ.active && integ.env_var && (
-                    <code className="text-[10px] bg-green-100 text-green-700 px-1 rounded block mt-1 w-fit">
-                        active: {integ.env_var}
-                    </code>
-                )}
+            <div className={`px-2 py-1 rounded text-xs font-bold uppercase ${integ.active ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'}`}>
+                {integ.active ? t('Active', 'Activo') : t('Offline', 'Desconectado')}
             </div>
         </div>
-        <div className={`px-2 py-1 rounded text-xs font-bold uppercase ${integ.active ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'}`}>
-            {integ.active ? 'Active' : 'Offline'}
-        </div>
-    </div>
-);
+    );
+};
 
 const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, hideIntegrations }) => {
     const { profile, isRole } = useAuth();
+    const { t } = useTranslation();
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [recentCalls, setRecentCalls] = useState<Call[]>([]);
     const [integrations, setIntegrations] = useState<Integration[]>([]);
@@ -140,7 +145,7 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
 
 
 
-    if (isLoading) return <div className="p-8 text-center text-gray-500">Cargando dashboard...</div>;
+    if (isLoading) return <div className="p-8 text-center text-gray-500">{t('Loading dashboard...', 'Cargando dashboard...')}</div>;
 
     return (
         <div className="space-y-8 animate-fade-in">
@@ -149,49 +154,49 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
                 <div>
                     <div className="flex items-center gap-3">
                         <img src="/ausarta.png" alt="Logo" className="h-10 w-auto object-contain dark:invert" />
-                        <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h2>
+                        <h2 className="text-3xl font-bold text-gray-900 dark:text-white">{t('Dashboard')}</h2>
                     </div>
-                    <p className="text-gray-500 dark:text-gray-400 mt-1">Resumen de actividad de encuestas</p>
+                    <p className="text-gray-500 dark:text-gray-400 mt-1">{t('Survey activity summary', 'Resumen de actividad de encuestas')}</p>
                 </div>
             )}
             {title && (
                 <div>
                     <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{title}</h2>
-                    <p className="text-gray-500 dark:text-gray-400 mt-1 text-sm">Resumen de actividad</p>
+                    <p className="text-gray-500 dark:text-gray-400 mt-1 text-sm">{t('Activity summary', 'Resumen de actividad')}</p>
                 </div>
             )}
 
             {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <StatCard
-                    title="Total Llamadas"
+                    title={t('Total Calls', 'Total Llamadas')}
                     value={stats?.total_calls || 0}
                     icon={Phone}
                     color="blue"
                 />
                 <StatCard
-                    title="Completadas"
+                    title={t('Completed', 'Completadas')}
                     value={stats?.completed_calls || 0}
                     icon={CheckCircle}
                     color="green"
                 />
                 {!stats?.is_question_based ? (
                     <StatCard
-                        title="Nota Media"
+                        title={t('Average Score', 'Nota Media')}
                         value={stats?.avg_scores?.overall || 0}
                         icon={BarChart2}
                         color="purple"
                     />
                 ) : (
                     <StatCard
-                        title="Encuesta Abierta"
-                        value="Ilimitada"
+                        title={t('Open Survey', 'Encuesta Abierta')}
+                        value={t('Unlimited', 'Ilimitada')}
                         icon={BarChart2}
                         color="purple"
                     />
                 )}
                 <StatCard
-                    title="Pendientes"
+                    title={t('Pending', 'Pendientes')}
                     value={stats?.pending_calls || 0}
                     icon={Timer}
                     color="yellow"
@@ -202,7 +207,7 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
             {!hideIntegrations && integrations.length > 0 && (
                 <div>
                     <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
-                        <Zap size={20} className="text-yellow-500" /> Estado de Servicios (APIs)
+                        <Zap size={20} className="text-yellow-500" /> {t('Services Status (APIs)', 'Estado de Servicios (APIs)')}
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         {integrations.map((intext, i) => (
@@ -217,13 +222,13 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm animate-fade-in">
                     <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
                         <BarChart2 className="text-blue-500" />
-                        Desglose de Puntuaciones
+                        {t('Scores Breakdown', 'Desglose de Puntuaciones')}
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                         {[
-                            { label: 'Punt. Comercial', value: stats.avg_scores.comercial, color: 'blue' },
-                            { label: 'Punt. Instalador', value: stats.avg_scores.instalador, color: 'green' },
-                            { label: 'Punt. Rapidez', value: stats.avg_scores.rapidez, color: 'purple' },
+                            { label: t('Sales Score', 'Punt. Comercial'), value: stats.avg_scores.comercial, color: 'blue' },
+                            { label: t('Installer Score', 'Punt. Instalador'), value: stats.avg_scores.instalador, color: 'green' },
+                            { label: t('Speed Score', 'Punt. Rapidez'), value: stats.avg_scores.rapidez, color: 'purple' },
                         ].map((item, idx) => (
                             <div key={idx} className="space-y-3">
                                 <div className="flex justify-between items-end">
@@ -244,18 +249,18 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
 
             {/* Recent Activity */}
             <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-                <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4">Últimas Llamadas</h3>
+                <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4">{t('Latest Calls', 'Últimas Llamadas')}</h3>
                 <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                         <thead className="bg-gray-50 dark:bg-gray-800/50">
                             <tr>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Teléfono / Campaña</th>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th>
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('Phone / Campaign', 'Teléfono / Campaña')}</th>
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('Date', 'Fecha')}</th>
                                 <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    {stats?.is_question_based ? 'Respuestas' : 'C / I / R'}
+                                    {stats?.is_question_based ? t('Answers', 'Respuestas') : 'C / I / R'}
                                 </th>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IA / Modelo</th>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('AI / Model', 'IA / Modelo')}</th>
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('Status', 'Estado')}</th>
                             </tr>
                         </thead>
                         <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -275,7 +280,7 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
                                     </td>
                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-center font-mono font-bold text-gray-700">
                                         {stats?.is_question_based ? (
-                                            <span className="text-xs font-normal text-gray-400 italic">Ver en resultados</span>
+                                            <span className="text-xs font-normal text-gray-400 italic">{t('See in results', 'Ver en resultados')}</span>
                                         ) : (
                                             `${call.scores?.comercial ?? '-'} / ${call.scores?.instalador ?? '-'} / ${call.scores?.rapidez ?? '-'}`
                                         )}
@@ -290,18 +295,18 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
                                         {(() => {
                                             switch (call.status) {
                                                 case 'completed':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-green-500 text-white uppercase shadow-sm">Completa</span>;
+                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-green-500 text-white uppercase shadow-sm">{t('Completed', 'Completa')}</span>;
                                                 case 'incomplete':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-blue-400 text-white uppercase shadow-sm">Incompleta</span>;
+                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-blue-400 text-white uppercase shadow-sm">{t('Incomplete', 'Incompleta')}</span>;
                                                 case 'rejected_opt_out':
                                                 case 'rejected':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-red-500 text-white uppercase shadow-sm">Rechazada</span>;
+                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-red-500 text-white uppercase shadow-sm">{t('Rejected', 'Rechazada')}</span>;
                                                 case 'failed':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-orange-400 text-white uppercase shadow-sm">Fallida</span>;
+                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-orange-400 text-white uppercase shadow-sm">{t('Failed', 'Fallida')}</span>;
                                                 case 'unreached':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-amber-400 text-white uppercase shadow-sm">No Contesta</span>;
+                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-amber-400 text-white uppercase shadow-sm">{t('Unreached', 'No Contesta')}</span>;
                                                 default:
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-400 text-white uppercase shadow-sm">Pendiente</span>;
+                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-400 text-white uppercase shadow-sm">{t('Pending', 'Pendiente')}</span>;
                                             }
                                         })()}
                                     </td>
@@ -310,7 +315,7 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
                         </tbody>
                     </table>
                     {recentCalls.length === 0 && (
-                        <p className="text-center text-gray-400 py-8 text-sm">No hay llamadas recientes</p>
+                        <p className="text-center text-gray-400 py-8 text-sm">{t('No recent calls', 'No hay llamadas recientes')}</p>
                     )}
                 </div>
             </div>

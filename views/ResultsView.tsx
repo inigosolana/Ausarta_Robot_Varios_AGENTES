@@ -91,14 +91,25 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     );
 
     const exportCSV = () => {
-        const headers = ["ID", "Teléfono", "Fecha", "Completada", "Modelo LLM", "P. Comercial", "P. Instalador", "P. Rapidez", "Comentarios", "Transcripción"];
+        const headers = [
+            t("ID"),
+            t("Teléfono", "Phone"),
+            t("Fecha", "Date"),
+            t("Completada", "Completed"),
+            t("Modelo LLM", "LLM Model"),
+            t("P. Comercial", "Sales Score"),
+            t("P. Instalador", "Installer Score"),
+            t("P. Rapidez", "Speed Score"),
+            t("Comentarios", "Comments"),
+            t("Transcripción", "Transcription")
+        ];
         const csvContent = [
             headers.join(","),
             ...results.map(r => [
                 r.id,
                 r.telefono,
                 new Date(r.fecha).toLocaleString(),
-                r.completada ? "Sí" : "No",
+                r.completada ? t("Sí", "Yes") : t("No"),
                 r.llm_model || "Groq",
                 r.puntuacion_comercial || "",
                 r.puntuacion_instalador || "",
@@ -277,8 +288,8 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                                             body: JSON.stringify({ phoneNumber: row.telefono })
                                                         })
                                                             .then(res => {
-                                                                if (res.ok) alert(`Reintentando llamada a ${row.telefono}...`);
-                                                                else alert("Error al reintentar");
+                                                                if (res.ok) alert(t("Retrying call to {{phone}}...", { phone: row.telefono, defaultValue: `Reintentando llamada a ${row.telefono}...` }));
+                                                                else alert(t("Error retrying", "Error al reintentar"));
                                                             })
                                                             .catch(e => console.error(e));
                                                     }}
@@ -323,7 +334,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                     <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
                         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
                             <div>
-                                <h3 className="text-lg font-bold text-gray-900">Transcription #{viewingTranscript.id}</h3>
+                                <h3 className="text-lg font-bold text-gray-900">{t("Transcription", "Transcripción")} #{viewingTranscript.id}</h3>
                                 <p className="text-xs text-gray-500">{viewingTranscript.telefono} • {new Date(viewingTranscript.fecha).toLocaleString()}</p>
                             </div>
                             <button
@@ -345,7 +356,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                                 : 'bg-white text-gray-800 border-gray-100 rounded-tr-none'
                                                 }`}>
                                                 <p className="font-semibold text-[10px] uppercase tracking-wider mb-1 opacity-70">
-                                                    {isAgente ? 'Ausarta Robot' : 'Cliente'}
+                                                    {isAgente ? t('Ausarta Robot') : t('Cliente', 'Customer')}
                                                 </p>
                                                 <p className="leading-relaxed">
                                                     {line.replace(/^(Agente|Cliente): /, '')}
@@ -359,8 +370,8 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                     <div className="bg-gray-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
                                         <FileText className="text-gray-400" />
                                     </div>
-                                    <p className="text-gray-500 font-medium">No transcription available</p>
-                                    <p className="text-xs text-gray-400">The call might have been too short or no speech detected.</p>
+                                    <p className="text-gray-500 font-medium">{t("No transcription available", "No hay transcripción disponible")}</p>
+                                    <p className="text-xs text-gray-400">{t("The call might have been too short or no speech detected.", "La llamada pudo ser muy corta o no se detectó voz.")}</p>
                                 </div>
                             )}
                         </div>
@@ -370,7 +381,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                 onClick={() => setViewingTranscript(null)}
                                 className="px-6 py-2 bg-gray-900 text-white text-sm font-semibold rounded-xl hover:bg-black transition-all shadow-lg"
                             >
-                                Close View
+                                {t("Close View", "Cerrar Vista")}
                             </button>
                         </div>
                     </div>

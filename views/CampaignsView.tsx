@@ -3,6 +3,7 @@ import {
   Plus, Upload, Clock, AlertCircle, History, Trash2, X, Edit2
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import type { Empresa } from '../types';
 import DashboardView from './DashboardView';
@@ -42,6 +43,7 @@ interface Agent {
 
 export function CampaignsView() {
   const { profile, isRole } = useAuth();
+  const { t } = useTranslation();
   const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && (profile?.role === 'admin' || profile?.role === 'superadmin');
   const isPlatformOwner = profile?.role === 'superadmin' || isAusartaAdmin;
 
@@ -90,7 +92,7 @@ export function CampaignsView() {
       });
 
       if (res.ok) {
-        alert("Campaign updated!");
+        alert(t("Campaign updated!", "¡Campaña actualizada!"));
         setEditingCampaign(null);
         loadCampaigns();
         if (selectedCampaign && selectedCampaign.id === editingCampaign.id) {
@@ -99,10 +101,10 @@ export function CampaignsView() {
           setSelectedCampaign(updatedCamp.campaign);
         }
       } else {
-        alert("Update failed");
+        alert(t("Update failed", "Error al actualizar"));
       }
     } catch (e) {
-      alert("Error updating campaign");
+      alert(t("Error updating campaign", "Error al actualizar la campaña"));
     }
   };
 
@@ -189,7 +191,7 @@ export function CampaignsView() {
         setActiveTab('leads');
       }
     } catch (e) {
-      alert("Error loading details");
+      alert(t("Error loading details", "Error al cargar detalles"));
     } finally {
       setLoading(false);
     }
@@ -236,7 +238,7 @@ export function CampaignsView() {
 
   const handleCreate = async () => {
     if (!name || !selectedAgent) {
-      setError('Por favor, completa los campos requeridos');
+      setError(t('Please complete the required fields', 'Por favor, completa los campos requeridos'));
       return;
     }
 
@@ -249,10 +251,10 @@ export function CampaignsView() {
       if (dataSource === 'csv' && csvFile) {
         leads = await parseCSV(csvFile);
       } else if (dataSource === 'csv' && !csvFile) {
-        throw new Error("Por favor, sube un archivo CSV");
+        throw new Error(t("Please upload a CSV file", "Por favor, sube un archivo CSV"));
       } else if (dataSource === 'manual') {
         leads = parseLines(manualInput);
-        if (leads.length === 0) throw new Error("Por favor, introduce al menos un número de teléfono válido");
+        if (leads.length === 0) throw new Error(t("Please enter at least one valid phone number", "Por favor, introduce al menos un número de teléfono válido"));
       }
 
       const selectedAgentData = agents.find(a => String(a.id) === String(selectedAgent));
@@ -276,13 +278,13 @@ export function CampaignsView() {
         body: JSON.stringify(payload)
       });
 
-      if (!res.ok) throw new Error('Error al crear la campaña');
+      if (!res.ok) throw new Error(t('Error creating campaign', 'Error al crear la campaña'));
 
       setShowCreate(false);
       setName('');
       setCsvFile(null);
       loadCampaigns();
-      alert('¡Campaña creada exitosamente!');
+      alert(t('Campaign created successfully!', '¡Campaña creada exitosamente!'));
 
     } catch (err: any) {
       setError(err.message);
@@ -292,31 +294,31 @@ export function CampaignsView() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Are you sure you want to delete this campaign? This cannot be undone.")) return;
+    if (!confirm(t("Are you sure you want to delete this campaign? This cannot be undone.", "¿Estás seguro de que quieres eliminar esta campaña? Esto no se puede deshacer."))) return;
     try {
       await fetch(`${API_URL}/api/campaigns/${id}`, { method: 'DELETE' });
       loadCampaigns();
       if (selectedCampaign?.id === id) setShowDetails(false);
     } catch (e) {
-      alert("Error deleting campaign");
+      alert(t("Error deleting campaign", "Error al eliminar la campaña"));
     }
   };
 
   const handleRetryFailed = async (id: number) => {
-    if (!confirm("Are you sure you want to retry all failed calls in this campaign?")) return;
+    if (!confirm(t("Are you sure you want to retry all failed calls in this campaign?", "¿Estás seguro de que quieres reintentar todas las llamadas fallidas en esta campaña?"))) return;
     try {
       const res = await fetch(`${API_URL}/api/campaigns/${id}/retry`, { method: 'POST' });
       const data = await res.json();
 
       if (res.ok && data.status === 'success') {
-        alert(`Successfully queued ${data.retried_count} failed calls for retry.`);
+        alert(t(`Successfully queued ${data.retried_count} failed calls for retry.`, `Se han encolado exitosamente ${data.retried_count} llamadas fallidas para reintento.`));
         if (selectedCampaign) loadCampaignDetails(selectedCampaign);
         loadCampaigns();
       } else {
-        alert("Failed to retry calls.");
+        alert(t("Failed to retry calls.", "Error al reintentar llamadas."));
       }
     } catch (e) {
-      alert("Error connecting to server");
+      alert(t("Error connecting to server", "Error al conectar con el servidor"));
     }
   };
 
@@ -339,12 +341,12 @@ export function CampaignsView() {
         setCampaignLeads(prev => prev.map(l =>
           l.id === leadId ? { ...l, status: 'pending', retries_attempted: 0 } : l
         ));
-        alert("Lead requeued successfully!");
+        alert(t("Lead requeued successfully!", "Lead encolado exitosamente!"));
       } else {
-        alert("Failed to retry lead");
+        alert(t("Failed to retry lead", "Error al reintentar lead"));
       }
     } catch (e) {
-      alert("Error connecting to server");
+      alert(t("Error connecting to server", "Error al conectar con el servidor"));
     }
   };
 
@@ -357,7 +359,7 @@ export function CampaignsView() {
         <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
             <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <Edit2 className="w-5 h-5 text-blue-600" /> Edit Campaign
+              <Edit2 className="w-5 h-5 text-blue-600" /> {t("Edit Campaign", "Editar Campaña")}
             </h3>
             <button
               onClick={() => setEditingCampaign(null)}
@@ -368,7 +370,7 @@ export function CampaignsView() {
           </div>
           <div className="p-6 space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Campaign Name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t("Campaign Name", "Nombre de la Campaña")}</label>
               <input
                 type="text"
                 value={editName}
@@ -377,7 +379,7 @@ export function CampaignsView() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Scheduled Time</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t("Scheduled Time", "Hora Programada")}</label>
               <input
                 type="datetime-local"
                 value={editTime}
@@ -387,8 +389,8 @@ export function CampaignsView() {
             </div>
           </div>
           <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
-            <button onClick={() => setEditingCampaign(null)} className="px-4 py-2 text-gray-700">Cancel</button>
-            <button onClick={handleUpdateCampaign} className="px-6 py-2 bg-blue-600 text-white rounded-lg">Save Changes</button>
+            <button onClick={() => setEditingCampaign(null)} className="px-4 py-2 text-gray-700">{t("Cancel", "Cancelar")}</button>
+            <button onClick={handleUpdateCampaign} className="px-6 py-2 bg-blue-600 text-white rounded-lg">{t("Save Changes", "Guardar Cambios")}</button>
           </div>
         </div>
       </div>
@@ -430,21 +432,21 @@ export function CampaignsView() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <button onClick={() => setShowDetails(false)} className="text-gray-500 hover:text-gray-900 flex items-center gap-2">
-            ← Volver a Campañas
+            ← {t("Back to Campaigns", "Volver a Campañas")}
           </button>
           <div className='flex gap-2'>
             <button
               onClick={() => loadCampaignDetails(selectedCampaign)}
               className="px-3 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-sm flex items-center gap-1"
             >
-              <History className="w-4 h-4" /> Actualizar
+              <History className="w-4 h-4" /> {t("Update", "Actualizar")}
             </button>
 
             <button
               onClick={() => openEditModal(selectedCampaign)}
               className="px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 text-sm flex items-center gap-1"
             >
-              <Edit2 className="w-4 h-4" /> Editar
+              <Edit2 className="w-4 h-4" /> {t("Edit", "Editar")}
             </button>
 
             {/* Retry Button - Only show if there are failed/unreached/incomplete leads */}
@@ -453,7 +455,7 @@ export function CampaignsView() {
                 onClick={() => handleRetryFailed(selectedCampaign.id)}
                 className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200 text-sm flex items-center gap-1"
               >
-                <Clock className="w-4 h-4" /> Reintentar Fallidas ({selectedCampaign.failed_leads})
+                <Clock className="w-4 h-4" /> {t("Retry Failed", "Reintentar Fallidas")} ({selectedCampaign.failed_leads})
               </button>
             )}
 
@@ -461,7 +463,7 @@ export function CampaignsView() {
               onClick={() => handleDelete(selectedCampaign.id)}
               className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 text-sm flex items-center gap-1"
             >
-              <Trash2 className="w-4 h-4" /> Eliminar Campaña
+              <Trash2 className="w-4 h-4" /> {t("Delete Campaign", "Eliminar Campaña")}
             </button>
           </div>
         </div>
@@ -472,7 +474,7 @@ export function CampaignsView() {
             onClick={() => setActiveTab('leads')}
             className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'leads' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
           >
-            Lista de Leads
+            {t("List of Leads", "Lista de Leads")}
           </button>
           <button
             onClick={() => setActiveTab('overview')}
@@ -484,7 +486,7 @@ export function CampaignsView() {
             onClick={() => setActiveTab('results')}
             className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'results' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
           >
-            Resultados Detallados
+            {t("Detailed Results", "Resultados Detallados")}
           </button>
         </div>
 
@@ -513,33 +515,33 @@ export function CampaignsView() {
                 <p className="text-2xl font-bold text-blue-900">{selectedCampaign.total_leads || 0}</p>
               </div>
               <div className="bg-green-50 p-4 rounded-xl border border-green-100">
-                <p className="text-green-600 text-xs font-semibold uppercase">Llamadas</p>
+                <p className="text-green-600 text-xs font-semibold uppercase">{t("Calls", "Llamadas")}</p>
                 <p className="text-2xl font-bold text-green-900">{selectedCampaign.called_leads || 0}</p>
               </div>
               <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-100">
-                <p className="text-yellow-600 text-xs font-semibold uppercase">Pendientes</p>
+                <p className="text-yellow-600 text-xs font-semibold uppercase">{t("Pending", "Pendientes")}</p>
                 <p className="text-2xl font-bold text-yellow-900">{selectedCampaign.pending_leads || 0}</p>
               </div>
               <div className="bg-red-50 p-4 rounded-xl border border-red-100">
-                <p className="text-red-600 text-xs font-semibold uppercase">Fallidas</p>
+                <p className="text-red-600 text-xs font-semibold uppercase">{t("Failed", "Fallidas")}</p>
                 <p className="text-2xl font-bold text-red-900">{selectedCampaign.failed_leads || 0}</p>
               </div>
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
-                <h3 className="font-semibold text-gray-900">Registro de Llamadas y Resultados</h3>
+                <h3 className="font-semibold text-gray-900">{t("Call Log and Results", "Registro de Llamadas y Resultados")}</h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-gray-50 border-b border-gray-100">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Nombre</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Teléfono</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Estado e Intentos</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase w-1/3">Notas y Transcripción</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Última Actualización</th>
-                      <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Acciones</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{t("Name", "Nombre")}</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{t("Phone", "Teléfono")}</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{t("Status and Attempts", "Estado e Intentos")}</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase w-1/3">{t("Notes and Transcription", "Notas y Transcripción")}</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{t("Last Update", "Última Actualización")}</th>
+                      <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase">{t("Actions", "Acciones")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -556,18 +558,18 @@ export function CampaignsView() {
                                     lead.status === 'unreached' ? 'bg-amber-100 text-amber-900' :
                                       lead.status === 'incomplete' ? 'bg-blue-50 text-blue-800' :
                                         (lead.status === 'rejected_opt_out' || lead.status === 'rejected') ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}>
-                              {lead.status === 'unreached' ? 'No Contesta' :
-                                (lead.status === 'rejected_opt_out' || lead.status === 'rejected') ? 'Rechazada' :
-                                  lead.status === 'completed' ? 'Completada' :
-                                    lead.status === 'incomplete' ? 'Incompleta' :
-                                      lead.status === 'failed' ? 'Fallida' :
-                                        lead.status === 'called' ? 'Llamada' :
-                                          lead.status === 'pending' ? 'Pendiente' : lead.status}
+                              {lead.status === 'unreached' ? t('No Answer', 'No Contesta') :
+                                (lead.status === 'rejected_opt_out' || lead.status === 'rejected') ? t('Rejected', 'Rechazada') :
+                                  lead.status === 'completed' ? t('Completed', 'Completada') :
+                                    lead.status === 'incomplete' ? t('Incomplete', 'Incompleta') :
+                                      lead.status === 'failed' ? t('Failed', 'Fallida') :
+                                        lead.status === 'called' ? t('Called', 'Llamada') :
+                                          lead.status === 'pending' ? t('Pending', 'Pendiente') : lead.status}
                             </span>
                             {/* Mostrar intentos si > 0 */}
                             {(lead.retries_attempted || 0) > 0 && (
                               <span className="text-xs text-gray-500 flex items-center gap-1">
-                                <History className="w-3 h-3" /> Intento: {lead.retries_attempted}
+                                <History className="w-3 h-3" /> {t("Attempt", "Intento")}: {lead.retries_attempted}
                               </span>
                             )}
                           </div>
@@ -576,14 +578,14 @@ export function CampaignsView() {
                           {selectedCampaign?.is_question_based ? (
                             lead.comentarios ? (
                               <div className="space-y-1">
-                                <div className="font-semibold text-gray-800 text-xs uppercase mb-1">Respuestas Registradas:</div>
+                                <div className="font-semibold text-gray-800 text-xs uppercase mb-1">{t("Recorded Responses", "Respuestas Registradas")}:</div>
                                 <p className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-2 rounded border border-gray-100">{lead.comentarios}</p>
                               </div>
                             ) : (
                               <span className="text-gray-400 italic">
-                                {lead.status === 'unreached' ? 'No contestó' :
-                                  lead.status === 'rejected_opt_out' ? 'Cliente rechazó responder' :
-                                    lead.status === 'pending' ? 'Esperando...' : 'Sin respuestas todavía'}
+                                {lead.status === 'unreached' ? t('No answer', 'No contestó') :
+                                  lead.status === 'rejected_opt_out' ? t('Customer refused to answer', 'Cliente rechazó responder') :
+                                    lead.status === 'pending' ? t('Waiting...', 'Esperando...') : t('No responses yet', 'Sin respuestas todavía')}
                               </span>
                             )
                           ) : (lead.puntuacion_comercial != null || lead.puntuacion_instalador != null || lead.puntuacion_rapidez != null) ? (
@@ -599,16 +601,16 @@ export function CampaignsView() {
                             </div>
                           ) : (
                             <span className="text-gray-400 italic">
-                              {lead.status === 'unreached' ? 'No contestó' :
-                                lead.status === 'rejected_opt_out' ? 'Cliente rechazó la encuesta' :
-                                  lead.status === 'pending' ? 'Esperando...' : 'Sin datos todavía'}
+                              {lead.status === 'unreached' ? t('No answer', 'No contestó') :
+                                lead.status === 'rejected_opt_out' ? t('Customer rejected the survey', 'Cliente rechazó la encuesta') :
+                                  lead.status === 'pending' ? t('Waiting...', 'Esperando...') : t('No data yet', 'Sin datos todavía')}
                             </span>
                           )}
 
                           {/* Transcription Preview (Collapsible better, but inline for now) */}
                           {lead.transcription_preview && (
                             <details className="mt-1">
-                              <summary className="text-xs text-blue-500 cursor-pointer hover:underline">Ver Transcripción</summary>
+                              <summary className="text-xs text-blue-500 cursor-pointer hover:underline">{t("View Transcription", "Ver Transcripción")}</summary>
                               <p className="text-xs text-gray-500 mt-1 p-2 bg-gray-50 rounded whitespace-pre-wrap max-h-32 overflow-y-auto">
                                 {lead.transcription_preview}
                               </p>
@@ -626,20 +628,20 @@ export function CampaignsView() {
                               <button
                                 onClick={() => handleRetryLead(lead.id)}
                                 className="text-xs bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-2 py-1 rounded shadow-sm inline-flex items-center gap-1 transition-all"
-                                title="Reintentar esta llamada"
+                                title={t("Retry this call", "Reintentar esta llamada")}
                               >
                                 <Clock className="w-3 h-3 text-blue-500" />
-                                Reintentar ({remaining} restantes)
+                                {t("Retry", "Reintentar")} ({remaining} {t("remaining", "restantes")})
                               </button>
                             ) : (
-                              <span className="text-xs text-gray-400 italic">Sin reintentos</span>
+                              <span className="text-xs text-gray-400 italic">{t("No retries", "Sin reintentos")}</span>
                             );
                           })()}
                           {lead.status === 'completed' && (
-                            <span className="text-xs text-green-600">✓ Completada</span>
+                            <span className="text-xs text-green-600">✓ {t("Completed", "Completada")}</span>
                           )}
                           {lead.status === 'rejected_opt_out' && (
-                            <span className="text-xs text-red-600">✗ Rechazada</span>
+                            <span className="text-xs text-red-600">✗ {t("Rejected", "Rechazada")}</span>
                           )}
                         </td>
                       </tr>
@@ -661,7 +663,7 @@ export function CampaignsView() {
     return (
       <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-          <h2 className="text-xl font-bold">Crear Campaña</h2>
+          <h2 className="text-xl font-bold">{t("Create Campaign", "Crear Campaña")}</h2>
           <button onClick={() => setShowCreate(false)} className="text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
@@ -676,11 +678,11 @@ export function CampaignsView() {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Nombre de la Campaña</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">{t("Campaign Name", "Nombre de la Campaña")}</label>
             <input
               type="text"
               className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent outline-none"
-              placeholder="Ej: Encuesta Clientes Q1"
+              placeholder={t("e.g. Q1 Customer Survey", "Ej: Encuesta Clientes Q1")}
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
@@ -688,13 +690,13 @@ export function CampaignsView() {
 
           {isPlatformOwner && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Empresa / Proyecto</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Company / Project", "Empresa / Proyecto")}</label>
               <select
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent outline-none bg-white"
                 value={selectedEmpresa || ''}
                 onChange={(e) => setSelectedEmpresa(e.target.value ? Number(e.target.value) : null)}
               >
-                <option value="">-- Todas las Empresas -- (No recomendado)</option>
+                <option value="">-- {t("All Companies", "Todas las Empresas")} -- ({t("Not recommended", "No recomendado")})</option>
                 {empresas.map(emp => (
                   <option key={emp.id} value={emp.id}>{emp.nombre}</option>
                 ))}
@@ -703,13 +705,13 @@ export function CampaignsView() {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Agente</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">{t("Agent", "Agente")}</label>
             <select
               className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent outline-none"
               value={selectedAgent}
               onChange={(e) => setSelectedAgent(e.target.value)}
             >
-              <option value="">Selecciona un agente</option>
+              <option value="">{t("Select an agent", "Selecciona un agente")}</option>
               {agents.map(a => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
@@ -717,32 +719,32 @@ export function CampaignsView() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Método de Entrada de Datos</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">{t("Data Input Method", "Método de Entrada de Datos")}</label>
             <select
               className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent outline-none"
               value={dataSource}
               onChange={(e) => setDataSource(e.target.value as 'csv' | 'api' | 'manual')}
             >
-              <option value="csv">Archivo CSV</option>
-              <option value="manual">Entrada Manual / Copiar-Pegar</option>
-              <option value="api">Integración API (Desarrolladores)</option>
+              <option value="csv">{t("CSV File", "Archivo CSV")}</option>
+              <option value="manual">{t("Manual Input / Copy-Paste", "Entrada Manual / Copiar-Pegar")}</option>
+              <option value="api">{t("API Integration (Developers)", "Integración API (Desarrolladores)")}</option>
             </select>
           </div>
 
           {dataSource === 'manual' ? (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Introduce Teléfonos (y Nombres opcionales)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Enter Phones (and optional Names)", "Introduce Teléfonos (y Nombres opcionales)")}</label>
               <textarea
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg h-32 font-mono text-sm focus:ring-2 focus:ring-black focus:border-transparent outline-none"
                 placeholder={"+34600112233, Juan Perez\n+34600445566, Maria"}
                 value={manualInput}
                 onChange={(e) => setManualInput(e.target.value)}
               />
-              <p className="text-xs text-gray-500 mt-1">Un registro por línea. Formato: <code>Teléfono, Nombre</code> (El nombre es opcional)</p>
+              <p className="text-xs text-gray-500 mt-1">{t("One record per line. Format: Phone, Name (Name is optional)", "Un registro por línea. Formato: Teléfono, Nombre (El nombre es opcional)")}</p>
             </div>
           ) : dataSource === 'csv' ? (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Archivo CSV</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t("CSV File", "Archivo CSV")}</label>
               <div className="border-2 border-dashed border-gray-200 rounded-lg p-8 text-center hover:border-black transition-colors cursor-pointer relative">
                 <input
                   type="file"
@@ -752,9 +754,9 @@ export function CampaignsView() {
                 />
                 <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
                 <p className="text-sm text-gray-600">
-                  {csvFile ? csvFile.name : 'Haz clic para subir o arrastra y suelta'}
+                  {csvFile ? csvFile.name : t('Click to upload or drag and drop', 'Haz clic para subir o arrastra y suelta')}
                 </p>
-                <p className="text-xs text-gray-400 mt-1">Solo archivos .csv</p>
+                <p className="text-xs text-gray-400 mt-1">{t("Only .csv files", "Solo archivos .csv")}</p>
               </div>
               <div className="mt-2 text-right">
                 <a
@@ -772,7 +774,7 @@ export function CampaignsView() {
                   }}
                   className="text-xs text-blue-600 hover:underline flex items-center justify-end gap-1"
                 >
-                  <Upload className="w-3 h-3" /> Descargar Plantilla
+                  <Upload className="w-3 h-3" /> {t("Download Template", "Descargar Plantilla")}
                 </a>
               </div>
             </div>
@@ -791,31 +793,31 @@ export function CampaignsView() {
 
           <div className="border-t border-gray-100 pt-6">
             <button className="flex items-center justify-between w-full text-left font-medium text-gray-700">
-              <span>Ajustes Avanzados / Programación</span>
+              <span>{t("Advanced Settings / Scheduling", "Ajustes Avanzados / Programación")}</span>
               <Clock className="w-4 h-4" />
             </button>
             <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Hora de Inicio Programada (Opcional)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Scheduled Start Time (Optional)", "Hora de Inicio Programada (Opcional)")}</label>
               <input
                 type="datetime-local"
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg"
                 value={scheduledTime}
                 onChange={(e) => setScheduledTime(e.target.value)}
               />
-              <p className="text-xs text-gray-500 mt-1">Dejar en blanco para empezar inmediatamente.</p>
+              <p className="text-xs text-gray-500 mt-1">{t("Leave blank to start immediately.", "Dejar en blanco para empezar inmediatamente.")}</p>
             </div>
 
             <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Intervalo de Reintento (minutos)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Retry Interval (minutes)", "Intervalo de Reintento (minutos)")}</label>
               <input
                 type="number"
                 min="1"
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg"
                 value={retryInterval}
                 onChange={(e) => setRetryInterval(Number(e.target.value))}
-                placeholder="Por defecto: 60"
+                placeholder={t("Default: 60", "Por defecto: 60")}
               />
-              <p className="text-xs text-gray-500 mt-1">Tiempo de espera antes de reintentar una llamada fallida.</p>
+              <p className="text-xs text-gray-500 mt-1">{t("Wait time before retrying a failed call.", "Tiempo de espera antes de reintentar una llamada fallida.")}</p>
             </div>
           </div>
         </div>
@@ -825,14 +827,14 @@ export function CampaignsView() {
             onClick={() => setShowCreate(false)}
             className="px-4 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors"
           >
-            Cancelar
+            {t("Cancel", "Cancelar")}
           </button>
           <button
             onClick={handleCreate}
             disabled={loading}
             className="px-4 py-2 bg-black text-white font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-2 disabled:opacity-50"
           >
-            {loading ? 'Creando...' : 'Lanzar Campaña'}
+            {loading ? t('Creating...', 'Creando...') : t('Launch Campaign', 'Lanzar Campaña')}
           </button>
         </div>
       </div>
@@ -843,15 +845,15 @@ export function CampaignsView() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Campaigns</h1>
-          <p className="text-gray-500">Manage your bulk outbound call campaigns</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t("Campaigns", "Campañas")}</h1>
+          <p className="text-gray-500">{t("Manage your bulk outbound call campaigns", "Gestiona tus campañas de llamadas salientes masivas")}</p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
           className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors"
         >
           <Plus className="w-4 h-4" />
-          Create Campaign
+          {t("Create Campaign", "Crear Campaña")}
         </button>
       </div>
 
@@ -859,12 +861,12 @@ export function CampaignsView() {
         <table className="w-full">
           <thead className="bg-gray-50 border-b border-gray-100">
             <tr>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Campaign Name</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Progress</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Scheduled</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Created</th>
-              <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Campaign Name", "Nombre de la Campaña")}</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Status", "Estado")}</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Progress", "Progreso")}</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Scheduled", "Planificado")}</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Created", "Creado")}</th>
+              <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Actions", "Acciones")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -884,7 +886,7 @@ export function CampaignsView() {
                       />
                     </div>
                     <div className="text-xs text-gray-500">
-                      {campaign.called_leads || 0} / {campaign.total_leads || 0} calls
+                      {campaign.called_leads || 0} / {campaign.total_leads || 0} {t("calls", "llamadas")}
                     </div>
                   </div>
                 </td>
@@ -906,7 +908,7 @@ export function CampaignsView() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (window.confirm('Delete campaign?')) {
+                        if (window.confirm(t('Delete campaign?', '¿Eliminar campaña?'))) {
                           handleDelete(campaign.id);
                         }
                       }}
@@ -922,7 +924,7 @@ export function CampaignsView() {
             {campaigns.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
-                  No campaigns found. Create your first campaign to get started.
+                  {t("No campaigns found. Create your first campaign to get started.", "No se encontraron campañas. Crea tu primera campaña para empezar.")}
                 </td>
               </tr>
             )}

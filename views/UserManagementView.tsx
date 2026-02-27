@@ -4,6 +4,7 @@ import {
     ToggleLeft, ToggleRight, X, Settings, ChevronDown, ChevronUp,
     Mail, CheckCircle, AlertCircle
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { UserProfile, UserPermission, UserRole, Empresa } from '../types';
@@ -11,6 +12,7 @@ import { ALL_MODULES } from '../types';
 
 const UserManagementView: React.FC = () => {
     const { profile: currentProfile, isRole } = useAuth();
+    const { t } = useTranslation();
 
     const isAusartaAdmin = currentProfile?.empresas?.nombre === 'Ausarta' && isRole('admin');
     const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
@@ -86,19 +88,19 @@ const UserManagementView: React.FC = () => {
 
     const handleCreateUser = async () => {
         if (!newEmail || !newName) {
-            alert('Rellena nombre y email');
+            alert(t('Fill in name and email', 'Rellena nombre y email'));
             return;
         }
 
         // Only superadmin and admin can create users
         if (!isRole('superadmin', 'admin')) {
-            alert('No tienes permisos para crear usuarios');
+            alert(t('You do not have permissions to create users', 'No tienes permisos para crear usuarios'));
             return;
         }
 
         // Admins can't create superadmins
         if (!isRole('superadmin') && newRole === 'superadmin') {
-            alert('No puedes crear usuarios superadmin');
+            alert(t('You cannot create superadmin users', 'No puedes crear usuarios superadmin'));
             return;
         }
 
@@ -113,7 +115,7 @@ const UserManagementView: React.FC = () => {
                 const existingAdmins = users.filter(u => u.empresa_id === selectedEmpresa.id && u.role === 'admin').length;
                 const limit = selectedEmpresa.max_admins || 1;
                 if (existingAdmins >= limit) {
-                    alert(`Esta empresa ya tiene el máximo permitido de administradores (${limit}). Para añadir más, el administrador principal debe habilitarlo (Servicio Premium).`);
+                    alert(t('This company already has the maximum allowed administrators ({{limit}}). To add more, the main administrator must enable it (Premium Service).', 'Esta empresa ya tiene el máximo permitido de administradores ({{limit}}). Para añadir más, el administrador principal debe habilitarlo (Servicio Premium).', { limit }));
                     return;
                 }
             }
@@ -161,7 +163,7 @@ const UserManagementView: React.FC = () => {
 
             if (!res.ok) {
                 const errorText = await res.text();
-                throw new Error(errorText || 'Error al conectar con n8n');
+                throw new Error(errorText || t('Error connecting to n8n', 'Error al conectar con n8n'));
             }
 
             // The n8n workflow returns the Supabase response from the last node (or response node)
@@ -188,7 +190,7 @@ const UserManagementView: React.FC = () => {
             setUsers(prev => [newUser, ...prev]);
             setInviteSuccess(true);
 
-            alert(`Usuario creado correctamente${!newPassword ? `. Contraseña temporal: ${tempPassword}` : ''}`);
+            alert(`${t('User created correctly', 'Usuario creado correctamente')}${!newPassword ? `. ${t('Temporary password:', 'Contraseña temporal:')} ${tempPassword}` : ''}`);
 
             // Reset form and close
             setTimeout(() => {
@@ -214,7 +216,7 @@ const UserManagementView: React.FC = () => {
                 redirectTo: window.location.origin.includes('localhost') ? 'https://app.ausarta.net' : window.location.origin,
             });
             if (error) throw error;
-            alert(`📧 Email de invitación reenviado a ${email}`);
+            alert(`📧 ${t('Invitation email resent to', 'Email de invitación reenviado a')} ${email}`);
         } catch (err: any) {
             alert(`Error: ${err.message}`);
         }
@@ -264,7 +266,7 @@ const UserManagementView: React.FC = () => {
                 }
             }));
         } catch (err) {
-            alert('Error al cambiar permiso');
+            alert(t('Error changing permission', 'Error al cambiar permiso'));
             loadUsersAndEmpresas();
         }
     };
@@ -279,12 +281,12 @@ const UserManagementView: React.FC = () => {
                 u.id === userId ? { ...u, is_active: !currentActive } : u
             ));
         } catch (err) {
-            alert('Error al cambiar estado del usuario');
+            alert(t('Error changing user status', 'Error al cambiar estado del usuario'));
         }
     };
 
     const handleDeleteUser = async (userId: string) => {
-        if (!confirm('¿Estás seguro de que quieres eliminar este usuario? Esta acción no se puede deshacer y borrará también su acceso de autenticación.')) return;
+        if (!confirm(t('Are you sure you want to delete this user? This action cannot be undone and will also delete their authentication access.', '¿Estás seguro de que quieres eliminar este usuario? Esta acción no se puede deshacer y borrará también su acceso de autenticación.'))) return;
         try {
             const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
             const res = await fetch(`${API_URL}/api/admin/users/${userId}`, {
@@ -319,7 +321,7 @@ const UserManagementView: React.FC = () => {
         const labels: Record<UserRole, string> = {
             superadmin: 'Superadmin',
             admin: 'Admin',
-            user: 'Usuario'
+            user: t('User', 'Usuario')
         };
         return (
             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${colors[role]}`}>
@@ -355,8 +357,8 @@ const UserManagementView: React.FC = () => {
             {/* Header */}
             <div className="flex justify-between items-center">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Gestión de Usuarios</h1>
-                    <p className="text-gray-500 text-sm">Administra roles y permisos</p>
+                    <h1 className="text-2xl font-bold text-gray-900">{t('User Management', 'Gestión de Usuarios')}</h1>
+                    <p className="text-gray-500 text-sm">{t('Manage roles and permissions', 'Administra roles y permisos')}</p>
                 </div>
                 {canCreateUsers && (
                     <button
@@ -364,7 +366,7 @@ const UserManagementView: React.FC = () => {
                         className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-500 hover:to-blue-400 transition-all shadow-lg shadow-blue-500/20 font-medium text-sm"
                     >
                         <Plus size={18} />
-                        Invitar Usuario
+                        {t('Invite User', 'Invitar Usuario')}
                     </button>
                 )}
             </div>
@@ -399,7 +401,7 @@ const UserManagementView: React.FC = () => {
                                             )}
                                             {!user.is_active && (
                                                 <span className="px-2 py-0.5 bg-red-50 text-red-600 rounded-full text-xs font-medium">
-                                                    Desactivado
+                                                    {t('Disabled', 'Desactivado')}
                                                 </span>
                                             )}
                                         </div>
@@ -413,21 +415,21 @@ const UserManagementView: React.FC = () => {
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); handleResendInvite(user.email); }}
                                                 className="p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
-                                                title="Reenviar invitación / Reset contraseña"
+                                                title={t('Resend invitation / Reset password', 'Reenviar invitación / Reset contraseña')}
                                             >
                                                 <Mail size={16} />
                                             </button>
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); handleToggleActive(user.id, user.is_active); }}
                                                 className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-                                                title={user.is_active ? 'Desactivar' : 'Activar'}
+                                                title={user.is_active ? t('Deactivate', 'Desactivar') : t('Activate', 'Activar')}
                                             >
                                                 {user.is_active ? <ToggleRight size={20} className="text-green-500" /> : <ToggleLeft size={20} className="text-gray-400" />}
                                             </button>
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); handleDeleteUser(user.id); }}
                                                 className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
-                                                title="Eliminar"
+                                                title={t('Delete', 'Eliminar')}
                                             >
                                                 <Trash2 size={16} />
                                             </button>
@@ -445,11 +447,11 @@ const UserManagementView: React.FC = () => {
                                             <div className="flex items-center justify-between mb-3">
                                                 <div className="flex items-center gap-2">
                                                     <Settings size={14} className="text-gray-400" />
-                                                    <span className="text-sm font-medium text-gray-600">Permisos y Módulos</span>
+                                                    <span className="text-sm font-medium text-gray-600">{t('Permissions and Modules', 'Permisos y Módulos')}</span>
                                                 </div>
                                                 {user.role !== 'user' && (
                                                     <span className="text-xs text-amber-600 font-medium bg-amber-50 px-2 py-0.5 rounded-full">
-                                                        Admin: Acceso total exceptuando Premium
+                                                        {t('Admin: Total access except Premium', 'Admin: Acceso total exceptuando Premium')}
                                                     </span>
                                                 )}
                                             </div>
@@ -480,7 +482,7 @@ const UserManagementView: React.FC = () => {
                                         </>
                                     ) : (
                                         <div className="py-2">
-                                            <p className="text-sm text-gray-400 italic">Los administradores tienen acceso a todos los módulos básicos.</p>
+                                            <p className="text-sm text-gray-400 italic">{t('Administrators have access to all basic modules.', 'Los administradores tienen acceso a todos los módulos básicos.')}</p>
                                         </div>
                                     )}
                                 </div>
@@ -496,7 +498,7 @@ const UserManagementView: React.FC = () => {
                     <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
                         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                             <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                                <Mail size={20} className="text-blue-600" /> Invitar Usuario
+                                <Mail size={20} className="text-blue-600" /> {t('Invite User', 'Invitar Usuario')}
                             </h3>
                             <button onClick={() => { setShowCreate(false); setInviteSuccess(false); }} className="text-gray-400 hover:text-gray-600">
                                 <X size={20} />
@@ -508,12 +510,12 @@ const UserManagementView: React.FC = () => {
                                 <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-50 mb-4">
                                     <CheckCircle size={32} className="text-green-500" />
                                 </div>
-                                <h3 className="text-lg font-semibold text-gray-900 mb-2">¡Usuario creado con éxito!</h3>
+                                <h3 className="text-lg font-semibold text-gray-900 mb-2">{t('User created successfully!', '¡Usuario creado con éxito!')}</h3>
                                 <p className="text-gray-500 text-sm">
                                     {newPassword ? (
-                                        <>El usuario ya puede acceder con el email <strong>{newEmail}</strong> y la contraseña proporcionada.</>
+                                        <>{t('The user can now log in with the email {{email}} and the provided password.', 'El usuario ya puede acceder con el email <strong>{{email}}</strong> y la contraseña proporcionada.', { email: newEmail })}</>
                                     ) : (
-                                        <>Se ha enviado un email a <strong>{newEmail}</strong> con un enlace para crear su contraseña.</>
+                                        <>{t('An email has been sent to {{email}} with a link to create their password.', 'Se ha enviado un email a <strong>{{email}}</strong> con un enlace para crear su contraseña.', { email: newEmail })}</>
                                     )}
                                 </p>
                             </div>
@@ -524,12 +526,12 @@ const UserManagementView: React.FC = () => {
                                     <div className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-100 rounded-xl">
                                         <AlertCircle size={18} className="text-blue-500 mt-0.5 shrink-0" />
                                         <p className="text-sm text-blue-700">
-                                            Puedes asignarle una contraseña directamente, o dejarlo en blanco para que reciba un email y cree la suya.
+                                            {t('You can assign a password directly, or leave it blank to receive an email and create theirs.', 'Puedes asignarle una contraseña directamente, o dejarlo en blanco para que reciba un email y cree la suya.')}
                                         </p>
                                     </div>
 
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Nombre completo</label>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">{t('Full Name', 'Nombre completo')}</label>
                                         <input
                                             type="text"
                                             value={newName}
@@ -539,7 +541,7 @@ const UserManagementView: React.FC = () => {
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">{t('Email', 'Email')}</label>
                                         <input
                                             type="email"
                                             value={newEmail}
@@ -549,26 +551,26 @@ const UserManagementView: React.FC = () => {
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Rol</label>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">{t('Role', 'Rol')}</label>
                                         <select
                                             value={newRole}
                                             onChange={(e) => setNewRole(e.target.value as UserRole)}
                                             className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white font-medium"
                                         >
                                             {isRole('superadmin') && <option value="superadmin">Superadmin</option>}
-                                            <option value="admin">Admin (Empresa)</option>
-                                            <option value="user">Usuario (Solo Resultados)</option>
+                                            <option value="admin">{t('Admin (Company)', 'Admin (Empresa)')}</option>
+                                            <option value="user">{t('User (Results Only)', 'Usuario (Solo Resultados)')}</option>
                                         </select>
                                     </div>
                                     {isPlatformOwner ? (
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">{t('Company', 'Empresa')}</label>
                                             <select
                                                 value={newEmpresaId}
                                                 onChange={(e) => setNewEmpresaId(e.target.value === '' ? '' : Number(e.target.value))}
                                                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white font-medium"
                                             >
-                                                <option value="">-- Ninguna --</option>
+                                                <option value="">-- {t('None', 'Ninguna')} --</option>
                                                 {empresas.map(emp => (
                                                     <option key={emp.id} value={emp.id}>{emp.nombre}</option>
                                                 ))}
@@ -576,31 +578,31 @@ const UserManagementView: React.FC = () => {
                                         </div>
                                     ) : (
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">{t('Company', 'Empresa')}</label>
                                             <div className="px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-600 font-medium">
-                                                {empresas.find(e => e.id === currentProfile?.empresa_id)?.nombre || 'Tu Empresa'}
+                                                {empresas.find(e => e.id === currentProfile?.empresa_id)?.nombre || t('Your Company', 'Tu Empresa')}
                                             </div>
                                         </div>
                                     )}
 
                                     <div className="pt-2 border-t border-gray-100 mt-2">
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Contraseña <span className="text-gray-400 font-normal">(Opcional)</span>
+                                            {t('Password', 'Contraseña')} <span className="text-gray-400 font-normal">({t('Optional', 'Opcional')})</span>
                                         </label>
                                         <input
                                             type="text"
                                             value={newPassword}
                                             onChange={(e) => setNewPassword(e.target.value)}
                                             className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                            placeholder="Introduce una contraseña para el usuario"
+                                            placeholder={t('Enter a password for the user', 'Introduce una contraseña para el usuario')}
                                         />
-                                        <p className="text-xs text-gray-500 mt-1.5">Si lo dejas en blanco, enviaremos un email de invitación. (Mínimo 6 caracteres)</p>
+                                        <p className="text-xs text-gray-500 mt-1.5">{t('If you leave it blank, we will send an invitation email. (Minimum 6 characters)', 'Si lo dejas en blanco, enviaremos un email de invitación. (Mínimo 6 caracteres)')}</p>
                                     </div>
                                 </div>
 
                                 <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
                                     <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
-                                        Cancelar
+                                        {t('Cancel', 'Cancelar')}
                                     </button>
                                     <button
                                         onClick={handleCreateUser}
@@ -608,7 +610,7 @@ const UserManagementView: React.FC = () => {
                                         className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 flex items-center gap-2 transition-colors"
                                     >
                                         {creating ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
-                                        {creating ? 'Enviando...' : 'Enviar invitación'}
+                                        {creating ? t('Sending...', 'Enviando...') : t('Send invitation', 'Enviar invitación')}
                                     </button>
                                 </div>
                             </>
