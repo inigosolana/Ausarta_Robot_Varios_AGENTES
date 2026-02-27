@@ -5,6 +5,18 @@ import { useAuth } from "../contexts/AuthContext";
 import { useTranslation } from "react-i18next";
 import type { AgentConfig, AIConfig, Empresa, UserProfile } from "../types";
 
+const SkeletonCard = () => (
+    <div className="bg-white rounded-2xl border border-gray-100 p-8 flex flex-col items-center space-y-4 animate-pulse">
+        <div className="w-20 h-20 bg-gray-200 rounded-3xl" />
+        <div className="space-y-2 w-full flex flex-col items-center">
+            <div className="h-5 bg-gray-200 rounded w-2/3" />
+            <div className="h-3 bg-gray-100 rounded w-1/2" />
+            <div className="h-2 bg-gray-100 rounded w-1/3 mt-1" />
+        </div>
+        <div className="h-4 bg-gray-100 rounded w-1/4 mt-4" />
+    </div>
+);
+
 const AgentListView: React.FC = () => {
     const { profile, isRole } = useAuth();
     const { t } = useTranslation();
@@ -30,19 +42,32 @@ const AgentListView: React.FC = () => {
     const loadEmpresas = async () => {
         setLoading(true);
         try {
-            let query = supabase.from("empresas").select("*").order("created_at", { ascending: true });
+            // Use cached API endpoint
+            const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/empresas`);
+            const data = await res.json();
 
-            if (!isPlatformOwner && profile?.empresa_id) {
-                query = query.eq('id', profile.empresa_id);
+            if (Array.isArray(data)) {
+                let filtered = data;
+                if (!isPlatformOwner && profile?.empresa_id) {
+                    filtered = data.filter(e => e.id === profile.empresa_id);
+                }
+                setEmpresas(filtered);
             }
-
-            const { data, error } = await query;
-            if (error) throw error;
-            setEmpresas(data || []);
         } catch (err) {
             console.error("Error loading empresas:", err);
+            // Fallback to direct Supabase
+            try {
+                let query = supabase.from("empresas").select("*").order("created_at", { ascending: true });
+                if (!isPlatformOwner && profile?.empresa_id) {
+                    query = query.eq('id', profile.empresa_id);
+                }
+                const { data } = await query;
+                setEmpresas(data || []);
+            } catch (e2) {
+                console.error("Fallback also failed:", e2);
+            }
         } finally {
-            setLoading(false);
+            setTimeout(() => setLoading(false), 200);
         }
     };
 
@@ -284,7 +309,7 @@ const AgentListView: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in duration-700">
                 {loading ? (
-                    <div className="col-span-full flex justify-center py-20"><Loader2 className="animate-spin text-blue-500" size={32} /></div>
+                    <>{[1, 2, 3, 4, 5, 6].map(i => <SkeletonCard key={i} />)}</>
                 ) : empresas.length === 0 ? (
                     <div className="col-span-full text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200">
                         <Building2 size={48} className="mx-auto text-gray-300 mb-4" />

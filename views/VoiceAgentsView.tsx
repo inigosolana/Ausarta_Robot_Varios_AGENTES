@@ -159,7 +159,46 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
     }
   };
 
-  if (isLoading) return <div className="p-8 text-center text-gray-500">Cargando configuración...</div>;
+  if (isLoading) return (
+    <div className="space-y-6 max-w-4xl mx-auto pb-20 animate-pulse">
+      <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm flex justify-between items-center">
+        <div className="space-y-2">
+          <div className="h-6 bg-gray-200 rounded w-48" />
+          <div className="h-3 bg-gray-100 rounded w-64" />
+        </div>
+        <div className="flex gap-3">
+          <div className="h-10 bg-gray-100 rounded-lg w-36" />
+          <div className="h-10 bg-gray-200 rounded-lg w-40" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="md:col-span-2 space-y-6">
+          <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+            <div className="h-5 bg-gray-200 rounded w-40" />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="h-10 bg-gray-100 rounded-lg" />
+              <div className="h-10 bg-gray-100 rounded-lg" />
+            </div>
+            <div className="h-10 bg-gray-100 rounded-lg" />
+            <div className="h-16 bg-gray-100 rounded-lg" />
+          </div>
+          <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+            <div className="h-5 bg-gray-200 rounded w-48" />
+            <div className="h-64 bg-gray-50 rounded-lg" />
+          </div>
+        </div>
+        <div className="space-y-6">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+              <div className="h-4 bg-gray-200 rounded w-32" />
+              <div className="h-10 bg-gray-100 rounded-lg" />
+              <div className="h-10 bg-gray-100 rounded-lg" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto pb-20">
