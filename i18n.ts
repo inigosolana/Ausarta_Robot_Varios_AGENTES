@@ -35,7 +35,11 @@ const resources = {
             "None": "Ninguno",
             "Retry": "Reintentar",
             "Transcript": "Transcripción",
-            "Export CSV": "Exportar CSV"
+            "Export CSV": "Exportar CSV",
+            "Restricted Access": "Acceso Restringido",
+            "No permission to access this module": "No tienes permisos para acceder a este módulo",
+            "Module in development": "Módulo en desarrollo",
+            "Loading...": "Cargando..."
         }
     },
     en: {
@@ -70,7 +74,11 @@ const resources = {
             "None": "None",
             "Retry": "Retry",
             "Transcript": "Transcript",
-            "Export CSV": "Export CSV"
+            "Export CSV": "Export CSV",
+            "Restricted Access": "Restricted Access",
+            "No permission to access this module": "You do not have permission to access this module",
+            "Module in development": "Module in development",
+            "Loading...": "Loading..."
         }
     },
     eu: {
@@ -105,7 +113,11 @@ const resources = {
             "None": "Bat ere ez",
             "Retry": "Berrabiarazi",
             "Transcript": "Transkripzioa",
-            "Export CSV": "Esportatu CSV"
+            "Export CSV": "Esportatu CSV",
+            "Restricted Access": "Sarbide mugatua",
+            "No permission to access this module": "Ez duzu modulu honetara sartzeko baimenik",
+            "Module in development": "Modulua garatzen",
+            "Loading...": "Kargatzen..."
         }
     },
     gl: {
@@ -140,7 +152,11 @@ const resources = {
             "None": "Ningunha",
             "Retry": "Reintentar",
             "Transcript": "Transcrición",
-            "Export CSV": "Exportar CSV"
+            "Export CSV": "Exportar CSV",
+            "Restricted Access": "Acceso Restrinxido",
+            "No permission to access this module": "Non tes permisos para acceder a este módulo",
+            "Module in development": "Módulo en desenvolvemento",
+            "Loading...": "Cargando..."
         }
     }
 };
