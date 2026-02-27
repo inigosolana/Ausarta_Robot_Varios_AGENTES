@@ -285,11 +285,11 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"✅ [{job_id}] Conectado (Instancia única).")
 
         # --- PASO 3: Cargar config ---
-        vad_task = asyncio.to_thread(silero.VAD.load, min_silence_duration=1.2, min_speech_duration=0.3)
+        vad_task = asyncio.to_thread(silero.VAD.load, min_silence_duration=0.5)
         config_task = fetch_agent_config(survey_id)
         
         vad_model, agent_config = await asyncio.gather(vad_task, config_task)
-        logger.info(f"✅ [{job_id}] VAD y configuración cargados (Silencio: 1.2s).")
+        logger.info(f"✅ [{job_id}] VAD y configuración cargados.")
 
         # --- PASO 4: Crear el agente ---
         agent_instance = DynamicAgent(room_name=room_name, agent_config=agent_config)
@@ -326,20 +326,7 @@ async def entrypoint(ctx: JobContext):
             ),
             vad=vad_model,
             preemptive_generation=False,
-            # Aplicar filtro de ruido si el plugin está disponible y se integra así
         )
-
-        # Aplicar reducción de ruido Krisp a todos los tracks de audio entrantes
-        @ctx.room.on("track_subscribed")
-        def on_track_subscribed(track: rtc.RemoteTrack, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant):
-            if track.kind == rtc.TrackKind.KIND_AUDIO:
-                logger.info(f"🎤 Aplicando reducción de ruido Krisp para {participant.identity}")
-                krisp = noise_cancellation.Krisp()
-                if hasattr(stt_plugin, 'add_filter'): # Algunos plugins STT permiten filtros directos
-                    stt_plugin.add_filter(krisp)
-                # En versiones recientes de Agents, Krisp se puede inyectar en el procesador del track
-                # pero con stt_plugin ya suele ser suficiente para mejorar la comprensión
-
 
         @session.on("user_speech_committed")
         def on_user_speech(msg: stt.SpeechEvent):
