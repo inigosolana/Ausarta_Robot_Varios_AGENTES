@@ -46,6 +46,19 @@ const resources = {
             "Module in development": "Módulo en desarrollo",
             "Loading...": "Cargando...",
 
+            // Sidebar & General UI
+            "Build": "Construcción",
+            "Companies": "Empresas",
+            "Test Call": "Probar Llamada",
+            "AI Models": "Modelos AI",
+            "Observe": "Observación",
+            "Ausarta Copilot": "Ausarta Copilot",
+            "Usage": "Uso",
+            "Admin": "Administración",
+            "Users": "Usuarios",
+            "User": "Usuario",
+            "CRM Integration": "Integración CRM",
+
             // Voice Agents View
             "Agent Identity": "Identidad del Agente",
             "Agent Name": "Nombre del Agente",
@@ -68,7 +81,6 @@ const resources = {
             "Call Now": "Llamar Ahora",
             "Configuration saved successfully!": "Configuración guardada correctamente",
             "Error saving configuration": "Error al guardar la configuración",
-            "Test Call": "Probar Llamada",
             "Save Changes": "Guardar Cambios",
 
             // Telephony View
@@ -113,6 +125,38 @@ const resources = {
             "Called": "Llamada",
             "Recorded Responses": "Respuestas Registradas",
             "Download Template": "Descargar Plantilla",
+            "Campaign updated!": "¡Campaña actualizada!",
+            "Update failed": "Error al actualizar",
+            "Error updating campaign": "Error al actualizar la campaña",
+            "Error loading details": "Error al cargar detalles",
+            "Please upload a CSV file": "Por favor, sube un archivo CSV",
+            "Please enter at least one valid phone number": "Por favor, introduce al menos un número de teléfono válido",
+            "Campaign created successfully!": "¡Campaña creada exitosamente!",
+            "Successfully queued": "Se han encolado exitosamente",
+            "failed calls for retry": "llamadas fallidas para reintento",
+            "Lead requeued successfully!": "Lead encolado exitosamente!",
+
+            // Dashboard View
+            "Loading dashboard...": "Cargando dashboard...",
+            "Survey activity summary": "Resumen de actividad de encuestas",
+            "Activity summary": "Resumen de actividad",
+            "Total Calls": "Total Llamadas",
+            "Average Score": "Nota Media",
+            "Open Survey": "Encuesta Abierta",
+            "Unlimited": "Ilimitada",
+            "Services Status (APIs)": "Estado de Servicios (APIs)",
+            "Scores Breakdown": "Desglose de Puntuaciones",
+            "Sales Score": "Punt. Comercial",
+            "Installer Score": "Punt. Instalador",
+            "Speed Score": "Punt. Rapidez",
+            "Latest Calls": "Últimas Llamadas",
+            "AI / Model": "IA / Modelo",
+            "Unreached": "No Contesta",
+            "See in results": "Ver en resultados",
+            "No recent calls": "No hay llamadas recientes",
+            "Missing": "Falta",
+            "active": "activo",
+            "Offline": "Desconectado",
 
             // Models View
             "AI Models Configuration": "Configuración de Modelos AI",
@@ -122,7 +166,7 @@ const resources = {
             "Select AI Model": "Selecciona el modelo de IA que deseas usar para la conversación.",
 
             // Usage View
-            "Monitoring Description": "Monitorización de servicios externos y consumo real",
+            "Monitoring Description": "Monitorización de servicios externos e consumo real",
             "Integration Status": "Estado de Integraciones",
             "Total Tokens": "Tokens Totales",
             "Total Minutes": "Minutos Totales",
@@ -130,11 +174,12 @@ const resources = {
             "CONSUMPTION BREAKDOWN": "DESGLOSE DE CONSUMO POR MODELO",
             "Model / Engine": "Modelo / Motor",
             "Efficiency": "Eficiencia (T/min)",
-            "Real-Time Limits": "Capacidades y Límites en Tiempo Real",
-            "Check Remaining Quota": "Consultar Cuota y Límites Restantes",
-            "SIP Logs": "Logs del Sistema de Telefonía (SIP)",
+            "Real-Time Limits": "Capacidades y Límites en Tempo Real",
+            "Check Remaining Quota": "Consultar Cuota e Límites Restantes",
+            "SIP Logs": "Logs do Sistema de Telefonía (SIP)",
             "Refresh Logs": "Actualizar Logs",
             "Syncing...": "Sincronizando..."
+
         }
     },
     en: {
@@ -180,6 +225,19 @@ const resources = {
             "Module in development": "Module in development",
             "Loading...": "Loading...",
 
+            // Sidebar & General UI
+            "Build": "Build",
+            "Companies": "Companies",
+            "Test Call": "Test Call",
+            "AI Models": "AI Models",
+            "Observe": "Observe",
+            "Ausarta Copilot": "Ausarta Copilot",
+            "Usage": "Usage",
+            "Admin": "Admin",
+            "Users": "Users",
+            "User": "User",
+            "CRM Integration": "CRM Integration",
+
             // Voice Agents View
             "Agent Identity": "Agent Identity",
             "Agent Name": "Agent Name",
@@ -202,7 +260,6 @@ const resources = {
             "Call Now": "Call Now",
             "Configuration saved successfully!": "Configuration saved successfully!",
             "Error saving configuration": "Error saving configuration",
-            "Test Call": "Test Call",
             "Save Changes": "Save Changes",
 
             // Telephony View
@@ -247,6 +304,38 @@ const resources = {
             "Called": "Called",
             "Recorded Responses": "Recorded Responses",
             "Download Template": "Download Template",
+            "Campaign updated!": "Campaign updated!",
+            "Update failed": "Update failed",
+            "Error updating campaign": "Error updating campaign",
+            "Error loading details": "Error loading details",
+            "Please upload a CSV file": "Please upload a CSV file",
+            "Please enter at least one valid phone number": "Please enter at least one valid phone number",
+            "Campaign created successfully!": "Campaign created successfully!",
+            "Successfully queued": "Successfully queued",
+            "failed calls for retry": "failed calls for retry",
+            "Lead requeued successfully!": "Lead requeued successfully!",
+
+            // Dashboard View
+            "Loading dashboard...": "Loading dashboard...",
+            "Survey activity summary": "Survey activity summary",
+            "Activity summary": "Activity summary",
+            "Total Calls": "Total Calls",
+            "Average Score": "Average Score",
+            "Open Survey": "Open Survey",
+            "Unlimited": "Unlimited",
+            "Services Status (APIs)": "Services Status (APIs)",
+            "Scores Breakdown": "Scores Breakdown",
+            "Sales Score": "Sales Score",
+            "Installer Score": "Installer Score",
+            "Speed Score": "Speed Score",
+            "Latest Calls": "Latest Calls",
+            "AI / Model": "AI / Model",
+            "Unreached": "Unreached",
+            "See in results": "See in results",
+            "No recent calls": "No recent calls",
+            "Missing": "Missing",
+            "active": "active",
+            "Offline": "Offline",
 
             // Models View
             "AI Models Configuration": "AI Models Configuration",
@@ -269,6 +358,7 @@ const resources = {
             "SIP Logs": "Telephony System Logs (SIP)",
             "Refresh Logs": "Refresh Logs",
             "Syncing...": "Syncing..."
+
         }
     },
     eu: {
@@ -314,6 +404,19 @@ const resources = {
             "Module in development": "Modulua garatzen",
             "Loading...": "Kargatzen...",
 
+            // Sidebar & General UI
+            "Build": "Eraikuntza",
+            "Companies": "Enpresak",
+            "Test Call": "Deia Probatu",
+            "AI Models": "AI Modeloak",
+            "Observe": "Behaketa",
+            "Ausarta Copilot": "Ausarta Copilot",
+            "Usage": "Erabilera",
+            "Admin": "Administrazioa",
+            "Users": "Erabiltzaileak",
+            "User": "Erabiltzailea",
+            "CRM Integration": "CRM Integrazioa",
+
             // Voice Agents View
             "Agent Identity": "Agentearen Nortasuna",
             "Agent Name": "Agentearen Izena",
@@ -336,7 +439,6 @@ const resources = {
             "Call Now": "Deitu Orain",
             "Configuration saved successfully!": "Konfigurazioa ongi gorde da",
             "Error saving configuration": "Errorea konfigurazioa gordetzean",
-            "Test Call": "Deia Probatu",
             "Save Changes": "Aldaketak Gorde",
 
             // Telephony View
@@ -381,6 +483,38 @@ const resources = {
             "Called": "Deitua",
             "Recorded Responses": "Erregistratutako Erantzunak",
             "Download Template": "Txantiloia Deskargatu",
+            "Campaign updated!": "Kanpaina eguneratua!",
+            "Update failed": "Eguneraketak huts egin du",
+            "Error updating campaign": "Errorea kanpaina eguneratzean",
+            "Error loading details": "Errorea xehetasunak kargatzean",
+            "Please upload a CSV file": "Mesedez, igo CSV fitxategi bat",
+            "Please enter at least one valid phone number": "Mesedez, sartu gutxienez telefono zenbakia baliozko bat",
+            "Campaign created successfully!": "Kanpaina ongi sortu da!",
+            "Successfully queued": "Ongi ilaratu dira",
+            "failed calls for retry": "huts egindako deiak berriro saiatzeko",
+            "Lead requeued successfully!": "Leada ongi ilaratu da!",
+
+            // Dashboard View
+            "Loading dashboard...": "Agintaritza-panela kargatzen...",
+            "Survey activity summary": "Inkesten jardueraren laburpena",
+            "Activity summary": "Jardueraren laburpena",
+            "Total Calls": "Deiak Guztira",
+            "Average Score": "Batez besteko nota",
+            "Open Survey": "Inkesta Irekia",
+            "Unlimited": "Mugagabea",
+            "Services Status (APIs)": "Zerbitzuen Egoera (APIak)",
+            "Scores Breakdown": "Puntuazioen Banaketa",
+            "Sales Score": "Punt. Komertziala",
+            "Installer Score": "Punt. Instalatzailea",
+            "Speed Score": "Punt. Azkartasuna",
+            "Latest Calls": "Azken Deiak",
+            "AI / Model": "AI / Modeloa",
+            "Unreached": "Ez du erantzuten",
+            "See in results": "Ikusi emaitzetan",
+            "No recent calls": "Ez dago azken deirik",
+            "Missing": "Falta da",
+            "active": "aktiboa",
+            "Offline": "Deskonektatuta",
 
             // Models View
             "AI Models Configuration": "AI Modeloen Konfigurazioa",
@@ -403,6 +537,7 @@ const resources = {
             "SIP Logs": "Telefono Sistemaren Logak (SIP)",
             "Refresh Logs": "Logak Eguneratu",
             "Syncing...": "Sinkronizatzen..."
+
         }
     },
     gl: {
@@ -448,6 +583,19 @@ const resources = {
             "Module in development": "Módulo en desenvolvemento",
             "Loading...": "Cargando...",
 
+            // Sidebar & General UI
+            "Build": "Construción",
+            "Companies": "Empresas",
+            "Test Call": "Probar Chamada",
+            "AI Models": "Modelos AI",
+            "Observe": "Observación",
+            "Ausarta Copilot": "Ausarta Copilot",
+            "Usage": "Uso",
+            "Admin": "Administración",
+            "Users": "Usuarios",
+            "User": "Usuario",
+            "CRM Integration": "Integración CRM",
+
             // Voice Agents View
             "Agent Identity": "Identidade do Axente",
             "Agent Name": "Nome do Axente",
@@ -470,7 +618,6 @@ const resources = {
             "Call Now": "Chamar Agora",
             "Configuration saved successfully!": "Configuración gardada correctamente",
             "Error saving configuration": "Erro ao gardar a configuración",
-            "Test Call": "Probar Chamada",
             "Save Changes": "Gardar Cambios",
 
             // Telephony View
@@ -515,6 +662,38 @@ const resources = {
             "Called": "Chamada",
             "Recorded Responses": "Respostas Rexistradas",
             "Download Template": "Descargar Modelo",
+            "Campaign updated!": "¡Campaña actualizada!",
+            "Update failed": "Erro ao actualizar",
+            "Error updating campaign": "Erro ao actualizar a campaña",
+            "Error loading details": "Erro ao cargar detalles",
+            "Please upload a CSV file": "Por favor, sube un arquivo CSV",
+            "Please enter at least one valid phone number": "Por favor, introduce polo menos un número de teléfono válido",
+            "Campaign created successfully!": "¡Campaña creada exitosamente!",
+            "Successfully queued": "Se encolaron exitosamente",
+            "failed calls for retry": "chamadas fallidas para reintento",
+            "Lead requeued successfully!": "Lead encolado exitosamente!",
+
+            // Dashboard View
+            "Loading dashboard...": "Cargando dashboard...",
+            "Survey activity summary": "Resumo de actividade de enquisas",
+            "Activity summary": "Resumo de actividade",
+            "Total Calls": "Total Chamadas",
+            "Average Score": "Nota Media",
+            "Open Survey": "Enquisa Aberta",
+            "Unlimited": "Ilimitada",
+            "Services Status (APIs)": "Estado de Servizos (APIs)",
+            "Scores Breakdown": "Desglose de Puntuacións",
+            "Sales Score": "Punt. Comercial",
+            "Installer Score": "Punt. Instalador",
+            "Speed Score": "Punt. Rapidez",
+            "Latest Calls": "Últimas Chamadas",
+            "AI / Model": "IA / Modelo",
+            "Unreached": "Non Contesta",
+            "See in results": "Ver en resultados",
+            "No recent calls": "Non hai chamadas recentes",
+            "Missing": "Falta",
+            "active": "activo",
+            "Offline": "Desconectado",
 
             // Models View
             "AI Models Configuration": "Configuración de Modelos IA",
