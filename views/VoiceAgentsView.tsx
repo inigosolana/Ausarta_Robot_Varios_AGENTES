@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Save, Phone, Loader2, Bot, Mic, Speaker, Brain } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8001/api';
 
@@ -31,6 +32,7 @@ interface PromptTemplate {
 }
 
 const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall }) => {
+  const { t } = useTranslation();
   const [agent, setAgent] = useState<AgentConfig>({
     name: '',
     useCase: '',
@@ -114,13 +116,13 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
       const [agentRes, aiRes] = await Promise.all([agentPromise, aiPromise]);
 
       if (agentRes.ok && aiRes.ok) {
-        alert('✅ Configuración guardada correctamente');
+        alert('✅ ' + t('Configuration saved successfully!'));
       } else {
-        alert('❌ Error al guardar la configuración');
+        alert('❌ ' + t('Error saving configuration'));
       }
     } catch (error) {
       console.error('Error saving:', error);
-      alert('Error al guardar');
+      alert(t('Error saving configuration'));
     } finally {
       setIsSaving(false);
     }
@@ -204,8 +206,8 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
     <div className="space-y-6 max-w-4xl mx-auto pb-20">
       <header className="flex justify-between items-center bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{agent.name || 'Ausarta Agent'}</h1>
-          <p className="text-gray-500 text-sm">Configuración del Agente y Modelos AI</p>
+          <h1 className="text-2xl font-bold text-gray-900">{agent.name || (t('Voice Agents') + ' Agent')}</h1>
+          <p className="text-gray-500 text-sm">{t('AI Models Description')}</p>
         </div>
         <div className="flex gap-3">
           <button
@@ -213,7 +215,7 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
             className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white font-medium rounded-lg hover:bg-green-600 transition-colors"
           >
             <Phone size={18} />
-            Probar Llamada
+            {t('Test Call')}
           </button>
           <button
             onClick={handleSave}
@@ -221,7 +223,7 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
             className="flex items-center gap-2 px-4 py-2 bg-black text-white font-medium rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50"
           >
             {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-            Guardar Cambios
+            {t('Save Changes')}
           </button>
         </div>
       </header>
@@ -233,12 +235,12 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
           <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
             <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
               <Bot size={20} className="text-blue-500" />
-              Identidad del Agente
+              {t('Agent Identity')}
             </h3>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Nombre del Agente</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Agent Name')}</label>
                 <input
                   type="text"
                   value={agent.name}
@@ -247,7 +249,7 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Caso de Uso</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Use Case')}</label>
                 <input
                   type="text"
                   value={agent.useCase}
@@ -258,7 +260,7 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Saludo Inicial</label>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Initial Greeting')}</label>
               <input
                 type="text"
                 value={agent.greeting}
@@ -266,11 +268,11 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
                 placeholder="Hola, soy..."
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
               />
-              <p className="text-xs text-gray-400 mt-1">Lo primero que dirá el agente al contestar.</p>
+              <p className="text-xs text-gray-400 mt-1">{t('Initial Greeting Hint')}</p>
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Descripción</label>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Description')}</label>
               <textarea
                 rows={2}
                 value={agent.description}
@@ -285,7 +287,7 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                 <Brain size={20} className="text-purple-500" />
-                Instrucciones (Prompt)
+                {t('Instructions (Prompt)')}
               </h3>
 
               <div className="flex items-center gap-2">
@@ -295,14 +297,14 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
                   onChange={(e) => {
                     const template = templates.find(t => t.id === Number(e.target.value));
                     if (template) {
-                      if (confirm('¿Reemplazar las instrucciones actuales con esta plantilla?')) {
+                      if (confirm(t('Replace instructions with this template?'))) {
                         setAgent({ ...agent, instructions: template.content });
                       }
                     }
                   }}
                   value=""
                 >
-                  <option value="" disabled>📂 Cargar Plantilla...</option>
+                  <option value="" disabled>{t('Load Template...')}</option>
                   {templates.map(t => (
                     <option key={t.id} value={t.id}>{t.name}</option>
                   ))}
@@ -310,7 +312,7 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
 
                 <button
                   onClick={async () => {
-                    const name = prompt('Nombre para la nueva plantilla:');
+                    const name = prompt(t('Name for the new template:'));
                     if (name) {
                       try {
                         const res = await fetch(`${API_URL}/prompts`, {
@@ -323,17 +325,17 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
                           })
                         });
                         if (res.ok) {
-                          alert('Plantilla guardada!');
+                          alert(t('Template saved!'));
                           loadData(); // Recargar templates
                         }
                       } catch (e) {
-                        alert('Error al guardar plantilla');
+                        alert(t('Error saving template'));
                       }
                     }
                   }}
                   className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg border border-gray-200 transition-colors"
                 >
-                  💾 Guardar como Plantilla
+                  {t('Save as Template')}
                 </button>
               </div>
             </div>
@@ -345,7 +347,7 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
                 onChange={(e) => setAgent({ ...agent, instructions: e.target.value })}
                 className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500/20 outline-none font-mono text-sm bg-gray-50"
               />
-              <p className="text-xs text-gray-500 mt-2">Define aquí la personalidad, misión y reglas del agente.</p>
+              <p className="text-xs text-gray-500 mt-2">{t('Prompt Hint')}</p>
             </div>
           </section>
         </div>
@@ -356,10 +358,10 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
           {/* LLM Config */}
           <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-              <Brain size={16} /> Modelo de Lenguaje (LLM)
+              <Brain size={16} /> {t('Language Model (LLM)')}
             </h3>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider')}</label>
               <select
                 value={aiConfig.llm_provider}
                 onChange={(e) => {
@@ -379,7 +381,7 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model')}</label>
               <select
                 value={aiConfig.llm_model}
                 onChange={(e) => setAiConfig({ ...aiConfig, llm_model: e.target.value })}
@@ -415,10 +417,10 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
           {/* TTS Config */}
           <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-              <Speaker size={16} /> Voz (TTS)
+              <Speaker size={16} /> {t('Voice (TTS)')}
             </h3>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider')}</label>
               <select
                 value={aiConfig.tts_provider}
                 onChange={(e) => setAiConfig({ ...aiConfig, tts_provider: e.target.value })}
@@ -430,7 +432,7 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model')}</label>
               <input
                 type="text"
                 value={aiConfig.tts_model}
@@ -439,7 +441,7 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Voice ID</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('Voice ID')}</label>
               <input
                 type="text"
                 value={aiConfig.tts_voice}
@@ -452,10 +454,10 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
           {/* STT Config */}
           <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-              <Mic size={16} /> Transcripción (STT)
+              <Mic size={16} /> {t('Transcription (STT)')}
             </h3>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Proveedor</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider')}</label>
               <select
                 value={aiConfig.stt_provider}
                 onChange={(e) => setAiConfig({ ...aiConfig, stt_provider: e.target.value })}
@@ -466,7 +468,7 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model')}</label>
               <input
                 type="text"
                 value={aiConfig.stt_model}
@@ -483,14 +485,14 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
       {showCallDialog && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 shadow-2xl max-w-md w-full mx-4">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Probar Agente</h3>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">{t('Test Agent')}</h3>
             <p className="text-sm text-gray-500 mb-4">
-              Llamar a tu teléfono para probar a <strong>{agent.name}</strong>
+              {t('Call your phone to test')} <strong>{agent.name}</strong>
             </p>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-2">Tu número de teléfono</label>
+                <label className="block text-sm font-semibold text-gray-800 mb-2">{t('Your phone number')}</label>
                 <input
                   type="tel"
                   value={phoneNumber}
@@ -507,7 +509,7 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
                   className="flex-1 py-2.5 bg-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-300 transition-colors"
                   disabled={isCalling}
                 >
-                  Cancelar
+                  {t('Cancel')}
                 </button>
                 <button
                   onClick={handleMakeCall}
@@ -517,12 +519,12 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
                   {isCalling ? (
                     <>
                       <Loader2 size={16} className="animate-spin" />
-                      Llamando...
+                      {t('Calling...')}
                     </>
                   ) : (
                     <>
                       <Phone size={16} />
-                      Llamar Ahora
+                      {t('Call Now')}
                     </>
                   )}
                 </button>
