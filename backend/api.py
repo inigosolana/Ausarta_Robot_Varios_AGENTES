@@ -154,12 +154,12 @@ async def get_ui_cache(key: str, max_age_minutes: int = 5):
     """Obtiene datos de ui_cache si tienen menos de X minutos"""
     if not supabase: return None
     try:
-        res = supabase.table("ui_cache").select("*").eq("key", key).maybeSingle().execute()
-        if res.data:
-            updated_at = datetime.fromisoformat(res.data["updated_at"].replace("Z", "+00:00"))
+        res = supabase.table("ui_cache").select("*").eq("key", key).limit(1).execute()
+        if res.data and len(res.data) > 0:
+            updated_at = datetime.fromisoformat(res.data[0]["updated_at"].replace("Z", "+00:00"))
             if datetime.now(timezone.utc) - updated_at < timedelta(minutes=max_age_minutes):
                 logger.info(f"🚀 Cache HIT for {key}")
-                return res.data["data"]
+                return res.data[0]["data"]
     except Exception as e:
         logger.error(f"Error reading cache {key}: {e}")
     return None
@@ -277,12 +277,12 @@ async def get_dashboard_stats(empresa_id: Optional[int] = None, agent_id: Option
         try:
             target_agent_id = agent_id
             if not target_agent_id and campaign_id:
-                camp_res = supabase.table("campaigns").select("agent_id").eq("id", campaign_id).maybeSingle().execute()
-                if camp_res.data: target_agent_id = camp_res.data.get("agent_id")
+                camp_res = supabase.table("campaigns").select("agent_id").eq("id", campaign_id).limit(1).execute()
+                if camp_res.data and len(camp_res.data) > 0: target_agent_id = camp_res.data[0].get("agent_id")
             if target_agent_id:
-                agent_res = supabase.table("agent_config").select("instructions").eq("id", target_agent_id).maybeSingle().execute()
-                if agent_res.data:
-                    inst = agent_res.data.get("instructions", "").lower()
+                agent_res = supabase.table("agent_config").select("instructions").eq("id", target_agent_id).limit(1).execute()
+                if agent_res.data and len(agent_res.data) > 0:
+                    inst = agent_res.data[0].get("instructions", "").lower()
                     return "pregunta 1" in inst or "pregunta 2" in inst or "pregunta:" in inst
         except: pass
         return False
@@ -1044,9 +1044,9 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
 async def get_result_transcription(result_id: int):
     if not supabase: return {"error": "Database not connected"}
     try:
-        res = supabase.table("encuestas").select("transcription").eq("id", result_id).maybeSingle().execute()
-        if res.data:
-            return {"transcription": res.data.get("transcription")}
+        res = supabase.table("encuestas").select("transcription").eq("id", result_id).limit(1).execute()
+        if res.data and len(res.data) > 0:
+            return {"transcription": res.data[0].get("transcription")}
         return {"transcription": None}
     except Exception as e:
         logger.error(f"Error fetching transcription: {e}")
