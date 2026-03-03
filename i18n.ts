@@ -205,7 +205,9 @@ const resources = {
             "Restore Superadmin": "Restaurar Superadmin",
             "Dev Role Switcher": "Selector de Rol (Dev)",
             "Restored Superadmin role": "Rol de Superadmin restaurado",
-            "Switched to": "Cambiado a"
+            "Switched to": "Cambiado a",
+            "Context Simulation": "Simulación de Contexto",
+            "Company changed": "Empresa cambiada"
         }
     },
     en: {
@@ -410,7 +412,9 @@ const resources = {
             "Restore Superadmin": "Restore Superadmin",
             "Dev Role Switcher": "Dev Role Switcher",
             "Restored Superadmin role": "Restored Superadmin role",
-            "Switched to": "Switched to"
+            "Switched to": "Switched to",
+            "Context Simulation": "Context Simulation",
+            "Company changed": "Company changed"
         }
     },
     eu: {

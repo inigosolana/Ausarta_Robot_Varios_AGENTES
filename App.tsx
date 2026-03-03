@@ -100,6 +100,16 @@ const App: React.FC = () => {
     }
   });
 
+  const { data: companies = [] } = useQuery({
+    queryKey: ['companies'],
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/empresas`);
+      if (!res.ok) throw new Error('Failed to fetch companies');
+      return res.json();
+    },
+    enabled: canSimulation
+  });
+
   useEffect(() => {
     const channel = supabase.channel('realtime_alerts')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alertas' }, payload => {
@@ -343,36 +353,20 @@ const App: React.FC = () => {
               )}
             </div>
 
-            {/* Quick Simulation Banner if enabled and not superadmin */}
-            {canSimulation && profile?.role !== 'superadmin' && isSidebarOpen && (
-              <div className="mx-2 mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-xl shadow-sm">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[10px] text-red-600 dark:text-red-400 font-bold uppercase tracking-wider">{t('Simulation Active')}</p>
-                  <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+            {/* If superadmin or original, show context switcher panel */}
+            {canSimulation && isSidebarOpen && (
+              <div className="mx-2 mb-4 p-3 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/50 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider">{t('Context Simulation')}</p>
+                  {profile.role !== 'superadmin' && <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>}
                 </div>
-                <button
-                  onClick={async () => {
-                    const { error } = await supabase.from('user_profiles').update({ role: 'superadmin' }).eq('id', profile!.id);
-                    if (!error) {
-                      toast.success(t('Restored Superadmin role'));
-                      await refreshProfile();
-                    }
-                  }}
-                  className="text-xs font-bold text-white bg-red-600 px-3 py-1.5 rounded-lg hover:bg-red-700 w-full transition-all shadow-sm"
-                >
-                  {t('Restore Superadmin')}
-                </button>
-              </div>
-            )}
 
-            {/* If superadmin, show quick role switcher in sidebar */}
-            {profile?.role === 'superadmin' && isSidebarOpen && (
-              <div className="mx-2 mb-4 p-2 bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700 rounded-xl">
-                <p className="text-[9px] text-gray-400 dark:text-gray-500 font-bold uppercase tracking-wider mb-2 px-1">{t('Dev Role Switcher')}</p>
+                {/* Role Switcher */}
                 <div className="flex gap-1">
                   {(['superadmin', 'admin', 'user'] as const).map((r) => (
                     <button
                       key={r}
+                      title={r}
                       onClick={async () => {
                         const { error } = await supabase.from('user_profiles').update({ role: r }).eq('id', profile!.id);
                         if (!error) {
@@ -381,14 +375,48 @@ const App: React.FC = () => {
                         }
                       }}
                       className={`text-[9px] flex-1 py-1 rounded transition-all font-bold ${profile.role === r
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'bg-white dark:bg-gray-800 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-650'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'bg-white dark:bg-gray-800 text-gray-500 hover:bg-indigo-50'
                         }`}
                     >
                       {r.charAt(0).toUpperCase()}
                     </button>
                   ))}
                 </div>
+
+                {/* Company Switcher */}
+                <select
+                  value={profile.empresa_id || ''}
+                  onChange={async (e) => {
+                    const val = e.target.value === '' ? null : Number(e.target.value);
+                    const { error } = await supabase.from('user_profiles').update({ empresa_id: val }).eq('id', profile!.id);
+                    if (!error) {
+                      toast.success(t('Company changed'));
+                      await refreshProfile();
+                    }
+                  }}
+                  className="w-full text-[10px] py-1 px-1 border border-indigo-100 dark:border-indigo-800 dark:bg-gray-800 rounded outline-none focus:ring-1 focus:ring-indigo-500 font-medium"
+                >
+                  <option value="">-- {t('No Company')} --</option>
+                  {companies.map((c: any) => (
+                    <option key={c.id} value={c.id}>{c.nombre}</option>
+                  ))}
+                </select>
+
+                {profile.role !== 'superadmin' && (
+                  <button
+                    onClick={async () => {
+                      const { error } = await supabase.from('user_profiles').update({ role: 'superadmin' }).eq('id', profile!.id);
+                      if (!error) {
+                        toast.success(t('Restored Superadmin role'));
+                        await refreshProfile();
+                      }
+                    }}
+                    className="text-[9px] font-bold text-white bg-red-600 py-1 rounded hover:bg-red-700 w-full transition-all"
+                  >
+                    {t('Restore Superadmin')}
+                  </button>
+                )}
               </div>
             )}
 
