@@ -118,19 +118,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const hasPermission = (module: string): boolean => {
         if (!profile) return false;
 
-        // Special case: premium_voice is ONLY for superadmins OR explicitly granted
-        if (module === 'premium_voice') {
-            if (profile.role === 'superadmin') return true;
-            const perm = permissions.find(p => p.module === module);
-            return perm?.enabled ?? false;
-        }
+        // Special case: Superadmins always have full access
+        if (profile.role === 'superadmin') return true;
 
-        // Default behavior: Superadmins and admins have access to everything else
-        if (profile.role === 'superadmin' || profile.role === 'admin') return true;
+        // Modules enabled for the company
+        const companyModules = profile.empresas?.enabled_modules || [];
+        const isModuleEnabled = companyModules.includes(module);
 
-        // Regular users check permissions
-        const perm = permissions.find(p => p.module === module);
-        return perm?.enabled ?? false;
+        // If it's the 'admin' module (User Management), regular users cannot access even if enabled for company
+        if (module === 'admin' && profile.role === 'user') return false;
+
+        // Default: modules must be enabled for the company
+        // EXCEPT if there's an explicit manual permission override (like premium voice)
+        const manualPerm = permissions.find(p => p.module === module);
+        if (manualPerm) return manualPerm.enabled;
+
+        return isModuleEnabled;
     };
 
     const isRole = (...roles: UserRole[]): boolean => {

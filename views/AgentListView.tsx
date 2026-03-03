@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect } from "react";
-import { Bot, Loader2, Search, Building2, ChevronRight, ArrowLeft, Users, Mail, Trash2, Settings } from "lucide-react";
+import { Bot, Loader2, Search, Building2, ChevronRight, ArrowLeft, Users, Mail, Trash2, Settings, Phone, Megaphone, BarChart3, Zap } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useTranslation } from "react-i18next";
@@ -34,6 +34,7 @@ const AgentListView: React.FC = () => {
     const [activeTab, setActiveTab] = useState<"agents" | "users">("agents");
     const [search, setSearch] = useState("");
     const [selectedResponsable, setSelectedResponsable] = useState<string>("all");
+    const [saving, setSaving] = useState(false);
 
     useEffect(() => {
         loadEmpresas();
@@ -118,6 +119,33 @@ const AgentListView: React.FC = () => {
         }
     };
 
+    const toggleCompanyModule = async (moduleKey: string) => {
+        if (!selectedEmpresa) return;
+
+        const currentModules = (selectedEmpresa as any).enabled_modules || [];
+        const newModules = currentModules.includes(moduleKey)
+            ? currentModules.filter((m: string) => m !== moduleKey)
+            : [...currentModules, moduleKey];
+
+        try {
+            setSaving(true);
+            const { error } = await supabase
+                .from("empresas")
+                .update({ enabled_modules: newModules })
+                .eq("id", selectedEmpresa.id);
+
+            if (error) throw error;
+
+            setSelectedEmpresa({ ...selectedEmpresa, enabled_modules: newModules });
+            // Update local list too
+            setEmpresas(prev => prev.map(e => e.id === selectedEmpresa.id ? { ...e, enabled_modules: newModules } : e));
+        } catch (err) {
+            alert(t('Error updating permissions', 'Error al actualizar permisos'));
+        } finally {
+            setSaving(false);
+        }
+    };
+
     const handleCreateEmpresa = async () => {
         const nombre = prompt(t("New Company / Project Name:", "Nombre de la nueva Empresa / Proyecto:"));
         if (!nombre) return;
@@ -195,6 +223,14 @@ const AgentListView: React.FC = () => {
                     >
                         <Users size={18} /> {t("Users", "Usuarios")} ({companyUsers.length})
                     </button>
+                    {isPlatformOwner && (
+                        <button
+                            onClick={() => setActiveTab("permissions" as any)}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === ("permissions" as any) ? "bg-white text-blue-600 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+                        >
+                            <Settings size={18} /> {t("Permissions", "Permisos")}
+                        </button>
+                    )}
                 </div>
 
                 <div className="relative">
@@ -247,7 +283,7 @@ const AgentListView: React.FC = () => {
                             </div>
                         )}
                     </>
-                ) : (
+                ) : activeTab === 'users' ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         {companyUsers.filter(u => u.email.toLowerCase().includes(search.toLowerCase()) || u.full_name.toLowerCase().includes(search.toLowerCase())).map((user) => (
                             <div key={user.id} className="bg-white rounded-xl border border-gray-100 p-5 flex items-center gap-4 hover:border-indigo-100 hover:shadow-md transition-all">
@@ -266,6 +302,47 @@ const AgentListView: React.FC = () => {
                                 </div>
                             </div>
                         ))}
+                    </div>
+                ) : (
+                    <div className="bg-white rounded-2xl border border-gray-100 p-8 animate-in fade-in duration-500">
+                        <div className="mb-6">
+                            <h2 className="text-lg font-bold text-gray-900 mb-1">{t('Company Modules', 'Módulos de la Empresa')}</h2>
+                            <p className="text-sm text-gray-500">{t('Select which features are enabled for this client.', 'Selecciona qué funciones están habilitadas para este cliente.')}</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {[
+                                { key: 'agents', label: t('Agents', 'Agentes'), icon: <Bot size={16} /> },
+                                { key: 'test-call', label: t('Test Call', 'Llamada Prueba'), icon: <Phone size={16} /> },
+                                { key: 'campaigns', label: t('Campaigns', 'Campañas'), icon: <Megaphone size={16} /> },
+                                { key: 'results', label: t('Results', 'Resultados'), icon: <BarChart3 size={16} /> },
+                                { key: 'assistant', label: t('Ausarta Copilot', 'Ausarta Copilot'), icon: <Bot size={16} /> },
+                                { key: 'admin', label: t('User Management', 'Gestión Usuarios'), icon: <Users size={16} /> },
+                                { key: 'usage', label: t('Usage', 'Uso'), icon: <Zap size={16} /> },
+                                { key: 'crm', label: t('CRM Integration', 'Integración CRM'), icon: <Settings size={16} /> }
+                            ].map((mod) => {
+                                const isEnabled = (selectedEmpresa.enabled_modules || []).includes(mod.key);
+                                return (
+                                    <button
+                                        key={mod.key}
+                                        disabled={saving}
+                                        onClick={() => toggleCompanyModule(mod.key)}
+                                        className={`flex items-center justify-between p-4 rounded-xl border transition-all ${isEnabled
+                                            ? 'bg-blue-50 border-blue-200 text-blue-700'
+                                            : 'bg-gray-50 border-gray-100 text-gray-400 opacity-60 hover:opacity-100'
+                                            }`}
+                                    >
+                                        <div className="flex items-center gap-3 font-medium">
+                                            {mod.icon}
+                                            {mod.label}
+                                        </div>
+                                        <div className={`w-10 h-6 rounded-full relative transition-colors ${isEnabled ? 'bg-blue-600' : 'bg-gray-300'}`}>
+                                            <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${isEnabled ? 'right-1' : 'left-1'}`} />
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
                 )}
             </div>

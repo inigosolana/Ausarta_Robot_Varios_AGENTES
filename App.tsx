@@ -18,7 +18,9 @@ import {
   Loader2,
   Moon,
   Sun,
-  BotMessageSquare
+  BotMessageSquare,
+  Settings,
+  Share2
 } from 'lucide-react';
 import { ViewState } from './types';
 import { useTranslation } from 'react-i18next';
@@ -75,11 +77,10 @@ const App: React.FC = () => {
     if (currentView === 'overview') return;
 
     // Check if the current view is still accessible
-    const adminViews = ['admin', 'crm', 'empresas'];
-    if (profile?.role === 'user' && adminViews.includes(currentView)) {
+    if (!hasPermission(currentView)) {
       setCurrentView('overview');
     }
-  }, [profile?.role, currentView]);
+  }, [profile?.role, currentView, profile?.empresa_id]);
 
   useEffect(() => {
     setIsDarkMode(document.documentElement.classList.contains('dark'));
@@ -243,56 +244,59 @@ const App: React.FC = () => {
             <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
               {t('Build', 'Construcción')}
             </div>
-            {isPlatformOwner && hasPermission('empresas') && (
+            {isAusartaAdmin && hasPermission('empresas') && (
               <SidebarItem
                 icon={<Building2 size={18} />}
                 label={t('Companies', 'Empresas')}
-                isActive={currentView === 'empresas' || currentView === 'create-agents'}
+                isActive={currentView === 'empresas'}
                 onClick={() => setCurrentView('empresas')}
                 collapsed={!isSidebarOpen}
               />
             )}
+
             {hasPermission('agents') && (
               <SidebarItem
                 icon={<Bot size={18} />}
-                label={t('Agents')}
+                label={t('Agentes', 'Agentes')}
                 isActive={currentView === 'agents'}
                 onClick={() => setCurrentView('agents')}
                 collapsed={!isSidebarOpen}
               />
             )}
+
             {hasPermission('test-call') && (
               <SidebarItem
                 icon={<Phone size={18} />}
-                label={t('Test Call')}
+                label={t('Test Call', 'Llamada Prueba')}
                 isActive={currentView === 'test-call'}
                 onClick={() => setCurrentView('test-call')}
                 collapsed={!isSidebarOpen}
               />
             )}
+
             {hasPermission('campaigns') && (
               <SidebarItem
                 icon={<Megaphone size={18} />}
-                label={t('Campaigns')}
+                label={t('Campaigns', 'Campañas')}
                 isActive={currentView === 'campaigns'}
                 onClick={() => setCurrentView('campaigns')}
                 collapsed={!isSidebarOpen}
               />
             )}
 
-
             <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
-              {t('Observe', 'Observación')}
+              {t('Analysis', 'Análisis')}
             </div>
             {hasPermission('results') && (
               <SidebarItem
-                icon={<ClipboardList size={18} />}
-                label={t('Results')}
+                icon={<BarChart3 size={18} />}
+                label={t('Results', 'Resultados')}
                 isActive={currentView === 'results'}
                 onClick={() => setCurrentView('results')}
                 collapsed={!isSidebarOpen}
               />
             )}
+
             {hasPermission('assistant') && (
               <SidebarItem
                 icon={<BotMessageSquare size={18} />}
@@ -302,9 +306,10 @@ const App: React.FC = () => {
                 collapsed={!isSidebarOpen}
               />
             )}
+
             {hasPermission('usage') && (
               <SidebarItem
-                icon={<BarChart3 size={18} />}
+                icon={<Zap size={18} />}
                 label={t('Usage', 'Uso')}
                 isActive={currentView === 'usage'}
                 onClick={() => setCurrentView('usage')}
@@ -312,27 +317,24 @@ const App: React.FC = () => {
               />
             )}
 
-            {/* Admin section - only for admin and superadmin */}
-            {isRole('superadmin', 'admin') && (
-              <>
-                <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
-                  {t('Admin', 'Administración')}
-                </div>
-                <SidebarItem
-                  icon={<Users size={18} />}
-                  label={t('Users', 'Usuarios')}
-                  isActive={currentView === 'admin'}
-                  onClick={() => setCurrentView('admin')}
-                  collapsed={!isSidebarOpen}
-                />
-                <SidebarItem
-                  icon={<Building2 size={18} />}
-                  label={t('CRM Integration', 'Integración CRM')}
-                  isActive={currentView === 'crm'}
-                  onClick={() => setCurrentView('crm')}
-                  collapsed={!isSidebarOpen}
-                />
-              </>
+            {hasPermission('admin') && (
+              <SidebarItem
+                icon={<Settings size={18} />}
+                label={t('Admin', 'Administración')}
+                isActive={currentView === 'admin'}
+                onClick={() => setCurrentView('admin')}
+                collapsed={!isSidebarOpen}
+              />
+            )}
+
+            {hasPermission('crm') && (
+              <SidebarItem
+                icon={<Share2 size={18} />}
+                label={t('CRM Integration', 'Integración CRM')}
+                isActive={currentView === 'crm'}
+                onClick={() => setCurrentView('crm')}
+                collapsed={!isSidebarOpen}
+              />
             )}
           </nav>
 
@@ -489,7 +491,7 @@ const App: React.FC = () => {
         {isCalling && (
           <LiveCallView onClose={() => setIsCalling(false)} />
         )}
-      </div>
+      </div >
     </>
   );
 };

@@ -47,6 +47,7 @@ export interface Empresa {
   nombre: string;
   responsable: string;
   max_admins?: number;
+  enabled_modules?: string[];
   crm_type?: string | null;
   crm_webhook_url?: string | null;
   created_at?: string;
@@ -127,6 +128,8 @@ export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'results', label: 'Resultados' },
   { key: 'usage', label: 'Uso' },
   { key: 'assistant', label: 'Ausarta Copilot' },
+  { key: 'admin', label: 'Usuarios' },
+  { key: 'crm', label: 'CRM Integration' },
   { key: 'ai_prompt_generator', label: 'Generador de Agentes AI (Extra)' },
   { key: 'premium_voice', label: 'Voz Ausarta (Acceso Premium)' },
 ];
