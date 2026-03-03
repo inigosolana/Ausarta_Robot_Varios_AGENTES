@@ -31,8 +31,6 @@ import SidebarItem from './components/SidebarItem';
 import AssistantPanel from './components/AssistantPanel';
 
 // Lazy loading views for better performance
-const TelephonyView = lazy(() => import('./views/TelephonyView'));
-const ModelsView = lazy(() => import('./views/ModelsView'));
 const CampaignsView = lazy(() => import('./views/CampaignsView').then(m => ({ default: m.CampaignsView })));
 const AgentListView = lazy(() => import('./views/AgentListView'));
 const TestCallView = lazy(() => import('./views/TestCallView'));
@@ -128,8 +126,7 @@ const App: React.FC = () => {
       <Suspense fallback={<ViewLoader />}>
         {(() => {
           switch (currentView) {
-            case 'telephony':
-              return <PermissionGate view="telephony"><TelephonyView /></PermissionGate>;
+
             case 'campaigns':
               return <PermissionGate view="campaigns"><CampaignsView /></PermissionGate>;
             case 'create-agents':
@@ -145,8 +142,7 @@ const App: React.FC = () => {
               return <PermissionGate view="results"><ResultsView /></PermissionGate>;
             case 'usage':
               return <PermissionGate view="usage"><UsageView /></PermissionGate>;
-            case 'models':
-              return <PermissionGate view="models"><ModelsView /></PermissionGate>;
+
             case 'admin':
               return <PermissionGate view="admin"><UserManagementView /></PermissionGate>;
             case 'crm':
@@ -255,24 +251,7 @@ const App: React.FC = () => {
                 collapsed={!isSidebarOpen}
               />
             )}
-            {isPlatformOwner && hasPermission('models') && (
-              <SidebarItem
-                icon={<Cpu size={18} />}
-                label={t('AI Models', 'Modelos AI')}
-                isActive={currentView === 'models'}
-                onClick={() => setCurrentView('models')}
-                collapsed={!isSidebarOpen}
-              />
-            )}
-            {isPlatformOwner && hasPermission('telephony') && (
-              <SidebarItem
-                icon={<PhoneCall size={18} />}
-                label={t('Telephony', 'Telefonía')}
-                isActive={currentView === 'telephony'}
-                onClick={() => setCurrentView('telephony')}
-                collapsed={!isSidebarOpen}
-              />
-            )}
+
 
             <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
               {t('Observe', 'Observación')}
