@@ -60,6 +60,7 @@ export interface AgentConfig {
   instructions: string;
   critical_rules?: string;
   greeting: string;
+  tipo_resultados?: string;
   created_at?: string;
   updated_at?: string;
 }

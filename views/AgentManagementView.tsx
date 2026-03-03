@@ -28,33 +28,28 @@ const AgentManagementView: React.FC = () => {
     const loadData = async () => {
         setLoading(true);
         try {
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000));
+            // Load empresas
+            let empQuery = supabase.from("empresas").select("*").order("nombre");
+            if (!isPlatformOwner && profile?.empresa_id) {
+                empQuery = empQuery.eq('id', profile.empresa_id);
+            }
+            const { data: empData, error: empError } = await empQuery;
+            if (empError) throw empError;
+            setEmpresas(empData || []);
 
-            const fetchData = async () => {
-                // Load empresas
-                let empQuery = supabase.from("empresas").select("*").order("nombre");
-                if (!isPlatformOwner && profile?.empresa_id) {
-                    empQuery = empQuery.eq('id', profile.empresa_id);
-                }
-                const { data: empData } = await empQuery;
-                setEmpresas(empData || []);
+            // Load agents
+            let query = supabase.from("agent_config").select("*, empresas(*)").order("created_at", { ascending: false });
+            if (isRole('admin') && !isPlatformOwner && profile?.empresa_id) {
+                // Admin can only see their company's agents
+                query = query.eq("empresa_id", profile.empresa_id);
+            }
+            const { data: agentsData, error: agentsError } = await query;
+            if (agentsError) throw agentsError;
 
-                // Load agents - if admin of a company, filter by empresa_id
-                let query = supabase.from("agent_config").select("*, empresas(*)").order("created_at", { ascending: false });
-
-                if (isRole('admin') && !isPlatformOwner && profile?.empresa_id) {
-                    // Admin can only see their company's agents
-                    query = query.eq("empresa_id", profile.empresa_id);
-                }
-
-                const { data: agentsData } = await query;
-                setAgents(agentsData || []);
-            };
-
-            await Promise.race([fetchData(), timeoutPromise]);
-        } catch (err) {
+            setAgents(agentsData || []);
+        } catch (err: any) {
             console.error("Error loading data:", err);
-            // Si hay timeout u otro error, se reflejará que no se pudo cargar
+            // Optionally we could show a toast here, but for now we just log it.
         } finally {
             setLoading(false);
         }
@@ -208,14 +203,24 @@ const AgentManagementView: React.FC = () => {
                             </div>
                             <p className="text-sm text-gray-500 my-3 line-clamp-2">{agent.description || t("No description", "Sin descripción")}</p>
 
-                            {/* Company badge */}
-                            {agent.empresas && (
-                                <div className="flex items-center gap-1.5 mt-2">
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-medium border border-indigo-100">
+                            {/* Tags */}
+                            <div className="flex flex-wrap items-center gap-2 mt-3">
+                                {agent.empresas && (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full text-[11px] font-medium border border-indigo-100">
                                         <Building2 size={12} /> {agent.empresas.nombre}
                                     </span>
-                                </div>
-                            )}
+                                )}
+                                {agent.tipo_resultados && (
+                                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${agent.tipo_resultados === 'ENCUESTA_NUMERICA' ? 'bg-green-50 text-green-700 border-green-200' :
+                                        agent.tipo_resultados === 'CUALIFICACION_LEAD' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                                            agent.tipo_resultados === 'AGENDAMIENTO_CITA' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                                                agent.tipo_resultados === 'SOPORTE_CLIENTE' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                                    'bg-gray-50 text-gray-700 border-gray-200'
+                                        }`}>
+                                        {agent.tipo_resultados.replace('_', ' ')}
+                                    </span>
+                                )}
+                            </div>
                         </div>
                     ))}
                 </div>
