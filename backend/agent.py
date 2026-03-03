@@ -146,8 +146,9 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         self.session: Optional[AgentSession] = None
         logger.info(f"Agente '{agent_name}' creado (Survey: {self.survey_id})")
 
-    async def on_enter(self):
+    async def on_enter(self, *args, **kwargs) -> None:
         """Método llamado cuando el agente entra en la sesión. Lanza el saludo inicial."""
+        # En versiones recientes de LiveKit, la sesión se accede vía self.session (property)
         if not self.session:
             logger.warning("No session available in on_enter")
             return
@@ -367,8 +368,8 @@ async def entrypoint(ctx: JobContext):
             ),
         )
 
-        # Guardamos la sesión para poder usarla en herramientas
-        agent_instance.session = session
+        # La sesión se asocia automáticamente al arrancar
+        # agent_instance.session = session  <- Esto fallaba porque session es property sin setter
         
         await session.start(
             room=ctx.room,

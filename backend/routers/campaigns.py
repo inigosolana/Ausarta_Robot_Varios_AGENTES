@@ -210,10 +210,10 @@ async def get_agent_config_by_survey(survey_id: int):
         res_ai = supabase.table("ai_config").select("*").eq("agent_id", agent_id).execute()
         ai_data = res_ai.data[0] if res_ai.data else {}
 
-        res_lead = supabase.table("campaign_leads").select("comentarios").eq("call_id", survey_id).execute()
+        # res_lead = supabase.table("campaign_leads").select("comentarios").eq("call_id", survey_id).execute()
         contexto_adicional = ""
-        if res_lead.data and res_lead.data[0].get("comentarios"):
-            contexto_adicional = f"\nDATOS CRM DEL CLIENTE: {res_lead.data[0].get('comentarios')}"
+        # if res_lead.data and res_lead.data[0].get("comentarios"):
+        #     contexto_adicional = f"\nDATOS CRM DEL CLIENTE: {res_lead.data[0].get('comentarios')}"
 
         greeting_processed = agent_data.get("greeting", "Buenas, ¿tiene un momento?").replace("{nombre}", nombre_cliente or "Cliente")
         instructions_base = agent_data.get("instructions", "Eres un asistente")
