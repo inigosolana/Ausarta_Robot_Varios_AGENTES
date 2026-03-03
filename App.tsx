@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import {
   LayoutDashboard,
   Bot,
@@ -28,21 +28,31 @@ import { useAuth } from './contexts/AuthContext';
 import { supabase } from './lib/supabase';
 import { PermissionGate } from './components/PermissionGate';
 import SidebarItem from './components/SidebarItem';
-import TelephonyView from './views/TelephonyView';
-import ModelsView from './views/ModelsView';
-import { CampaignsView } from './views/CampaignsView';
-import AgentListView from './views/AgentListView';
-import TestCallView from './views/TestCallView';
-import LiveCallView from './views/LiveCallView';
-import DashboardView from './views/DashboardView';
-import ResultsView from './views/ResultsView';
-import UsageView from './views/UsageView';
-import UserManagementView from './views/UserManagementView';
-import AgentManagementView from './views/AgentManagementView';
-import LoginView from './views/LoginView';
-import CrmIntegrationView from './views/CrmIntegrationView';
-import AssistantView from './views/AssistantView';
 import AssistantPanel from './components/AssistantPanel';
+
+// Lazy loading views for better performance
+const TelephonyView = lazy(() => import('./views/TelephonyView'));
+const ModelsView = lazy(() => import('./views/ModelsView'));
+const CampaignsView = lazy(() => import('./views/CampaignsView').then(m => ({ default: m.CampaignsView })));
+const AgentListView = lazy(() => import('./views/AgentListView'));
+const TestCallView = lazy(() => import('./views/TestCallView'));
+const LiveCallView = lazy(() => import('./views/LiveCallView'));
+const DashboardView = lazy(() => import('./views/DashboardView'));
+const ResultsView = lazy(() => import('./views/ResultsView'));
+const UsageView = lazy(() => import('./views/UsageView'));
+const UserManagementView = lazy(() => import('./views/UserManagementView'));
+const AgentManagementView = lazy(() => import('./views/AgentManagementView'));
+const LoginView = lazy(() => import('./views/LoginView'));
+const CrmIntegrationView = lazy(() => import('./views/CrmIntegrationView'));
+const AssistantView = lazy(() => import('./views/AssistantView'));
+
+const ViewLoader = () => (
+  <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
+    <Loader2 className="animate-spin text-blue-500 mb-4" size={32} />
+    <p className="text-gray-400 text-sm animate-pulse italic">Cargando vista...</p>
+  </div>
+);
+
 
 const App: React.FC = () => {
   const { user, profile, loading, signOut, hasPermission, isRole } = useAuth();
@@ -114,45 +124,52 @@ const App: React.FC = () => {
   }
 
   const renderContent = () => {
-    switch (currentView) {
-      case 'telephony':
-        return <PermissionGate view="telephony"><TelephonyView /></PermissionGate>;
-      case 'campaigns':
-        return <PermissionGate view="campaigns"><CampaignsView /></PermissionGate>;
-      case 'create-agents':
-      case 'empresas':
-        return <PermissionGate view="empresas"><AgentListView /></PermissionGate>;
-      case 'agents':
-        return <PermissionGate view="agents"><AgentManagementView /></PermissionGate>;
-      case 'test-call':
-        return <PermissionGate view="test-call"><TestCallView /></PermissionGate>;
-      case 'overview':
-        return <PermissionGate view="overview"><DashboardView /></PermissionGate>;
-      case 'results':
-        return <PermissionGate view="results"><ResultsView /></PermissionGate>;
-      case 'usage':
-        return <PermissionGate view="usage"><UsageView /></PermissionGate>;
-      case 'models':
-        return <PermissionGate view="models"><ModelsView /></PermissionGate>;
-      case 'admin':
-        return <PermissionGate view="admin"><UserManagementView /></PermissionGate>;
-      case 'crm':
-        return <CrmIntegrationView />;
-      case 'assistant':
-        return <PermissionGate view="assistant"><AssistantView /></PermissionGate>;
-      case 'automation':
-      case 'tools':
-      default:
-        return (
-          <div className="flex items-center justify-center h-full text-gray-400">
-            <div className="text-center">
-              <BarChart3 size={48} className="mx-auto mb-4 opacity-20" />
-              <p>{t('Module in development', 'Módulo en desarrollo')} - {currentView}</p>
-            </div>
-          </div>
-        );
-    }
+    return (
+      <Suspense fallback={<ViewLoader />}>
+        {(() => {
+          switch (currentView) {
+            case 'telephony':
+              return <PermissionGate view="telephony"><TelephonyView /></PermissionGate>;
+            case 'campaigns':
+              return <PermissionGate view="campaigns"><CampaignsView /></PermissionGate>;
+            case 'create-agents':
+            case 'empresas':
+              return <PermissionGate view="empresas"><AgentListView /></PermissionGate>;
+            case 'agents':
+              return <PermissionGate view="agents"><AgentManagementView /></PermissionGate>;
+            case 'test-call':
+              return <PermissionGate view="test-call"><TestCallView /></PermissionGate>;
+            case 'overview':
+              return <PermissionGate view="overview"><DashboardView /></PermissionGate>;
+            case 'results':
+              return <PermissionGate view="results"><ResultsView /></PermissionGate>;
+            case 'usage':
+              return <PermissionGate view="usage"><UsageView /></PermissionGate>;
+            case 'models':
+              return <PermissionGate view="models"><ModelsView /></PermissionGate>;
+            case 'admin':
+              return <PermissionGate view="admin"><UserManagementView /></PermissionGate>;
+            case 'crm':
+              return <CrmIntegrationView />;
+            case 'assistant':
+              return <PermissionGate view="assistant"><AssistantView /></PermissionGate>;
+            case 'automation':
+            case 'tools':
+            default:
+              return (
+                <div className="flex items-center justify-center h-full text-gray-400">
+                  <div className="text-center">
+                    <BarChart3 size={48} className="mx-auto mb-4 opacity-20" />
+                    <p>{t('Module in development', 'Módulo en desarrollo')} - {currentView}</p>
+                  </div>
+                </div>
+              );
+          }
+        })()}
+      </Suspense>
+    );
   };
+
 
   const resolveAlert = async (id: number) => {
     try {

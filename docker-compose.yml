@@ -62,29 +62,55 @@ services:
       timeout: 10s
       retries: 3
 
+  # Redis for scalability and WebSockets support
+  redis:
+    image: redis:alpine
+    container_name: ausarta-redis
+    restart: unless-stopped
+    networks:
+      - ausarta-network
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+
   # Frontend (React + Nginx)
   frontend:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        # Variables VITE_ necesarias en tiempo de build
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-${SUPABASE_URL}}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-${SUPABASE_KEY}}
         VITE_API_URL: ${VITE_API_URL:-}
     container_name: ausarta-v2-frontend
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "80:80"
+      - "443:443"
     networks:
       - ausarta-network
     depends_on:
       - backend
+      - redis
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost/" ]
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Certbot for SSL certificates
+  certbot:
+    image: certbot/certbot
+    container_name: ausarta-certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - ausarta-network
 
 networks:
   ausarta-network:
@@ -92,4 +118,6 @@ networks:
 
 volumes:
   sqlite-data:
+    driver: local
+  redis-data:
     driver: local

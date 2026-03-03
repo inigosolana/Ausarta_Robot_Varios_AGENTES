@@ -20,9 +20,9 @@ export default defineConfig(({ mode }) => {
     build: {
       rollupOptions: {
         output: {
-          entryFileNames: `app-static/main.js`,
-          chunkFileNames: `app-static/main.js`,
-          assetFileNames: `app-static/main.[ext]`
+          entryFileNames: `app-static/[name]-[hash].js`,
+          chunkFileNames: `app-static/[name]-[hash].js`,
+          assetFileNames: `app-static/[name]-[hash].[ext]`
         }
       }
     },
@@ -30,6 +30,12 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.resolve(__dirname, '.'),
       }
+    },
+    test: {
+      globals: true,
+      environment: 'jsdom',
+      setupFiles: './src/test/setup.ts',
     }
   };
 });
+
