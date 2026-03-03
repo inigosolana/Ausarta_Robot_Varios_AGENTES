@@ -6,7 +6,7 @@ livekit-plugins-deepgram>=0.10.0
 livekit-plugins-cartesia>=0.10.0
 livekit-plugins-silero>=0.10.0
 livekit-plugins-google>=0.10.0
-livekit-plugins-noise-cancellation>=0.10.0
+livekit-plugins-noise-cancellation
 redis
 python-dotenv
 requests
