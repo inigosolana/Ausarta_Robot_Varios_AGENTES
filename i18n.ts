@@ -178,8 +178,26 @@ const resources = {
             "Check Remaining Quota": "Consultar Cuota e Límites Restantes",
             "SIP Logs": "Logs do Sistema de Telefonía (SIP)",
             "Refresh Logs": "Actualizar Logs",
-            "Syncing...": "Sincronizando..."
+            "Syncing...": "Sincronizando...",
 
+            // Profile View
+            "My Profile": "Mi Perfil",
+            "Manage your personal information and preferences": "Gestiona tu información personal y preferencias",
+            "No Company": "Sin empresa",
+            "Joined": "Miembro desde",
+            "As Superadmin, you can change your role and company context to test the platform as different users.": "Como Superadmin, puedes cambiar tu rol y contexto de empresa para probar la plataforma como diferentes usuarios.",
+            "Account Settings": "Ajustes de Cuenta",
+            "Full Name": "Nombre Completo",
+            "Email Address": "Correo Electrónico",
+            "Email cannot be changed": "El email no se puede cambiar",
+            "Developer / Context Mode": "Modo Desarrollador / Contexto",
+            "Simulation Role": "Rol de Simulación",
+            "Simulate Company": "Simular Empresa",
+            "Note: If you switch to \"User\" role, you will lose access to administration panels. You must use this feature with caution.": "Nota: Si cambias a rol \"Usuario\", perderás acceso a los paneles de administración. Debes usar esta función con precaución.",
+            "Saving...": "Guardando...",
+            "Save Profile": "Guardar Perfil",
+            "Profile updated successfully": "Perfil actualizado correctamente",
+            "Error updating profile": "Error al actualizar perfil"
         }
     },
     en: {
@@ -357,8 +375,26 @@ const resources = {
             "Check Remaining Quota": "Check Remaining Quota & Limits",
             "SIP Logs": "Telephony System Logs (SIP)",
             "Refresh Logs": "Refresh Logs",
-            "Syncing...": "Syncing..."
+            "Syncing...": "Syncing...",
 
+            // Profile View
+            "My Profile": "My Profile",
+            "Manage your personal information and preferences": "Manage your personal information and preferences",
+            "No Company": "No Company",
+            "Joined": "Joined",
+            "As Superadmin, you can change your role and company context to test the platform as different users.": "As Superadmin, you can change your role and company context to test the platform as different users.",
+            "Account Settings": "Account Settings",
+            "Full Name": "Full Name",
+            "Email Address": "Email Address",
+            "Email cannot be changed": "Email cannot be changed",
+            "Developer / Context Mode": "Developer / Context Mode",
+            "Simulation Role": "Simulation Role",
+            "Simulate Company": "Simulate Company",
+            "Note: If you switch to \"User\" role, you will lose access to administration panels. You must use this feature with caution.": "Note: If you switch to \"User\" role, you will lose access to administration panels. You must use this feature with caution.",
+            "Saving...": "Saving...",
+            "Save Profile": "Save Profile",
+            "Profile updated successfully": "Profile updated successfully",
+            "Error updating profile": "Error updating profile"
         }
     },
     eu: {

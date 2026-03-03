@@ -43,6 +43,7 @@ const AgentManagementView = lazy(() => import('./views/AgentManagementView'));
 const LoginView = lazy(() => import('./views/LoginView'));
 const CrmIntegrationView = lazy(() => import('./views/CrmIntegrationView'));
 const AssistantView = lazy(() => import('./views/AssistantView'));
+const ProfileView = lazy(() => import('./views/ProfileView'));
 
 const ViewLoader = () => (
   <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
@@ -57,7 +58,7 @@ const App: React.FC = () => {
   const { t, i18n } = useTranslation();
   const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
   const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
-  const [currentView, setCurrentView] = useState<ViewState | 'results' | 'admin' | 'crm'>('overview');
+  const [currentView, setCurrentView] = useState<ViewState | 'results' | 'admin' | 'crm' | 'profile'>('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isCalling, setIsCalling] = useState(false);
@@ -149,6 +150,8 @@ const App: React.FC = () => {
               return <CrmIntegrationView />;
             case 'assistant':
               return <PermissionGate view="assistant"><AssistantView /></PermissionGate>;
+            case 'profile':
+              return <ProfileView />;
             case 'automation':
             case 'tools':
             default:
@@ -310,7 +313,10 @@ const App: React.FC = () => {
 
           {/* User info + Logout */}
           <div className="p-4 border-t border-gray-50 dark:border-gray-700 space-y-2">
-            <div className={`flex items-center gap-2 text-sm ${!isSidebarOpen && 'justify-center'}`}>
+            <div
+              onClick={() => setCurrentView('profile')}
+              className={`flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded-xl transition-all ${!isSidebarOpen && 'justify-center'}`}
+            >
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                 {(profile.full_name || profile.email).charAt(0).toUpperCase()}
               </div>

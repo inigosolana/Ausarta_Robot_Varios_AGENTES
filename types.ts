@@ -15,7 +15,8 @@ export type ViewState =
   | 'usage'
   | 'results'
   | 'admin'
-  | 'assistant';
+  | 'assistant'
+  | 'profile';
 
 export type UserRole = 'superadmin' | 'admin' | 'user';
 
