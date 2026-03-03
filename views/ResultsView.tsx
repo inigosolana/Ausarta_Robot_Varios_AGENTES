@@ -17,7 +17,7 @@ interface SurveyResult {
     comentarios: string | null;
     transcription: string | null;
     llm_model: string | null;
-    is_question_based?: boolean;
+    tipo_resultados?: string | null;
 }
 
 interface Props {
@@ -234,28 +234,42 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                         })()}
                                     </td>
                                     <td className="px-6 py-4 text-center">
-                                        {row.is_question_based ? (
-                                            <div className="flex justify-center items-center">
-                                                <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-1 rounded-full border border-gray-200">
-                                                    {t('Preguntas Abiertas')}
-                                                </span>
-                                            </div>
-                                        ) : (
-                                            <div className="flex items-center justify-center gap-2">
-                                                {[
-                                                    { label: 'COM', val: row.puntuacion_comercial },
-                                                    { label: 'INS', val: row.puntuacion_instalador },
-                                                    { label: 'RAP', val: row.puntuacion_rapidez }
-                                                ].map((s, idx) => (
-                                                    <div key={idx} className="flex flex-col items-center">
-                                                        <span className="text-[10px] text-gray-400 mb-0.5">{s.label}</span>
-                                                        <span className={`w-8 h-8 flex items-center justify-center rounded-lg text-sm font-bold shadow-sm ${getScoreColor(s.val)}`}>
-                                                            {s.val ?? '-'}
+                                        {(() => {
+                                            const type = row.tipo_resultados;
+                                            if (type === 'ENCUESTA_NUMERICA') {
+                                                return (
+                                                    <div className="flex items-center justify-center gap-2">
+                                                        {[
+                                                            { label: 'COM', val: row.puntuacion_comercial },
+                                                            { label: 'INS', val: row.puntuacion_instalador },
+                                                            { label: 'RAP', val: row.puntuacion_rapidez }
+                                                        ].map((s, idx) => (
+                                                            <div key={idx} className="flex flex-col items-center">
+                                                                <span className="text-[10px] text-gray-400 mb-0.5">{s.label}</span>
+                                                                <span className={`w-8 h-8 flex items-center justify-center rounded-lg text-sm font-bold shadow-sm ${getScoreColor(s.val)}`}>
+                                                                    {s.val ?? '-'}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                );
+                                            } else if (type === 'CUALIFICACION_LEAD') {
+                                                return <span className="text-xs font-semibold text-orange-600 bg-orange-50 px-2 py-1 rounded-full border border-orange-100 uppercase">{t('Cualificación Lead')}</span>;
+                                            } else if (type === 'AGENDAMIENTO_CITA') {
+                                                return <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-1 rounded-full border border-green-100 uppercase">{t('Cita / Reunión')}</span>;
+                                            } else if (type === 'SOPORTE_CLIENTE') {
+                                                return <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded-full border border-blue-100 uppercase">{t('Soporte')}</span>;
+                                            } else {
+                                                // Fallback para PREGUNTAS_ABIERTAS o desconocidos
+                                                return (
+                                                    <div className="flex justify-center items-center">
+                                                        <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-1 rounded-full border border-gray-200">
+                                                            {t('Preguntas Abiertas')}
                                                         </span>
                                                     </div>
-                                                ))}
-                                            </div>
-                                        )}
+                                                );
+                                            }
+                                        })()}
                                     </td>
                                     <td className="px-6 py-4">
                                         <div className="flex flex-col">

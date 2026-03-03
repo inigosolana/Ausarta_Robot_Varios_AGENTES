@@ -101,21 +101,26 @@ class DynamicAgent(Agent):
         
         base_rules_to_use = BASE_RULES
         inst_lower = agent_instructions.lower()
-        # Detección de tipo de encuesta (Campo explícito 'survey_type' o fallback por palabras clave)
-        survey_type = agent_config.get("survey_type")
+        # Detección de tipo de agente (Campo explícito 'tipo_resultados' o fallback)
+        tipo_res = agent_config.get("tipo_resultados")
         
-        is_numeric = (survey_type == 'numeric')
-        has_preguntas = (survey_type in ['open_questions', 'mixed'])
+        is_numeric = (tipo_res == 'ENCUESTA_NUMERICA')
+        has_preguntas = (tipo_res in ['PREGUNTAS_ABIERTAS', 'CUALIFICACION_LEAD', 'AGENDAMIENTO_CITA', 'SOPORTE_CLIENTE'])
         
         # Fallback para agentes antiguos o si n8n aún no lo clasificó
-        if survey_type is None:
-            numeric_keywords = ["1 al 10", "0 al 10", "del uno al diez", "numérica", "puntuación", "uno al 10", "uno al diez"]
-            is_numeric = any(kw in inst_lower for kw in numeric_keywords) or "dakota" in agent_name.lower()
-            has_preguntas = any(p in inst_lower for p in ["pregunta 1", "pregunta 2", "pregunta:"])
-        
-        if survey_type == 'mixed':
-            is_numeric = True
-            has_preguntas = True
+        if tipo_res is None:
+            survey_type_legacy = agent_config.get("survey_type")
+            is_numeric = (survey_type_legacy == 'numeric')
+            has_preguntas = (survey_type_legacy in ['open_questions', 'mixed'])
+            
+            if survey_type_legacy is None:
+                numeric_keywords = ["1 al 10", "0 al 10", "del uno al diez", "numérica", "puntuación", "uno al 10", "uno al diez"]
+                is_numeric = any(kw in inst_lower for kw in numeric_keywords) or "dakota" in agent_name.lower()
+                has_preguntas = any(p in inst_lower for p in ["pregunta 1", "pregunta 2", "pregunta:"])
+            
+            if survey_type_legacy == 'mixed':
+                is_numeric = True
+                has_preguntas = True
         
         if is_numeric:
             base_rules_to_use += """

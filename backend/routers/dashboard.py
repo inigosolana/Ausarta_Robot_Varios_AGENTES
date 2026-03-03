@@ -144,27 +144,38 @@ async def get_all_results(empresa_id: Optional[int] = None, agent_id: Optional[i
         results = response.data
         
         try:
-            agents_res = supabase.table("agent_config").select("id, instructions, critical_rules, survey_type").execute()
+            agents_res = supabase.table("agent_config").select("id, instructions, critical_rules, survey_type, tipo_resultados").execute()
             qs_agents = set()
+            agent_types = {}
             agent_critical_rules = {}
             for a in (agents_res.data or []):
-                s_type = a.get("survey_type")
-                if s_type:
-                    if s_type in ['open_questions', 'mixed']:
-                        qs_agents.add(str(a["id"]))
+                aid = str(a["id"])
+                t_res = a.get("tipo_resultados")
+                agent_types[aid] = t_res
+                
+                if t_res:
+                    if t_res in ['PREGUNTAS_ABIERTAS', 'CUALIFICACION_LEAD', 'AGENDAMIENTO_CITA', 'SOPORTE_CLIENTE']:
+                        qs_agents.add(aid)
                 else:
-                    # Fallback
-                    inst_lower = a.get("instructions", "").lower()
-                    has_preguntas = "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower
-                    is_numeric = "1 al 10" in inst_lower or "del uno al diez" in inst_lower or "numérica" in inst_lower or "puntuación" in inst_lower
-                    if has_preguntas and not is_numeric:
-                        qs_agents.add(str(a["id"]))
+                    s_type = a.get("survey_type")
+                    if s_type:
+                        if s_type in ['open_questions', 'mixed']:
+                            qs_agents.add(aid)
+                    else:
+                        # Fallback
+                        inst_lower = a.get("instructions", "").lower()
+                        has_preguntas = "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower
+                        is_numeric = "1 al 10" in inst_lower or "del uno al diez" in inst_lower or "numérica" in inst_lower or "puntuación" in inst_lower
+                        if has_preguntas and not is_numeric:
+                            qs_agents.add(aid)
                 
                 if a.get("critical_rules"):
-                    agent_critical_rules[str(a["id"])] = a["critical_rules"]
+                    agent_critical_rules[aid] = a["critical_rules"]
             for res in results:
-                res["is_question_based"] = str(res.get("agent_id")) in qs_agents
-                res["agent_critical_rules"] = agent_critical_rules.get(str(res.get("agent_id")))
+                aid_res = str(res.get("agent_id"))
+                res["is_question_based"] = aid_res in qs_agents
+                res["tipo_resultados"] = agent_types.get(aid_res)
+                res["agent_critical_rules"] = agent_critical_rules.get(aid_res)
         except Exception as e_agent:
             logger.error(f"Error enriching query based question agents: {e_agent}")
         return results

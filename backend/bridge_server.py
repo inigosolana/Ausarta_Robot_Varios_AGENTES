@@ -119,20 +119,29 @@ def get_calls_supabase(limit=50):
         mapped = []
         # Obtener tipos de agentes para marcar if is_question_based
         qs_agents = set()
+        agent_types = {}
         try:
-            agents_res = supabase.table("agent_config").select("id, instructions, survey_type").execute()
+            agents_res = supabase.table("agent_config").select("id, instructions, survey_type, tipo_resultados").execute()
             for a in (agents_res.data or []):
-                s_type = a.get("survey_type")
-                if s_type:
-                    if s_type in ['open_questions', 'mixed']:
-                        qs_agents.add(str(a["id"]))
+                aid = str(a["id"])
+                t_res = a.get("tipo_resultados")
+                agent_types[aid] = t_res
+                
+                if t_res:
+                    if t_res in ['PREGUNTAS_ABIERTAS', 'CUALIFICACION_LEAD', 'AGENDAMIENTO_CITA', 'SOPORTE_CLIENTE']:
+                        qs_agents.add(aid)
                 else:
-                    # Fallback
-                    inst_lower = (a.get("instructions") or "").lower()
-                    has_preguntas = "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower
-                    is_numeric = any(kw in inst_lower for kw in ["1 al 10", "0 al 10", "del uno al diez", "uno al 10", "uno al diez", "numérica", "puntuación"])
-                    if has_preguntas and not is_numeric:
-                        qs_agents.add(str(a["id"]))
+                    s_type = a.get("survey_type")
+                    if s_type:
+                        if s_type in ['open_questions', 'mixed']:
+                            qs_agents.add(aid)
+                    else:
+                        # Fallback
+                        inst_lower = (a.get("instructions") or "").lower()
+                        has_preguntas = "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower
+                        is_numeric = any(kw in inst_lower for kw in ["1 al 10", "0 al 10", "del uno al diez", "uno al 10", "uno al diez", "numérica", "puntuación"])
+                        if has_preguntas and not is_numeric:
+                            qs_agents.add(aid)
         except: pass
 
         for c in calls:
@@ -153,6 +162,7 @@ def get_calls_supabase(limit=50):
                 "completada": c.get('completada'),
                 "status": raw_status,
                 "is_question_based": res_agent_id in qs_agents,
+                "tipo_resultados": agent_types.get(res_agent_id),
                 "scores": {
                     "comercial": c.get('puntuacion_comercial'),
                     "instalador": c.get('puntuacion_instalador'),
