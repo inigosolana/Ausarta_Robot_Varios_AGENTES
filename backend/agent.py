@@ -100,47 +100,31 @@ class DynamicAgent(Agent):
         
         base_rules_to_use = BASE_RULES
         inst_lower = agent_instructions.lower()
-        has_preguntas = "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower
-        is_numeric = "1 al 10" in inst_lower or "del uno al diez" in inst_lower or "numérica" in inst_lower or "puntuación" in inst_lower
+        has_preguntas = any(p in inst_lower for p in ["pregunta 1", "pregunta 2", "pregunta:"])
+        is_numeric = any(n in inst_lower for n in ["1 al 10", "0 al 10", "del uno al diez", "numérica", "puntuación"])
+        
         if has_preguntas and not is_numeric:
             base_rules_to_use += """
 REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
 - Como este es un cuestionario de preguntas abiertas, USA el campo 'comentarios' de la herramienta 'guardar_encuesta' para guardar todas las respuestas de las preguntas planteadas recopiladas en forma de texto descriptivo.
 - IGNORA la regla estructurada de "Validación de notas de 1 al 10" si no aplica a tus preguntas.
 """
-            # Add "tienes un minuto" to the greeting if not already present
-            greet_lower = self.greeting.lower()
-            if "minuto" not in greet_lower:
-                self.greeting = f"{self.greeting.strip()} ¿Tienes un minuto para responder unas preguntas?"
         
-        full_instructions = f"""{agent_instructions}
-
-DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
-- SALA ACTUAL: '{room_name}'
-- ID DE LA ENCUESTA: {self.survey_id}
-- NOMBRE DEL AGENTE (INTERNO, NO DECIR AL CLIENTE): {agent_name}
-
-{base_rules_to_use}
-"""
-
-        critical_rules = agent_config.get("critical_rules")
-        if critical_rules:
-            full_instructions += f"\n🚨 REGLAS CRÍTICAS ADICIONALES (¡CUMPLIR A RAJA TABLA!):\n{critical_rules}\n"
+        # Construcción del Prompt Final: Reglas -> Datos -> GUION (EL GUION ES LO MÁS IMPORTANTE)
+        full_instructions = f"{base_rules_to_use}\n\n"
+        full_instructions += f"DATOS DEL AGENTE:\n- NOMBRE: {agent_name}\n- EMPRESA: Ausarta\n\n"
+        full_instructions += "SIGUE ESTE GUION AL PIE DE LA LETRA:\n"
+        full_instructions += f"{agent_instructions}\n"
 
         super().__init__(instructions=full_instructions)
-        logger.info(f"🤖 Agente '{agent_name}' creado con instrucciones dinámicas (Survey: {self.survey_id})")
+        logger.info(f"Agente '{agent_name}' creado (Survey: {self.survey_id})")
 
     async def on_enter(self):
-        """Método para manejar la entrada a la sala. 
-        Se llama explícitamente desde el entrypoint para evitar duplicidad."""
-        logger.info(f"🎤 Agente entrando en acción para Survey ID: {self.survey_id}")
-        
-        # Pausa de cortesía: 1.5 segundos para que la red telefónica se estabilice
-        await asyncio.sleep(1.5)
-        
-        # Solo generamos el saludo si el LLM no ha empezado ya
+        """Método para lanzar el saludo inicial."""
+        logger.info(f"Saludando en sala: {self.room_name}")
+        await asyncio.sleep(1.2)
         await self.session.generate_reply(
-            instructions=f"Di exactamente: '{self.greeting}' y espera la respuesta del usuario.",
+            instructions=f"Di el saludo inicial: '{self.greeting}'",
             allow_interruptions=False
         )
 
@@ -148,9 +132,24 @@ DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, timeout=2) as resp:
-                    logger.info(f"✅ (Background) Guardado ID {payload.get('id_encuesta')}: {payload}")
+                    pass
+        except:
+            pass
+
+    async def notify_n8n_transcription(self, survey_id: str, messages: list):
+        """Envía la transcripción cruda a n8n para que él la procese."""
+        webhook_url = os.getenv("N8N_WEBHOOK_URL_TRANSCRIPTS")
+        if not webhook_url: return
+        try:
+            payload = {
+                "survey_id": survey_id,
+                "room_name": self.room_name,
+                "messages": messages
+            }
+            async with aiohttp.ClientSession() as session:
+                await session.post(webhook_url, json=payload, timeout=5)
         except Exception as e:
-            logger.error(f"❌ (Background) Error: {e}")
+            logger.error(f"Error enviando a n8n: {e}")
 
     @function_tool(name="guardar_encuesta")
     async def _http_tool_guardar_encuesta(
@@ -163,6 +162,12 @@ DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
         comentarios: Optional[str] = None,
         status: Optional[str] = None
     ) -> str | None:
+        """
+        Guarda los datos de la encuesta/llamada. 
+        - Si la encuesta es NUMÉRICA, usa los campos 'nota_comercial', 'nota_instalador' y 'nota_rapidez' (valores del 1 al 10).
+        - Si la encuesta es ABIERTA o el usuario da feedback extra, usa el campo 'comentarios'.
+        - 'status' puede ser 'completed', 'failed', 'incomplete' o 'rejected_opt_out'.
+        """
         self.data_saved = True
         
         url = f"{self.server_url}/guardar-encuesta"
@@ -191,30 +196,23 @@ DATOS TÉCNICOS (INVISIBLES PARA EL CLIENTE):
         Herramienta para decir unas últimas palabras y colgar la llamada.
         Debes proporcionar obligatoriamente el mensaje de despedida.
         """
-        logger.info(f"🗣️ Forzando despedida: {mensaje_despedida_manual}")
-        
-        # 1. Forzar al agente a decir el mensaje de despedida de forma inmediata y sin interrupciones
+        logger.info(f"Forzando despedida: {mensaje_despedida_manual}")
         asyncio.create_task(self.session.generate_reply(
             instructions=f"Di exactamente: '{mensaje_despedida_manual}' y no digas nada más.",
             allow_interruptions=False
         ))
         
-        # 2. Programar el cuelgue físico de la sala con un margen mayor
         async def delayed_hangup():
-            wait_time = 8.0 # Aumentado a 8s para asegurar que se escuche todo
-            logger.info(f"⏳ Esperando {wait_time}s para asegurar despedida en {self.room_name}...")
-            await asyncio.sleep(wait_time) 
+            await asyncio.sleep(8.0) 
             url = f"{self.server_url}/colgar"
             payload = {"nombre_sala": self.room_name}
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.post(url, timeout=5, json=payload) as resp:
-                        logger.info(f"✂️ COLGANDO: {self.room_name}")
-            except Exception as e:
-                logger.error(f"Error Colgar: {e}")
+                    await session.post(url, timeout=5, json=payload)
+            except: pass
                 
         asyncio.create_task(delayed_hangup())
-        return "Llamada finalizándose. Despidiéndome..."
+        return "Llamada finalizada."
 
 
 # ============================================================================
@@ -394,16 +392,21 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"--- 🏁 FIN DE SESIÓN AGENTE (Job: {job_id}) ---")
         data_saved = getattr(agent_instance, 'data_saved', False) if 'agent_instance' in dir() else False
         
+        raw_messages = []
         transcript = ""
         try:
             if 'session' in dir():
                 for m in session.chat_ctx.messages:
-                    if m.role == "user" and m.content:
-                        transcript += f"Cliente: {m.content}\n"
-                    elif m.role == "assistant" and m.content:
-                        transcript += f"Agente: {m.content}\n"
+                    if m.content:
+                        raw_messages.append({"role": m.role, "content": m.content})
+                        role_label = "Cliente" if m.role == "user" else "Agente"
+                        transcript += f"{role_label}: {m.content}\n"
+                
+                # Enviar a n8n para procesamiento externo (sin carga en Python)
+                if 'agent_instance' in dir():
+                    asyncio.create_task(agent_instance.notify_n8n_transcription(survey_id, raw_messages))
         except Exception as ex:
-            logger.error(f"Error generando transcripción: {ex}")
+            logger.error(f"Error procesando historia: {ex}")
             
         try:
             fallback_payload = {
@@ -411,7 +414,7 @@ async def entrypoint(ctx: JobContext):
                 "transcription": transcript,
             }
             if not data_saved:
-                logger.warning(f"⚠️ La sesión terminó sin guardar datos (Survey ID: {survey_id}). Marcando como 'unreached'...")
+                logger.warning(f"⚠️ La sesión terminó sin guardar datos (Survey ID: {survey_id})")
                 fallback_payload["status"] = "unreached"
                 fallback_payload["comentarios"] = "Llamada finalizada sin datos (Posible No Contesta / Cuelgue inmediato)"
                 
@@ -420,10 +423,10 @@ async def entrypoint(ctx: JobContext):
                 async with aiohttp.ClientSession() as sess:
                     url = f"{server_url}/guardar-encuesta"
                     async with sess.post(url, json=fallback_payload, timeout=5) as r:
-                         logger.info(f"✅ Transcripción y datos finales guardados")
+                         pass
             asyncio.create_task(do_final_save())
         except Exception as ex:
-             logger.error(f"❌ Error salvando fallback/transcripción: {ex}")
+             logger.error(f"❌ Error salvando datos finales: {ex}")
 
 if __name__ == "__main__":
     cli.run_app(server)
