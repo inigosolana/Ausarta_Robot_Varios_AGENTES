@@ -143,7 +143,6 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         full_instructions += f"{agent_instructions}\n"
 
         super().__init__(instructions=full_instructions)
-        self.session: Optional[AgentSession] = None
         logger.info(f"Agente '{agent_name}' creado (Survey: {self.survey_id})")
 
     async def on_enter(self, *args, **kwargs) -> None:
