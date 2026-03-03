@@ -271,7 +271,7 @@ async def notify_n8n_alert(message: str, details: dict = None):
 # ============================================================================
 server = AgentServer()
 
-@server.rtc_session()
+@server.rtc_session(agent_name=os.getenv("AGENT_NAME_DISPATCH", ""))
 async def entrypoint(ctx: JobContext):
     # Identificador único para esta instancia/trabajo
     job_id = ctx.job.id if hasattr(ctx, 'job') else "unknown"

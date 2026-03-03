@@ -764,7 +764,7 @@ async def make_outbound_call(request: dict):
         print(f"🚀 [API] Solicitando despacho de agente genérico a sala {room_name}...")
         try:
             await lkapi.agent_dispatch.create_dispatch(api.CreateAgentDispatchRequest(
-                agent_name="",
+                agent_name=os.getenv("AGENT_NAME_DISPATCH", ""),
                 room=room_name
             ))
         except Exception as e:
