@@ -40,7 +40,10 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     const [searchTerm, setSearchTerm] = useState('');
     const [viewingTranscript, setViewingTranscript] = useState<SurveyResult | null>(null);
     const [empresas, setEmpresas] = useState<any[]>([]);
+    const [agents, setAgents] = useState<any[]>([]);
     const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | 'all'>(empresaId || 'all');
+    const [selectedAgentId, setSelectedAgentId] = useState<number | 'all'>('all');
+    const [selectedTipo, setSelectedTipo] = useState<string | 'all'>('all');
 
     const loadResults = async () => {
         setLoading(true);
@@ -48,10 +51,8 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
             const BASE_URL = import.meta.env.VITE_API_URL || window.location.origin;
             const params = new URLSearchParams();
 
-            const finalEmpresaId = selectedEmpresaId !== 'all'
-                ? selectedEmpresaId
-                : (isPlatformOwner ? undefined : profile?.empresa_id);
-            if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
+            if (selectedEmpresaId !== 'all') params.append('empresa_id', String(selectedEmpresaId));
+            if (selectedAgentId !== 'all') params.append('agent_id', String(selectedAgentId));
             if (agentId) params.append('agent_id', String(agentId));
             if (campaignId) params.append('campaign_id', String(campaignId));
 
@@ -79,16 +80,29 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     }, []);
 
     useEffect(() => {
-        loadResults();
-    }, [profile, selectedEmpresaId, agentId, campaignId]);
+        const fetchAgents = async () => {
+            const BASE_URL = import.meta.env.VITE_API_URL || window.location.origin;
+            const url = selectedEmpresaId !== 'all' ? `${BASE_URL}/api/agents?empresa_id=${selectedEmpresaId}` : `${BASE_URL}/api/agents`;
+            const res = await fetch(url);
+            if (res.ok) setAgents(await res.json());
+        };
+        fetchAgents();
+    }, [selectedEmpresaId]);
 
-    const filteredResults = results.filter(r =>
-        r.telefono.includes(searchTerm) ||
-        (r.campaign_name && r.campaign_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (r.comentarios && r.comentarios.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (r.transcription && r.transcription.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (r.llm_model && r.llm_model.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    useEffect(() => {
+        loadResults();
+    }, [profile, selectedEmpresaId, selectedAgentId, agentId, campaignId]);
+
+    const filteredResults = results.filter(r => {
+        const matchesSearch = r.telefono.includes(searchTerm) ||
+            (r.campaign_name && r.campaign_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (r.comentarios && r.comentarios.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (r.transcription && r.transcription.toLowerCase().includes(searchTerm.toLowerCase()));
+
+        const matchesTipo = selectedTipo === 'all' || r.tipo_resultados === selectedTipo;
+
+        return matchesSearch && matchesTipo;
+    });
 
     const exportCSV = () => {
         const headers = [
@@ -169,6 +183,30 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                         ))}
                     </select>
                 )}
+                <select
+                    value={selectedAgentId}
+                    onChange={(e) => setSelectedAgentId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                    className="px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white min-w-[150px]"
+                >
+                    <option value="all">{t('Todos los agentes')}</option>
+                    {agents.map(agent => (
+                        <option key={agent.id} value={agent.id}>{agent.name}</option>
+                    ))}
+                </select>
+
+                <select
+                    value={selectedTipo}
+                    onChange={(e) => setSelectedTipo(e.target.value)}
+                    className="px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white min-w-[150px]"
+                >
+                    <option value="all">{t('Todos los tipos')}</option>
+                    <option value="ENCUESTA_NUMERICA">{t('Numérica')}</option>
+                    <option value="PREGUNTAS_ABIERTAS">{t('Preguntas Abiertas')}</option>
+                    <option value="CUALIFICACION_LEAD">{t('Cualificación Lead')}</option>
+                    <option value="AGENDAMIENTO_CITA">{t('Cita / Reunión')}</option>
+                    <option value="SOPORTE_CLIENTE">{t('Soporte')}</option>
+                </select>
+
                 <div className="relative flex-1 max-w-md">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
                     <input

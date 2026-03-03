@@ -112,7 +112,7 @@ async def get_recent_calls(empresa_id: Optional[int] = None, agent_id: Optional[
         if campaign_id: query = query.eq("campaign_id", campaign_id)
         response = query.order("fecha", desc=True).limit(50).execute()
         mapped = []
-        for r in response.data:
+        for r in (response.data or []):
             mapped.append({
                 "id": r.get("id"),
                 "phone": r.get("telefono", ""),
@@ -120,12 +120,22 @@ async def get_recent_calls(empresa_id: Optional[int] = None, agent_id: Optional[
                 "date": r.get("fecha", ""),
                 "status": r.get("status", "pending"),
                 "llm_model": r.get("llm_model"),
+                "agent_id": r.get("agent_id"),
                 "scores": {
                     "comercial": r.get("puntuacion_comercial"),
                     "instalador": r.get("puntuacion_instalador"),
                     "rapidez": r.get("puntuacion_rapidez")
                 }
             })
+        
+        try:
+            agents_res = supabase.table("agent_config").select("id, tipo_resultados").execute()
+            t_map = {str(a["id"]): a.get("tipo_resultados") for a in (agents_res.data or [])}
+            for m in mapped:
+                aid = str(m.get("agent_id"))
+                m["tipo_resultados"] = t_map.get(aid)
+        except: pass
+        
         return mapped
     except Exception as e:
         logger.error(f"Error recent calls: {e}")
