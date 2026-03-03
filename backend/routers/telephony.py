@@ -5,6 +5,7 @@ from services.supabase_service import supabase
 from services.livekit_service import lkapi
 from livekit import api
 import aiohttp
+import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 import time
@@ -216,14 +217,10 @@ async def make_outbound_call(request: dict):
             processing_rooms.discard(room_name)
             raise sip_err
 
-        print(f"🚀 [API] Solicitando despacho de agente a sala {room_name}...")
-        try:
-            await lkapi.agent_dispatch.create_dispatch(api.CreateAgentDispatchRequest(
-                agent_name=os.getenv("AGENT_NAME_DISPATCH", ""),
-                room=room_name
-            ))
-        except Exception as e:
-            print(f"⚠️ [API] Error despacho: {e}")
+        # NOTA: NO llamamos a create_dispatch manualmente.
+        # LiveKit auto-despacha el agente porque AGENT_NAME_DISPATCH está vacío (catch-all).
+        # Llamar a create_dispatch además del auto-despacho causaba DOBLE AGENTE.
+        logger.info(f"✅ [API] Sala {room_name} creada con participante SIP. LiveKit auto-despachará el agente.")
 
         # Limpiamos el lock después de un tiempo prudencial
         async def clear_room_lock(rname):
