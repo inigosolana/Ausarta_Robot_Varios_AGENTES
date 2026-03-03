@@ -60,15 +60,19 @@ async def update_agent(agent_id: str, config: dict):
         
         # Clasificación automática vía n8n (Agent Classifier)
         if "instructions" in config:
-            try:
-                import aiohttp
-                import os
-                n8n_base = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
-                url = f"{n8n_base}/classify-agent"
-                payload = {"agent_id": agent_id, "instructions": config["instructions"]}
-                async with aiohttp.ClientSession() as sess:
-                    await sess.post(url, json=payload, timeout=2)
-            except: pass
+            async def call_webhook():
+                try:
+                    import aiohttp
+                    import os
+                    n8n_base = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
+                    url = f"{n8n_base}/classify-agent"
+                    payload = {"agent_id": agent_id, "instructions": config["instructions"]}
+                    async with aiohttp.ClientSession() as sess:
+                        await sess.post(url, json=payload)
+                except Exception as e:
+                    logger.error(f"Error calling classify webhook: {e}")
+            import asyncio
+            asyncio.create_task(call_webhook())
             
         return {"status": "ok", "message": f"Agente {agent_id} actualizado"}
     except Exception as e:
@@ -97,15 +101,20 @@ async def create_agent(config: dict):
         new_id = str(new_agent.get('id', ''))
         
         # Clasificación automática vía n8n (Agent Classifier)
-        try:
-            import aiohttp
-            import os
-            n8n_base = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
-            url = f"{n8n_base}/classify-agent"
-            payload = {"agent_id": new_id, "instructions": db_config["instructions"]}
-            async with aiohttp.ClientSession() as sess:
-                await sess.post(url, json=payload, timeout=2)
-        except: pass
+        async def call_webhook():
+            try:
+                import aiohttp
+                import os
+                n8n_base = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
+                url = f"{n8n_base}/classify-agent"
+                payload = {"agent_id": new_id, "instructions": db_config["instructions"]}
+                async with aiohttp.ClientSession() as sess:
+                    await sess.post(url, json=payload)
+            except Exception as e:
+                logger.error(f"Error calling classify webhook: {e}")
+        
+        import asyncio
+        asyncio.create_task(call_webhook())
 
         new_agent['id'] = new_id
         return {"status": "ok", "agent": new_agent}
