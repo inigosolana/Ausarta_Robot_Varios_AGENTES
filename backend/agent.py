@@ -222,20 +222,21 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         Herramienta para decir unas últimas palabras y colgar la llamada.
         Debes proporcionar obligatoriamente el mensaje de despedida.
         """
-        logger.info(f"Forzando despedida y cuelgue: {mensaje_despedida_manual}")
-        asyncio.create_task(self.session.say(mensaje_despedida_manual, allow_interruptions=False))
-        
-        async def delayed_hangup():
-            # Esperamos 5 segundos para que termine de hablar antes de colgar
-            await asyncio.sleep(5.0) 
-            url = f"{self.server_url}/colgar"
-            payload = {"nombre_sala": self.room_name}
+        async def process_goodbye_and_hangup():
             try:
-                async with aiohttp.ClientSession() as session:
-                    await session.post(url, timeout=5, json=payload)
-            except: pass
+                # Usamos await porque say() devuelve un handle awaitable en esta versión
+                await self.session.say(mensaje_despedida_manual, allow_interruptions=False)
+                # Esperamos un poco para dar tiempo a que se escuche antes de cerrar la sala
+                await asyncio.sleep(4.0)
+            finally:
+                url = f"{self.server_url}/colgar"
+                payload = {"nombre_sala": self.room_name}
+                try:
+                    async with aiohttp.ClientSession() as sess:
+                        await sess.post(url, timeout=5, json=payload)
+                except: pass
                 
-        asyncio.create_task(delayed_hangup())
+        asyncio.create_task(process_goodbye_and_hangup())
         return "Llamada finalizada."
 
 
@@ -416,11 +417,14 @@ async def entrypoint(ctx: JobContext):
             transcript = ""
             try:
                 if 'session' in locals():
-                    for m in session.chat_ctx.messages:
-                        if m.content and m.role in ("user", "assistant"):
-                            raw_messages.append({"role": m.role, "content": m.content})
-                            role_label = "Cliente" if m.role == "user" else "Agente"
-                            transcript += f"{role_label}: {m.content}\n"
+                    # Intentamos obtener la historia de la sesión o del asistente (varía según versión de livekit-agents)
+                    chat_ctx = getattr(session, 'chat_ctx', getattr(session, 'chat_context', None))
+                    if chat_ctx:
+                        for m in chat_ctx.messages:
+                            if m.content and m.role in ("user", "assistant"):
+                                raw_messages.append({"role": m.role, "content": m.content})
+                                role_label = "Cliente" if m.role == "user" else "Agente"
+                                transcript += f"{role_label}: {m.content}\n"
                     
                     # Enviar a n8n
                     if agent_instance_exists:
