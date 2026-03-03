@@ -409,6 +409,9 @@ async def entrypoint(ctx: JobContext):
             agent_instance_exists = 'agent_instance' in locals()
             data_saved = getattr(agent_instance, 'data_saved', False) if agent_instance_exists else False
             
+            # Forzamos el uso de 127.0.0.1 para llamadas internas al propio contenedor
+            internal_api_url = "http://127.0.0.1:8001"
+            
             raw_messages = []
             transcript = ""
             try:
@@ -432,7 +435,7 @@ async def entrypoint(ctx: JobContext):
                 logger.error(f"Error procesando historia: {ex}")
                 
             # SIEMPRE guardar transcripción y datos finales en Supabase
-            server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
+            url_guardar = f"{internal_api_url}/guardar-encuesta"
             try:
                 if data_saved:
                     # El LLM ya guardó notas, pero TAMBIÉN necesitamos guardar la transcripción
@@ -444,9 +447,7 @@ async def entrypoint(ctx: JobContext):
                         }
                         try:
                             async with aiohttp.ClientSession() as sess:
-                                internal_url = os.getenv("BRIDGE_SERVER_URL_INTERNAL", "http://127.0.0.1:8001")
-                                url = f"{internal_url}/guardar-encuesta"
-                                async with sess.post(url, json=transcript_payload, timeout=10) as resp:
+                                async with sess.post(url_guardar, json=transcript_payload, timeout=10) as resp:
                                     logger.info(f"✅ Transcripción guardada: HTTP {resp.status}")
                         except Exception as save_err:
                             logger.error(f"Error guardando transcripción: {save_err}")
@@ -461,8 +462,7 @@ async def entrypoint(ctx: JobContext):
                     }
                     try:
                         async with aiohttp.ClientSession() as sess:
-                            url = f"{server_url}/guardar-encuesta"
-                            async with sess.post(url, json=fallback_payload, timeout=10) as resp:
+                            async with sess.post(url_guardar, json=fallback_payload, timeout=10) as resp:
                                 logger.info(f"✅ Fallback guardado: HTTP {resp.status}")
                     except Exception as save_err:
                         logger.error(f"Error en guardado final: {save_err}")

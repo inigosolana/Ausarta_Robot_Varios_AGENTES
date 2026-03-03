@@ -31,7 +31,7 @@ async def finalizar_llamada(req: CallEndRequest):
 async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTasks):
     if not supabase: return {"status": "error", "message": "No DB connection"}
     
-    print(f"📥 [API] Recibiendo datos encuesta {datos.id_encuesta}: {datos.model_dump(exclude_none=True)}")
+    print(f"📥 [API] Recibiendo datos encuesta {datos.id_encuesta}: {datos.dict(exclude_none=True)}")
     
     update_data = {}
     
@@ -62,8 +62,10 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
          if curr_data.get('status') not in ('completed', 'rejected_opt_out'):
              update_data["status"] = 'incomplete'
 
+    print(f"📝 [API] Intentando actualizar encuesta {datos.id_encuesta} con: {update_data}")
     try:
         supabase.table("encuestas").update(update_data).eq("id", datos.id_encuesta).execute()
+        print(f"✅ [API] Supabase actualizado para encuesta {datos.id_encuesta}")
         
         if datos.status in ('completed', 'rejected_opt_out', 'incomplete', 'failed'):
              lead_update = {"status": datos.status}
