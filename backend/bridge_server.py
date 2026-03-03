@@ -45,6 +45,7 @@ class FinEncuesta(BaseModel):
     nota_rapidez: Union[int, str, None] = None
     comentarios: Optional[str] = None 
     status: Optional[str] = None
+    transcription: Optional[str] = None
 
 class ColgarLlamada(BaseModel):
     nombre_sala: str 
@@ -218,6 +219,8 @@ async def guardar_encuesta(datos: FinEncuesta):
     if val_rapidez is not None: updates["puntuacion_rapidez"] = val_rapidez
     if val_comentarios is not None:
         updates["comentarios"] = val_comentarios
+    if datos.transcription is not None:
+        updates["transcription"] = datos.transcription
     
     # Lógica de estados
     if datos.status:
