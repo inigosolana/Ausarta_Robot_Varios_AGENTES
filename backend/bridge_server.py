@@ -284,6 +284,18 @@ async def recent_calls_alias():
 async def results():
     return get_calls_supabase(limit=1000)
 
+@app.get("/api/results/{id}/transcription")
+async def get_transcription(id: int):
+    if not supabase: return {"transcription": ""}
+    try:
+        res = supabase.table("encuestas").select("transcription").eq("id", id).execute()
+        if res.data:
+            return {"transcription": res.data[0].get('transcription', '')}
+        return {"transcription": ""}
+    except Exception as e:
+        print(f"Error fetching transcription {id}: {e}")
+        return {"transcription": ""}
+
 @app.get("/dashboard/integrations")
 async def integrations_alias():
     return [
