@@ -54,7 +54,7 @@ const ViewLoader = () => (
 
 
 const App: React.FC = () => {
-  const { user, profile, loading, signOut, hasPermission, isRole } = useAuth();
+  const { user, profile, loading, signOut, hasPermission, isRole, refreshProfile } = useAuth();
   const { t, i18n } = useTranslation();
   const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
   const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
@@ -65,6 +65,21 @@ const App: React.FC = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const queryClient = useQueryClient();
   const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+
+  const isRootUser = profile?.email === 'admin@ausarta.net';
+  const canSimulation = profile?.role === 'superadmin' || isRootUser;
+
+  // Auto-redirect if role change makes current view inaccessible
+  useEffect(() => {
+    if (currentView === 'profile') return;
+    if (currentView === 'overview') return;
+
+    // Check if the current view is still accessible
+    const adminViews = ['admin', 'crm', 'empresas'];
+    if (profile?.role === 'user' && adminViews.includes(currentView)) {
+      setCurrentView('overview');
+    }
+  }, [profile?.role, currentView]);
 
   useEffect(() => {
     setIsDarkMode(document.documentElement.classList.contains('dark'));
@@ -327,6 +342,56 @@ const App: React.FC = () => {
                 </div>
               )}
             </div>
+
+            {/* Quick Simulation Banner if enabled and not superadmin */}
+            {canSimulation && profile?.role !== 'superadmin' && isSidebarOpen && (
+              <div className="mx-2 mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-xl shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] text-red-600 dark:text-red-400 font-bold uppercase tracking-wider">{t('Simulation Active')}</p>
+                  <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                </div>
+                <button
+                  onClick={async () => {
+                    const { error } = await supabase.from('user_profiles').update({ role: 'superadmin' }).eq('id', profile!.id);
+                    if (!error) {
+                      toast.success(t('Restored Superadmin role'));
+                      await refreshProfile();
+                    }
+                  }}
+                  className="text-xs font-bold text-white bg-red-600 px-3 py-1.5 rounded-lg hover:bg-red-700 w-full transition-all shadow-sm"
+                >
+                  {t('Restore Superadmin')}
+                </button>
+              </div>
+            )}
+
+            {/* If superadmin, show quick role switcher in sidebar */}
+            {profile?.role === 'superadmin' && isSidebarOpen && (
+              <div className="mx-2 mb-4 p-2 bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700 rounded-xl">
+                <p className="text-[9px] text-gray-400 dark:text-gray-500 font-bold uppercase tracking-wider mb-2 px-1">{t('Dev Role Switcher')}</p>
+                <div className="flex gap-1">
+                  {(['superadmin', 'admin', 'user'] as const).map((r) => (
+                    <button
+                      key={r}
+                      onClick={async () => {
+                        const { error } = await supabase.from('user_profiles').update({ role: r }).eq('id', profile!.id);
+                        if (!error) {
+                          toast.success(`${t('Switched to')} ${r}`);
+                          await refreshProfile();
+                        }
+                      }}
+                      className={`text-[9px] flex-1 py-1 rounded transition-all font-bold ${profile.role === r
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-white dark:bg-gray-800 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-650'
+                        }`}
+                    >
+                      {r.charAt(0).toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex justify-between items-center gap-2">
               <button
                 onClick={signOut}

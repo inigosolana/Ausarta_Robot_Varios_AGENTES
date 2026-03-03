@@ -200,7 +200,12 @@ const resources = {
             "Error updating profile": "Error al actualizar perfil",
             "No Position": "Sin cargo",
             "Position": "Cargo",
-            "e.g. CEO, Developer, Manager": "ej. CEO, Desarrollador, Manager"
+            "e.g. CEO, Developer, Manager": "ej. CEO, Desarrollador, Manager",
+            "Simulation Active": "Simulación Activa",
+            "Restore Superadmin": "Restaurar Superadmin",
+            "Dev Role Switcher": "Selector de Rol (Dev)",
+            "Restored Superadmin role": "Rol de Superadmin restaurado",
+            "Switched to": "Cambiado a"
         }
     },
     en: {
@@ -400,7 +405,12 @@ const resources = {
             "Error updating profile": "Error updating profile",
             "No Position": "No Position",
             "Position": "Position",
-            "e.g. CEO, Developer, Manager": "e.g. CEO, Developer, Manager"
+            "e.g. CEO, Developer, Manager": "e.g. CEO, Developer, Manager",
+            "Simulation Active": "Simulation Active",
+            "Restore Superadmin": "Restore Superadmin",
+            "Dev Role Switcher": "Dev Role Switcher",
+            "Restored Superadmin role": "Restored Superadmin role",
+            "Switched to": "Switched to"
         }
     },
     eu: {
