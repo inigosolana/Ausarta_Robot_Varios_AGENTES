@@ -139,14 +139,6 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         await asyncio.sleep(1.2)
         await self.session.say(self.greeting, allow_interruptions=False)
 
-    async def _fire_and_forget_save(self, url, payload):
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, timeout=2) as resp:
-                    pass
-        except:
-            pass
-
     async def notify_n8n_transcription(self, survey_id: str, messages: list):
         """Envía la transcripción cruda a n8n para que él la procese."""
         webhook_url = os.getenv("N8N_WEBHOOK_URL_TRANSCRIPTS")
@@ -196,7 +188,14 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
             "status": status
         }
         
-        asyncio.create_task(self._fire_and_forget_save(url, payload))
+        # IMPORTANTE: Await directo en vez de fire-and-forget para asegurar que se guarda
+        try:
+            async with aiohttp.ClientSession() as sess:
+                async with sess.post(url, json=payload, timeout=10) as resp:
+                    logger.info(f"✅ guardar_encuesta tool: HTTP {resp.status} para encuesta {real_id}")
+        except Exception as e:
+            logger.error(f"❌ Error en guardar_encuesta tool: {e}")
+        
         return "Dato guardado."
 
     @function_tool(name="finalizar_llamada")
@@ -405,12 +404,36 @@ async def entrypoint(ctx: JobContext):
                     
                     # Enviar a n8n
                     if agent_instance_exists:
-                        asyncio.create_task(agent_instance.notify_n8n_transcription(survey_id, raw_messages))
+                        try:
+                            await asyncio.wait_for(
+                                agent_instance.notify_n8n_transcription(survey_id, raw_messages),
+                                timeout=5
+                            )
+                        except Exception as n8n_err:
+                            logger.error(f"Error enviando transcripción a n8n: {n8n_err}")
             except Exception as ex:
                 logger.error(f"Error procesando historia: {ex}")
                 
+            # SIEMPRE guardar transcripción y datos finales en Supabase
+            server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
             try:
-                if not data_saved:
+                if data_saved:
+                    # El LLM ya guardó notas, pero TAMBIÉN necesitamos guardar la transcripción
+                    if transcript:
+                        logger.info(f"📝 Guardando transcripción para encuesta {survey_id} (datos ya guardados por tool)")
+                        transcript_payload = {
+                            "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
+                            "transcription": transcript
+                        }
+                        try:
+                            async with aiohttp.ClientSession() as sess:
+                                url = f"{server_url}/guardar-encuesta"
+                                async with sess.post(url, json=transcript_payload, timeout=10) as resp:
+                                    logger.info(f"✅ Transcripción guardada: HTTP {resp.status}")
+                        except Exception as save_err:
+                            logger.error(f"Error guardando transcripción: {save_err}")
+                else:
+                    # No se guardaron datos → fallback completo
                     logger.warning(f"⚠️ La sesión terminó sin guardar datos explícitos (Survey ID: {survey_id})")
                     fallback_payload = {
                         "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
@@ -418,12 +441,11 @@ async def entrypoint(ctx: JobContext):
                         "status": "unreached",
                         "comentarios": "Llamada finalizada sin interacción completa (Posible No Contesta / Cuelgue)"
                     }
-                    
-                    server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
                     try:
                         async with aiohttp.ClientSession() as sess:
                             url = f"{server_url}/guardar-encuesta"
-                            await asyncio.wait_for(sess.post(url, json=fallback_payload), timeout=5)
+                            async with sess.post(url, json=fallback_payload, timeout=10) as resp:
+                                logger.info(f"✅ Fallback guardado: HTTP {resp.status}")
                     except Exception as save_err:
                         logger.error(f"Error en guardado final: {save_err}")
             except Exception as ex:
