@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # Backend (API + LiveKit Agent)
   backend:
     build:
       context: ./backend
@@ -9,17 +8,12 @@ services:
     container_name: ausarta-v2-backend
     restart: unless-stopped
     ports:
-      - "8003:8001" # Puerto externo 8003 → interno 8001
+      - "8003:8001"
     environment:
-      # LiveKit
       - LIVEKIT_URL=${LIVEKIT_URL}
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
-
-      # SIP
       - SIP_OUTBOUND_TRUNK_ID=${SIP_OUTBOUND_TRUNK_ID}
-
-      # AI Providers
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
       - CARTESIA_API_KEY=${CARTESIA_API_KEY}
       - GROQ_API_KEY=${GROQ_API_KEY}
@@ -28,13 +22,9 @@ services:
       - ELEVEN_API_KEY=${ELEVEN_API_KEY}
       - VOICE_ID_AUSARTA=${VOICE_ID_AUSARTA}
       - VOICE_ID_ESPANOLA=${VOICE_ID_ESPANOLA}
-
-      # Database Configuration (Supabase)
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-
-      # Integrations & Webhooks
       - GLPI_URL=${GLPI_URL}
       - GLPI_APP_TOKEN=${GLPI_APP_TOKEN}
       - GLPI_USER_TOKEN=${GLPI_USER_TOKEN}
@@ -46,23 +36,19 @@ services:
       - ENABLE_SIP=${ENABLE_SIP}
       - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL}
       - N8N_WEBHOOK_BASE_URL=${N8N_WEBHOOK_BASE_URL}
-
-      # Bridge
       - BRIDGE_SERVER_URL=http://127.0.0.1:8001
     extra_hosts:
       - "host.docker.internal:host-gateway"
-      - "livekit.ausarta.net:51.94.186.74"
     networks:
       - ausarta-network
     volumes:
-      - sqlite-data:/app/data # Mantener por si acaso
+      - sqlite-data:/app/data
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8001/" ]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # Redis for scalability and WebSockets support
   redis:
     image: redis:alpine
     container_name: ausarta-redis
@@ -73,7 +59,6 @@ services:
     volumes:
       - redis-data:/data
 
-  # Frontend (React + Nginx)
   frontend:
     build:
       context: .
@@ -86,31 +71,16 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
     networks:
       - ausarta-network
     depends_on:
       - backend
       - redis
-    volumes:
-      - ./certbot/conf:/etc/letsencrypt
-      - ./certbot/www:/var/www/certbot
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost/" ]
       interval: 30s
       timeout: 10s
       retries: 3
-
-  # Certbot for SSL certificates
-  certbot:
-    image: certbot/certbot
-    container_name: ausarta-certbot
-    volumes:
-      - ./certbot/conf:/etc/letsencrypt
-      - ./certbot/www:/var/www/certbot
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
-    networks:
-      - ausarta-network
 
 networks:
   ausarta-network:
