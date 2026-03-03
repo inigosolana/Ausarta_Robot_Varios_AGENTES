@@ -11,6 +11,7 @@ interface AgentConfig {
   description: string;
   instructions: string;
   greeting: string;
+  tipo_resultados?: string;
 }
 
 interface AIConfig {
@@ -206,7 +207,19 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
     <div className="space-y-6 max-w-4xl mx-auto pb-20">
       <header className="flex justify-between items-center bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{agent.name || (t('Voice Agents') + ' Agent')}</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-900">{agent.name || (t('Voice Agents') + ' Agent')}</h1>
+            {agent.tipo_resultados && (
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${agent.tipo_resultados === 'ENCUESTA_NUMERICA' ? 'bg-green-50 text-green-700 border-green-200' :
+                agent.tipo_resultados === 'CUALIFICACION_LEAD' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                  agent.tipo_resultados === 'AGENDAMIENTO_CITA' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                    agent.tipo_resultados === 'SOPORTE_CLIENTE' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                      'bg-gray-50 text-gray-700 border-gray-200'
+                }`}>
+                {agent.tipo_resultados.replace('_', ' ')}
+              </span>
+            )}
+          </div>
           <p className="text-gray-500 text-sm">{t('AI Models Description')}</p>
         </div>
         <div className="flex gap-3">
