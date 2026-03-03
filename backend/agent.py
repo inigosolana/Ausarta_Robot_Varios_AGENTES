@@ -79,7 +79,8 @@ class DynamicAgent(Agent):
     """Agente dinámico que carga sus instrucciones desde Supabase."""
     
     def __init__(self, room_name: str, agent_config: dict) -> None:
-        self.server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
+        # Si estamos en el mismo contenedor, usamos 127.0.0.1 para evitar problemas de resolución de nombres
+        self.server_url = os.getenv("BRIDGE_SERVER_URL_INTERNAL", "http://127.0.0.1:8001")
         self.data_saved = False
         self.room_name = room_name
         self.agent_config = agent_config
@@ -102,7 +103,8 @@ class DynamicAgent(Agent):
         inst_lower = agent_instructions.lower()
         has_preguntas = any(p in inst_lower for p in ["pregunta 1", "pregunta 2", "pregunta:"])
         # Detección de tipo de encuesta para el prompt
-        is_numeric = any(kw in inst_lower for kw in ["1 al 10", "0 al 10", "del uno al diez", "numérica", "puntuación"])
+        numeric_keywords = ["1 al 10", "0 al 10", "del uno al diez", "numérica", "puntuación", "uno al 10", "uno al diez"]
+        is_numeric = any(kw in inst_lower for kw in numeric_keywords)
         if "dakota" in agent_name.lower():
             is_numeric = True
         
@@ -206,11 +208,12 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         Herramienta para decir unas últimas palabras y colgar la llamada.
         Debes proporcionar obligatoriamente el mensaje de despedida.
         """
-        logger.info(f"Forzando despedida: {mensaje_despedida_manual}")
+        logger.info(f"Forzando despedida y cuelgue: {mensaje_despedida_manual}")
         asyncio.create_task(self.session.say(mensaje_despedida_manual, allow_interruptions=False))
         
         async def delayed_hangup():
-            await asyncio.sleep(8.0) 
+            # Esperamos 5 segundos para que termine de hablar antes de colgar
+            await asyncio.sleep(5.0) 
             url = f"{self.server_url}/colgar"
             payload = {"nombre_sala": self.room_name}
             try:
@@ -427,7 +430,8 @@ async def entrypoint(ctx: JobContext):
                         }
                         try:
                             async with aiohttp.ClientSession() as sess:
-                                url = f"{server_url}/guardar-encuesta"
+                                internal_url = os.getenv("BRIDGE_SERVER_URL_INTERNAL", "http://127.0.0.1:8001")
+                                url = f"{internal_url}/guardar-encuesta"
                                 async with sess.post(url, json=transcript_payload, timeout=10) as resp:
                                     logger.info(f"✅ Transcripción guardada: HTTP {resp.status}")
                         except Exception as save_err:

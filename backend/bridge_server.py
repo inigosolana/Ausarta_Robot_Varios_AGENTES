@@ -117,21 +117,36 @@ def get_calls_supabase(limit=50):
         res = supabase.table("encuestas").select("*").order("fecha", desc=True).limit(limit).execute()
         calls = res.data
         mapped = []
+        # Obtener tipos de agentes para marcar if is_question_based
+        qs_agents = set()
+        try:
+            agents_res = supabase.table("agent_config").select("id, instructions").execute()
+            for a in (agents_res.data or []):
+                inst_lower = (a.get("instructions") or "").lower()
+                has_preguntas = "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower
+                is_numeric = any(kw in inst_lower for kw in ["1 al 10", "0 al 10", "del uno al diez", "uno al 10", "uno al diez", "numérica", "puntuación"])
+                if has_preguntas and not is_numeric:
+                    qs_agents.add(str(a["id"]))
+        except: pass
+
         for c in calls:
             # Map status nicely
             raw_status = c.get('status', 'initiated')
             if c.get('completada'): raw_status = 'completed'
             
+            res_agent_id = str(c.get('agent_id')) if c.get('agent_id') else ""
+            
             mapped.append({
                 "id": c['id'],
                 "telefono": c.get('telefono'),
                 "phone": c.get('telefono'),
-                "campaign": "Ausarta", 
-                "campaign_name": "Ausarta",
+                "campaign": c.get('campaign_name', "Ausarta"), 
+                "campaign_name": c.get('campaign_name', "Ausarta"),
                 "fecha": c.get('fecha'),
                 "date": c.get('fecha'),
                 "completada": c.get('completada'),
                 "status": raw_status,
+                "is_question_based": res_agent_id in qs_agents,
                 "scores": {
                     "comercial": c.get('puntuacion_comercial'),
                     "instalador": c.get('puntuacion_instalador'),
