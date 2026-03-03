@@ -296,6 +296,7 @@ async def entrypoint(ctx: JobContext):
         survey_id = "0"
 
     # --- PASO 2: Conectar a la sala ---
+    is_duplicate = False
     try:
         logger.info(f"⏱️ [{job_id}] Conectando a sala...")
         await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
@@ -306,6 +307,7 @@ async def entrypoint(ctx: JobContext):
         agent_participants = [p for p in ctx.room.remote_participants.values() if getattr(p, 'kind', None) == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT or p.identity.startswith("agent-")]
         if len(agent_participants) > 0:
             logger.warning(f"⚠️ [{job_id}] Ya hay un agente en la sala {room_name} ({agent_participants[0].identity}). Cancelando esta instancia para evitar doble voz.")
+            is_duplicate = True
             return
 
         logger.info(f"✅ [{job_id}] Conectado (Instancia única).")
@@ -399,44 +401,48 @@ async def entrypoint(ctx: JobContext):
         handle_error(e)
     
     finally:
-        logger.info(f"--- 🏁 FIN DE SESIÓN AGENTE (Job: {job_id}) ---")
-        data_saved = getattr(agent_instance, 'data_saved', False) if 'agent_instance' in dir() else False
-        
-        raw_messages = []
-        transcript = ""
-        try:
-            if 'assistant' in locals():
-                for m in assistant.chat_ctx.messages:
-                    if m.content:
-                        raw_messages.append({"role": m.role, "content": m.content})
-                        role_label = "Cliente" if m.role == "user" else "Agente"
-                        transcript += f"{role_label}: {m.content}\n"
-                
-                # Enviar a n8n para procesamiento externo (sin carga en Python)
-                if 'agent_instance' in locals():
-                    asyncio.create_task(agent_instance.notify_n8n_transcription(survey_id, raw_messages))
-        except Exception as ex:
-            logger.error(f"Error procesando historia: {ex}")
+        if not is_duplicate:
+            logger.info(f"--- 🏁 FIN DE SESIÓN AGENTE (Job: {job_id}) ---")
+            agent_instance_exists = 'agent_instance' in locals()
+            data_saved = getattr(agent_instance, 'data_saved', False) if agent_instance_exists else False
             
-        try:
-            fallback_payload = {
-                "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
-                "transcription": transcript,
-            }
-            if not data_saved:
-                logger.warning(f"⚠️ La sesión terminó sin guardar datos (Survey ID: {survey_id})")
-                fallback_payload["status"] = "unreached"
-                fallback_payload["comentarios"] = "Llamada finalizada sin datos (Posible No Contesta / Cuelgue inmediato)"
+            raw_messages = []
+            transcript = ""
+            try:
+                if 'assistant' in locals():
+                    for m in assistant.chat_ctx.messages:
+                        if m.content and m.role in ("user", "assistant"):
+                            raw_messages.append({"role": m.role, "content": m.content})
+                            role_label = "Cliente" if m.role == "user" else "Agente"
+                            transcript += f"{role_label}: {m.content}\n"
+                    
+                    # Enviar a n8n
+                    if agent_instance_exists:
+                        asyncio.create_task(agent_instance.notify_n8n_transcription(survey_id, raw_messages))
+            except Exception as ex:
+                logger.error(f"Error procesando historia: {ex}")
                 
-            server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
-            async def do_final_save():
-                async with aiohttp.ClientSession() as sess:
-                    url = f"{server_url}/guardar-encuesta"
-                    async with sess.post(url, json=fallback_payload, timeout=5) as r:
-                         pass
-            asyncio.create_task(do_final_save())
-        except Exception as ex:
-             logger.error(f"❌ Error salvando datos finales: {ex}")
+            try:
+                if not data_saved:
+                    logger.warning(f"⚠️ La sesión terminó sin guardar datos explícitos (Survey ID: {survey_id})")
+                    fallback_payload = {
+                        "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
+                        "transcription": transcript,
+                        "status": "unreached",
+                        "comentarios": "Llamada finalizada sin interacción completa (Posible No Contesta / Cuelgue)"
+                    }
+                    
+                    server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
+                    async def do_final_save():
+                        async with aiohttp.ClientSession() as sess:
+                            url = f"{server_url}/guardar-encuesta"
+                            await sess.post(url, json=fallback_payload, timeout=5)
+                    
+                    asyncio.create_task(do_final_save())
+            except Exception as ex:
+                 logger.error(f"❌ Error salvando datos finales: {ex}")
+        else:
+            logger.info(f"--- 🏁 FIN DE SESIÓN DUPLICADA (Job: {job_id}) - Saliendo sin reportar datos ---")
 
 if __name__ == "__main__":
     cli.run_app(server)

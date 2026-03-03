@@ -127,6 +127,9 @@ async def trigger_crm_webhook(encuesta_id: int, status: str, result_data: dict, 
     except Exception as e:
         print(f"⚠️ CRM Webhook Error: {e}")
 
+# Lock para evitar doble despacho accidental
+processing_rooms = set()
+
 @router.post("/api/calls/outbound")
 async def make_outbound_call(request: dict):
     """Endpoint para llamadas de prueba o llamadas disparadas por Webhook de n8n"""
@@ -138,10 +141,13 @@ async def make_outbound_call(request: dict):
     if not phone:
         return JSONResponse(status_code=400, content={"error": "Phone number is required"})
 
-    print(f"📞 [API] Iniciando solicitud de llamada a {phone} (Agent ID: {agent_id})...")
+    # Usamos un ID único para la encuesta para evitar duplicaciones en la base de datos
+    # si se llama dos veces muy rápido.
+    encuesta_id = None
     
     try:
         if supabase:
+            # (Logic for creating the survey record)
             emp_id = request.get("empresa_id")
             if not emp_id and agent_id:
                 try:
@@ -178,47 +184,57 @@ async def make_outbound_call(request: dict):
                     "status": "calling",
                     "last_call_at": datetime.now(timezone.utc).isoformat()
                 }).eq("id", lead_id).execute()
-
         else:
             encuesta_id = random.randint(1000, 9999)
-            
+
+        room_name = f"encuesta_{encuesta_id}"
         sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
-        room_name = f"encuesta_{encuesta_id}_{int(time.time())}"
+
+        # --- PREVENCIÓN DE DOBLE DESPACHO ---
+        if room_name in processing_rooms:
+            logger.warning(f"⚠️ [API] Despacho ya en curso para sala {room_name}. Ignorando duplicado.")
+            return {"status": "ok", "message": "Call already initiated", "roomName": room_name}
+        
+        processing_rooms.add(room_name)
 
         print(f"📡 [API] Creando sala: {room_name}")
         try:
             await lkapi.room.create_room(api.CreateRoomRequest(name=room_name))
         except Exception as e:
-            print(f"⚠️ [API] Aviso al crear sala (puede que ya exista): {e}")
+            print(f"⚠️ [API] Aviso al crear sala: {e}")
 
         logger.info(f"☎️ [API] Marcando vía SIP a {phone} en sala {room_name}...")
-        print(f"☎️ [API] Marcando vía SIP a {phone} en sala {room_name}...", flush=True)
         try:
-            sip_res = await lkapi.sip.create_sip_participant(api.CreateSIPParticipantRequest(
+            await lkapi.sip.create_sip_participant(api.CreateSIPParticipantRequest(
                 sip_trunk_id=sip_trunk_id,
                 sip_call_to=phone,
                 room_name=room_name,
-                participant_identity=f"user_{phone}_{int(time.time())}",
-                participant_name="Test User"
+                participant_identity=f"user_{phone}_{encuesta_id}",
+                participant_name="Cliente"
             ))
-            logger.info(f"✅ [API] Respuesta SIP: {sip_res}")
-            print(f"✅ [API] Respuesta SIP: {sip_res}", flush=True)
         except Exception as sip_err:
-            logger.error(f"❌ [API] Error creando participante SIP: {sip_err}")
-            print(f"❌ [API] Error creando participante SIP: {sip_err}", flush=True)
+            processing_rooms.discard(room_name)
             raise sip_err
 
-        print(f"🚀 [API] Solicitando despacho de agente genérico a sala {room_name}...")
+        print(f"🚀 [API] Solicitando despacho de agente a sala {room_name}...")
         try:
             await lkapi.agent_dispatch.create_dispatch(api.CreateAgentDispatchRequest(
                 agent_name=os.getenv("AGENT_NAME_DISPATCH", ""),
                 room=room_name
             ))
         except Exception as e:
-            print(f"⚠️ [API] No se pudo forzar despacho (puede que ya exista regla): {e}")
+            print(f"⚠️ [API] Error despacho: {e}")
+
+        # Limpiamos el lock después de un tiempo prudencial
+        async def clear_room_lock(rname):
+            await asyncio.sleep(10)
+            processing_rooms.discard(rname)
+        
+        asyncio.create_task(clear_room_lock(room_name))
 
         return {"status": "ok", "roomName": room_name, "callId": encuesta_id}
         
     except Exception as e:
+        if 'room_name' in locals(): processing_rooms.discard(room_name)
         print(f"❌ [API] Error fatal en outbound call: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
