@@ -217,10 +217,10 @@ async def make_outbound_call(request: dict):
             processing_rooms.discard(room_name)
             raise sip_err
 
-        # NOTA: NO llamamos a create_dispatch manualmente.
-        # LiveKit auto-despacha el agente porque AGENT_NAME_DISPATCH está vacío (catch-all).
-        # Llamar a create_dispatch además del auto-despacho causaba DOBLE AGENTE.
-        logger.info(f"✅ [API] Sala {room_name} creada con participante SIP. LiveKit auto-despachará el agente.")
+        # Si AGENT_NAME_DISPATCH tiene valor (ej: inigo_local en .env), LiveKit despachará ese agente específico.
+        # Si no tiene valor, usará worker-dispatch por defecto.
+        agent_name_dispatch = os.getenv("AGENT_NAME_DISPATCH", "")
+        logger.info(f"✅ [API] Sala {room_name} creada con participante SIP. LiveKit despachará el agente '{agent_name_dispatch or '(default)'}'.")
 
         # Limpiamos el lock después de un tiempo prudencial
         async def clear_room_lock(rname):
