@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Plus, Upload, Clock, AlertCircle, History, Trash2, X, Edit2
+  Plus, Upload, Clock, AlertCircle, History, Trash2, X, Edit2, Building2
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
@@ -21,6 +21,7 @@ interface Campaign {
   pending_leads?: number;
   retries_count?: number;
   is_question_based?: boolean;
+  empresas?: { nombre: string };
 }
 
 interface Lead {
@@ -115,9 +116,21 @@ export function CampaignsView() {
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [manualInput, setManualInput] = useState('');
   const [scheduledTime, setScheduledTime] = useState('');
-  const [retryInterval, setRetryInterval] = useState<number>(60); // Default 60 mins
+  const [retryInterval, setRetryInterval] = useState<number>(60); // Default
 
   const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+
+  // Helper to group campaigns
+  const groupedCampaignsByCompany = campaigns.reduce((acc: Record<string, Campaign[]>, campaign) => {
+    const companyName = campaign.empresas?.nombre || t("General / No Company", "General / Sin Empresa");
+    if (!acc[companyName]) {
+      acc[companyName] = [];
+    }
+    acc[companyName].push(campaign);
+    return acc;
+  }, {} as Record<string, Campaign[]>);
+
+  const groupedEntries = Object.entries(groupedCampaignsByCompany) as [string, Campaign[]][];
 
   useEffect(() => {
     loadCampaigns();
@@ -857,79 +870,91 @@ export function CampaignsView() {
         </button>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50 border-b border-gray-100">
-            <tr>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Campaign Name", "Nombre de la Campaña")}</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Status", "Estado")}</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Progress", "Progreso")}</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Scheduled", "Planificado")}</th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Created", "Creado")}</th>
-              <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Actions", "Acciones")}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {campaigns.map((campaign) => (
-              <tr key={campaign.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => loadCampaignDetails(campaign)}>
-                <td className="px-6 py-4 text-sm font-medium text-gray-900">{campaign.name}</td>
-                <td className="px-6 py-4">
-                  <StatusBadge status={campaign.status} />
-                </td>
-                <td className="px-6 py-4 w-48">
-                  {/* Progress Bar */}
-                  <div className="flex flex-col gap-1">
-                    <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-green-500"
-                        style={{ width: `${((campaign.called_leads || 0) / (campaign.total_leads || 1)) * 100}%` }}
-                      />
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {campaign.called_leads || 0} / {campaign.total_leads || 0} {t("calls", "llamadas")}
-                    </div>
-                  </div>
-                </td>
-                <td className="px-6 py-4 text-sm text-gray-500">
-                  {campaign.scheduled_time ? new Date(campaign.scheduled_time).toLocaleString() : '-'}
-                </td>
-                <td className="px-6 py-4 text-sm text-gray-500">
-                  {campaign.created_at ? new Date(campaign.created_at).toLocaleDateString() : '-'}
-                </td>
-                <td className="px-6 py-4 text-right text-sm font-medium">
-                  <div className="flex justify-end gap-2">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); openEditModal(campaign); }}
-                      className="text-blue-600 hover:text-blue-900"
-                      title="Edit Campaign"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (window.confirm(t('Delete campaign?', '¿Eliminar campaña?'))) {
-                          handleDelete(campaign.id);
-                        }
-                      }}
-                      className="text-red-600 hover:text-red-900"
-                      title="Delete Campaign"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {campaigns.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
-                  {t("No campaigns found. Create your first campaign to get started.", "No se encontraron campañas. Crea tu primera campaña para empezar.")}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className="space-y-8">
+        {Object.entries(groupedCampaignsByCompany).length === 0 ? (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center text-gray-500">
+            {t("No campaigns found. Create your first campaign to get started.", "No se encontraron campañas. Crea tu primera campaña para empezar.")}
+          </div>
+        ) : (
+          groupedEntries.sort((a, b) => a[0].localeCompare(b[0])).map(([companyName, companyCampaigns]) => (
+            <div key={companyName} className="space-y-3">
+              <div className="flex items-center gap-2 px-1">
+                <Building2 className="w-5 h-5 text-blue-600" />
+                <h2 className="text-lg font-bold text-gray-800 uppercase tracking-wider">{companyName}</h2>
+                <div className="h-px flex-1 bg-gray-100 ml-2"></div>
+                <span className="text-xs font-medium text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full border border-gray-100">
+                  {companyCampaigns.length} {companyCampaigns.length === 1 ? t("Campaña", "Campaña") : t("Campañas", "Campañas")}
+                </span>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <table className="w-full text-left">
+                  <thead className="bg-gray-50 border-b border-gray-100">
+                    <tr>
+                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Campaign Name", "Nombre de la Campaña")}</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Status", "Estado")}</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Progress", "Progreso")}</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Scheduled", "Planificado")}</th>
+                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Created", "Creado")}</th>
+                      <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Actions", "Acciones")}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {companyCampaigns.map((campaign) => (
+                      <tr key={campaign.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => loadCampaignDetails(campaign)}>
+                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{campaign.name}</td>
+                        <td className="px-6 py-4">
+                          <StatusBadge status={campaign.status} />
+                        </td>
+                        <td className="px-6 py-4 w-48">
+                          <div className="flex flex-col gap-1">
+                            <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-green-500"
+                                style={{ width: `${((campaign.called_leads || 0) / (campaign.total_leads || 1)) * 100}%` }}
+                              />
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {campaign.called_leads || 0} / {campaign.total_leads || 0} {t("calls", "llamadas")}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-500 font-mono">
+                          {campaign.scheduled_time ? new Date(campaign.scheduled_time).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : '-'}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-500">
+                          {campaign.created_at ? new Date(campaign.created_at).toLocaleDateString() : '-'}
+                        </td>
+                        <td className="px-6 py-4 text-right text-sm font-medium" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => openEditModal(campaign)}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Edit Campaign"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (window.confirm(t('Delete campaign?', '¿Eliminar campaña?'))) {
+                                  handleDelete(campaign.id);
+                                }
+                              }}
+                              className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete Campaign"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))
+        )}
       </div>
       {renderEditModal()}
     </div>

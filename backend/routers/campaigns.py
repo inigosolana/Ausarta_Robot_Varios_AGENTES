@@ -81,11 +81,12 @@ async def get_result_transcription(result_id: int):
 async def list_campaigns(empresa_id: Optional[int] = None):
     if not supabase: return []
     try:
-        query = supabase.table("campaigns").select("*")
+        # Join with empresas to get the company name
+        query = supabase.table("campaigns").select("*, empresas:empresa_id(nombre)")
         if empresa_id:
             query = query.eq("empresa_id", empresa_id)
             
-        res = query.order("created_at", desc=True).limit(50).execute()
+        res = query.order("created_at", desc=True).limit(100).execute()
         return res.data
     except Exception as e:
         logger.error(f"Error listing campaigns: {e}")

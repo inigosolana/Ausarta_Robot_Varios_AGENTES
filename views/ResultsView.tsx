@@ -48,7 +48,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     const loadResults = async () => {
         setLoading(true);
         try {
-            const BASE_URL = import.meta.env.VITE_API_URL || window.location.origin;
+            const BASE_URL = import.meta.env.VITE_API_URL || '';
             const params = new URLSearchParams();
 
             if (selectedEmpresaId !== 'all') params.append('empresa_id', String(selectedEmpresaId));

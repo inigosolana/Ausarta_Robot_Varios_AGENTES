@@ -11,8 +11,8 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 
-// API URL
-const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
+// API URL - Consistent with other views
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 interface Props {
     empresaId?: number;
@@ -115,6 +115,7 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
     const loadData = async () => {
         try {
             setIsLoading(true);
+            const BASE_URL = import.meta.env.VITE_API_URL || '';
             const params = new URLSearchParams();
 
             const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
@@ -127,9 +128,9 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
             const queryStr = params.toString() ? `?${params.toString()}` : '';
 
             const [statsRes, callsRes, intRes] = await Promise.all([
-                fetch(`${API_URL}/dashboard/stats${queryStr}`),
-                fetch(`${API_URL}/dashboard/recent-calls${queryStr}`),
-                hideIntegrations ? Promise.resolve({ ok: true, json: () => [] }) : fetch(`${API_URL}/dashboard/integrations`)
+                fetch(`${API_URL}/api/dashboard/stats${queryStr}`),
+                fetch(`${API_URL}/api/dashboard/recent-calls${queryStr}`),
+                hideIntegrations ? Promise.resolve({ ok: true, json: () => [] }) : fetch(`${API_URL}/api/dashboard/integrations`)
             ]);
 
             if (statsRes.ok) setStats(await statsRes.json());
