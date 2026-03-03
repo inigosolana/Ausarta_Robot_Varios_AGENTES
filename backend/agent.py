@@ -101,12 +101,21 @@ class DynamicAgent(Agent):
         
         base_rules_to_use = BASE_RULES
         inst_lower = agent_instructions.lower()
-        has_preguntas = any(p in inst_lower for p in ["pregunta 1", "pregunta 2", "pregunta:"])
-        # Detección de tipo de encuesta para el prompt
-        numeric_keywords = ["1 al 10", "0 al 10", "del uno al diez", "numérica", "puntuación", "uno al 10", "uno al diez"]
-        is_numeric = any(kw in inst_lower for kw in numeric_keywords)
-        if "dakota" in agent_name.lower():
+        # Detección de tipo de encuesta (Campo explícito 'survey_type' o fallback por palabras clave)
+        survey_type = agent_config.get("survey_type")
+        
+        is_numeric = (survey_type == 'numeric')
+        has_preguntas = (survey_type in ['open_questions', 'mixed'])
+        
+        # Fallback para agentes antiguos o si n8n aún no lo clasificó
+        if survey_type is None:
+            numeric_keywords = ["1 al 10", "0 al 10", "del uno al diez", "numérica", "puntuación", "uno al 10", "uno al diez"]
+            is_numeric = any(kw in inst_lower for kw in numeric_keywords) or "dakota" in agent_name.lower()
+            has_preguntas = any(p in inst_lower for p in ["pregunta 1", "pregunta 2", "pregunta:"])
+        
+        if survey_type == 'mixed':
             is_numeric = True
+            has_preguntas = True
         
         if is_numeric:
             base_rules_to_use += """

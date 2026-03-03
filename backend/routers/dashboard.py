@@ -144,15 +144,22 @@ async def get_all_results(empresa_id: Optional[int] = None, agent_id: Optional[i
         results = response.data
         
         try:
-            agents_res = supabase.table("agent_config").select("id, instructions, critical_rules").execute()
+            agents_res = supabase.table("agent_config").select("id, instructions, critical_rules, survey_type").execute()
             qs_agents = set()
             agent_critical_rules = {}
             for a in (agents_res.data or []):
-                inst_lower = a.get("instructions", "").lower()
-                has_preguntas = "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower
-                is_numeric = "1 al 10" in inst_lower or "del uno al diez" in inst_lower or "numérica" in inst_lower or "puntuación" in inst_lower
-                if has_preguntas and not is_numeric:
-                    qs_agents.add(str(a["id"]))
+                s_type = a.get("survey_type")
+                if s_type:
+                    if s_type in ['open_questions', 'mixed']:
+                        qs_agents.add(str(a["id"]))
+                else:
+                    # Fallback
+                    inst_lower = a.get("instructions", "").lower()
+                    has_preguntas = "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower
+                    is_numeric = "1 al 10" in inst_lower or "del uno al diez" in inst_lower or "numérica" in inst_lower or "puntuación" in inst_lower
+                    if has_preguntas and not is_numeric:
+                        qs_agents.add(str(a["id"]))
+                
                 if a.get("critical_rules"):
                     agent_critical_rules[str(a["id"])] = a["critical_rules"]
             for res in results:

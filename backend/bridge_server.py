@@ -120,13 +120,19 @@ def get_calls_supabase(limit=50):
         # Obtener tipos de agentes para marcar if is_question_based
         qs_agents = set()
         try:
-            agents_res = supabase.table("agent_config").select("id, instructions").execute()
+            agents_res = supabase.table("agent_config").select("id, instructions, survey_type").execute()
             for a in (agents_res.data or []):
-                inst_lower = (a.get("instructions") or "").lower()
-                has_preguntas = "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower
-                is_numeric = any(kw in inst_lower for kw in ["1 al 10", "0 al 10", "del uno al diez", "uno al 10", "uno al diez", "numérica", "puntuación"])
-                if has_preguntas and not is_numeric:
-                    qs_agents.add(str(a["id"]))
+                s_type = a.get("survey_type")
+                if s_type:
+                    if s_type in ['open_questions', 'mixed']:
+                        qs_agents.add(str(a["id"]))
+                else:
+                    # Fallback
+                    inst_lower = (a.get("instructions") or "").lower()
+                    has_preguntas = "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower
+                    is_numeric = any(kw in inst_lower for kw in ["1 al 10", "0 al 10", "del uno al diez", "uno al 10", "uno al diez", "numérica", "puntuación"])
+                    if has_preguntas and not is_numeric:
+                        qs_agents.add(str(a["id"]))
         except: pass
 
         for c in calls:

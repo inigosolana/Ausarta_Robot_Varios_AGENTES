@@ -57,6 +57,18 @@ async def update_agent(agent_id: str, config: dict):
         db_config["updated_at"] = datetime.utcnow().isoformat()
         
         supabase.table("agent_config").update(db_config).eq("id", int(agent_id)).execute()
+        
+        # Clasificación automática vía n8n (Agent Classifier)
+        if "instructions" in config:
+            try:
+                import aiohttp
+                import os
+                n8n_base = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
+                url = f"{n8n_base}/classify-agent"
+                payload = {"agent_id": agent_id, "instructions": config["instructions"]}
+                async with aiohttp.ClientSession() as sess:
+                    await sess.post(url, json=payload, timeout=2)
+            except: pass
             
         return {"status": "ok", "message": f"Agente {agent_id} actualizado"}
     except Exception as e:
@@ -82,8 +94,20 @@ async def create_agent(config: dict):
         
         res = supabase.table("agent_config").insert(db_config).execute()
         new_agent = res.data[0] if res.data else {}
-        new_agent['id'] = str(new_agent.get('id', ''))
+        new_id = str(new_agent.get('id', ''))
         
+        # Clasificación automática vía n8n (Agent Classifier)
+        try:
+            import aiohttp
+            import os
+            n8n_base = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
+            url = f"{n8n_base}/classify-agent"
+            payload = {"agent_id": new_id, "instructions": db_config["instructions"]}
+            async with aiohttp.ClientSession() as sess:
+                await sess.post(url, json=payload, timeout=2)
+        except: pass
+
+        new_agent['id'] = new_id
         return {"status": "ok", "agent": new_agent}
     except Exception as e:
         logger.error(f"Error creating agent: {e}")
