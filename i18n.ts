@@ -197,7 +197,10 @@ const resources = {
             "Saving...": "Guardando...",
             "Save Profile": "Guardar Perfil",
             "Profile updated successfully": "Perfil actualizado correctamente",
-            "Error updating profile": "Error al actualizar perfil"
+            "Error updating profile": "Error al actualizar perfil",
+            "No Position": "Sin cargo",
+            "Position": "Cargo",
+            "e.g. CEO, Developer, Manager": "ej. CEO, Desarrollador, Manager"
         }
     },
     en: {
@@ -394,7 +397,10 @@ const resources = {
             "Saving...": "Saving...",
             "Save Profile": "Save Profile",
             "Profile updated successfully": "Profile updated successfully",
-            "Error updating profile": "Error updating profile"
+            "Error updating profile": "Error updating profile",
+            "No Position": "No Position",
+            "Position": "Position",
+            "e.g. CEO, Developer, Manager": "e.g. CEO, Developer, Manager"
         }
     },
     eu: {

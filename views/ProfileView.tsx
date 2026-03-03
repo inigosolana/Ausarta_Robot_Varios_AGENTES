@@ -25,6 +25,7 @@ export const ProfileView: React.FC = () => {
 
     // Form state
     const [fullName, setFullName] = useState(profile?.full_name || '');
+    const [position, setPosition] = useState(profile?.position || '');
     const [role, setRole] = useState<UserRole>(profile?.role || 'user');
     const [empresaId, setEmpresaId] = useState<number | null>(profile?.empresa_id || null);
 
@@ -58,6 +59,7 @@ export const ProfileView: React.FC = () => {
                 .from('user_profiles')
                 .update({
                     full_name: fullName,
+                    position: position,
                     role: role,
                     empresa_id: empresaId,
                     updated_at: new Date().toISOString()
@@ -106,6 +108,12 @@ export const ProfileView: React.FC = () => {
                                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{profile.email}</p>
 
                                 <div className="space-y-3">
+                                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                                        <div className="p-1.5 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                                            <Briefcase size={16} className="text-gray-400" />
+                                        </div>
+                                        <span>{profile.position || t('No Position')}</span>
+                                    </div>
                                     <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
                                         <div className="p-1.5 bg-gray-50 dark:bg-gray-700 rounded-lg">
                                             {profile.role === 'superadmin' ? <ShieldCheck size={16} className="text-red-500" /> : profile.role === 'admin' ? <Shield size={16} className="text-blue-500" /> : <User size={16} />}
@@ -159,6 +167,16 @@ export const ProfileView: React.FC = () => {
                                     />
                                 </div>
                                 <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">{t('Position')}</label>
+                                    <input
+                                        type="text"
+                                        value={position}
+                                        onChange={(e) => setPosition(e.target.value)}
+                                        placeholder={t('e.g. CEO, Developer, Manager')}
+                                        className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-600 dark:bg-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
+                                    />
+                                </div>
+                                <div className="col-span-full">
                                     <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">{t('Email Address')}</label>
                                     <input
                                         type="email"

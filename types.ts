@@ -27,6 +27,7 @@ export interface UserProfile {
   role: UserRole;
   empresa_id?: number | null;
   empresas?: Empresa | null;
+  position?: string;
   created_by: string | null;
   is_active: boolean;
   created_at: string;
