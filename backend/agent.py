@@ -22,8 +22,7 @@ from livekit.agents import (
     utils,
     stt,
     AutoSubscribe,
-    llm,
-    pipeline
+    llm
 )
 from livekit.plugins import (
     silero,
@@ -336,14 +335,8 @@ async def entrypoint(ctx: JobContext):
             stt_plugin = deepgram.STT(model="nova-3", language=language)
             logger.info("🎙️ Usando STT: Deepgram Nova-3")
 
-        # Creamos el chat_context con las instrucciones
-        initial_ctx = llm.ChatContext().append(
-            role="system",
-            text=agent_instance.instructions,
-        )
-
-        # Usamos VoicePipelineAgent que es el estándar actual y permite desactivar filtros de ruido
-        assistant = pipeline.VoicePipelineAgent(
+        # --- Crear sesión del agente (AgentSession, compatible con versión instalada) ---
+        session = AgentSession(
             vad=vad_model,
             stt=stt_plugin,
             llm=openai.LLM(
@@ -357,21 +350,20 @@ async def entrypoint(ctx: JobContext):
                 voice=voice_id,
                 language=language
             ),
-            chat_ctx=initial_ctx,
-            fnc_ctx=agent_instance, # Pasamos la instancia de DynamicAgent como contexto de funciones
-            noise_cancellation=None, # <-- ¡CRÍTICO! Desactiva el requerimiento de LiveKit Cloud
-            preemptive_generation=False,
         )
 
-        assistant.start(ctx.room)
-        
         # Guardamos la sesión para poder usarla en herramientas
-        agent_instance.session = assistant
+        agent_instance.session = session
+        
+        await session.start(
+            room=ctx.room,
+            agent=agent_instance,
+        )
         
         # --- SALUDO CONTROLADO ---
         async def say_greeting():
             await asyncio.sleep(1.5)
-            await assistant.say(agent_instance.greeting, allow_interruptions=False)
+            await session.say(agent_instance.greeting, allow_interruptions=False)
             
         asyncio.create_task(say_greeting())
         
@@ -409,8 +401,8 @@ async def entrypoint(ctx: JobContext):
             raw_messages = []
             transcript = ""
             try:
-                if 'assistant' in locals():
-                    for m in assistant.chat_ctx.messages:
+                if 'session' in locals():
+                    for m in session.chat_ctx.messages:
                         if m.content and m.role in ("user", "assistant"):
                             raw_messages.append({"role": m.role, "content": m.content})
                             role_label = "Cliente" if m.role == "user" else "Agente"
