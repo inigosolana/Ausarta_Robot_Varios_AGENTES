@@ -42,8 +42,10 @@ const AgentListView: React.FC = () => {
     const loadEmpresas = async () => {
         setLoading(true);
         try {
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000));
             // Use cached API endpoint
-            const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/empresas`);
+            const fetchPromise = fetch(`${import.meta.env.VITE_API_URL || ''}/api/empresas`);
+            const res = (await Promise.race([fetchPromise, timeoutPromise])) as Response;
             const data = await res.json();
 
             if (Array.isArray(data)) {
@@ -57,12 +59,17 @@ const AgentListView: React.FC = () => {
             console.error("Error loading empresas:", err);
             // Fallback to direct Supabase
             try {
-                let query = supabase.from("empresas").select("*").order("created_at", { ascending: true });
-                if (!isPlatformOwner && profile?.empresa_id) {
-                    query = query.eq('id', profile.empresa_id);
-                }
-                const { data } = await query;
-                setEmpresas(data || []);
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000));
+
+                const fetchSupabase = async () => {
+                    let query = supabase.from("empresas").select("*").order("created_at", { ascending: true });
+                    if (!isPlatformOwner && profile?.empresa_id) {
+                        query = query.eq('id', profile.empresa_id);
+                    }
+                    const { data } = await query;
+                    setEmpresas(data || []);
+                };
+                await Promise.race([fetchSupabase(), timeoutPromise]);
             } catch (e2) {
                 console.error("Fallback also failed:", e2);
             }
@@ -74,32 +81,36 @@ const AgentListView: React.FC = () => {
     const loadCompanyData = async (empresaId: number) => {
         setLoading(true);
         try {
-            // Load Agents
-            const { data: agentsData } = await supabase
-                .from("agent_config")
-                .select("*")
-                .eq("empresa_id", empresaId)
-                .order("created_at", { ascending: false });
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000));
+            const fetchData = async () => {
+                // Load Agents
+                const { data: agentsData } = await supabase
+                    .from("agent_config")
+                    .select("*")
+                    .eq("empresa_id", empresaId)
+                    .order("created_at", { ascending: false });
 
-            const agentIds = (agentsData || []).map(a => a.id);
-            const { data: aiConfigsData } = await supabase
-                .from("ai_config")
-                .select("*")
-                .in("agent_id", agentIds);
+                const agentIds = (agentsData || []).map(a => a.id);
+                const { data: aiConfigsData } = await supabase
+                    .from("ai_config")
+                    .select("*")
+                    .in("agent_id", agentIds);
 
-            const agentsWithAI = (agentsData || []).map(agent => ({
-                ...agent,
-                ai_config: (aiConfigsData || []).find(c => c.agent_id === agent.id)
-            }));
-            setAgents(agentsWithAI);
+                const agentsWithAI = (agentsData || []).map(agent => ({
+                    ...agent,
+                    ai_config: (aiConfigsData || []).find(c => c.agent_id === agent.id)
+                }));
+                setAgents(agentsWithAI);
 
-            // Load Users
-            const { data: usersData } = await supabase
-                .from("user_profiles")
-                .select("*")
-                .eq("empresa_id", empresaId);
-            setCompanyUsers(usersData || []);
+                // Load Users
+                const { data: usersData } = await supabase
+                    .from("user_profiles")
+                    .select("*")
+                    .eq("empresa_id", empresaId);
+                setCompanyUsers(usersData || []);
+            };
 
+            await Promise.race([fetchData(), timeoutPromise]);
         } catch (err) {
             console.error("Error loading company data:", err);
         } finally {

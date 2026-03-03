@@ -283,7 +283,9 @@ async def get_dashboard_stats(empresa_id: Optional[int] = None, agent_id: Option
                 agent_res = supabase.table("agent_config").select("instructions").eq("id", target_agent_id).limit(1).execute()
                 if agent_res.data and len(agent_res.data) > 0:
                     inst = agent_res.data[0].get("instructions", "").lower()
-                    return "pregunta 1" in inst or "pregunta 2" in inst or "pregunta:" in inst
+                    has_preguntas = "pregunta 1" in inst or "pregunta 2" in inst or "pregunta:" in inst
+                    is_numeric = "1 al 10" in inst or "del uno al diez" in inst or "numérica" in inst or "puntuación" in inst
+                    return has_preguntas and not is_numeric
         except: pass
         return False
 
@@ -383,7 +385,9 @@ async def get_all_results(empresa_id: Optional[int] = None, agent_id: Optional[i
             agent_critical_rules = {}
             for a in (agents_res.data or []):
                 inst_lower = a.get("instructions", "").lower()
-                if "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower:
+                has_preguntas = "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower
+                is_numeric = "1 al 10" in inst_lower or "del uno al diez" in inst_lower or "numérica" in inst_lower or "puntuación" in inst_lower
+                if has_preguntas and not is_numeric:
                     qs_agents.add(str(a["id"]))
                 if a.get("critical_rules"):
                     agent_critical_rules[str(a["id"])] = a["critical_rules"]

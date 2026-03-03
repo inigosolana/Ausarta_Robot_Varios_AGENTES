@@ -100,7 +100,9 @@ class DynamicAgent(Agent):
         
         base_rules_to_use = BASE_RULES
         inst_lower = agent_instructions.lower()
-        if "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower:
+        has_preguntas = "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower
+        is_numeric = "1 al 10" in inst_lower or "del uno al diez" in inst_lower or "numérica" in inst_lower or "puntuación" in inst_lower
+        if has_preguntas and not is_numeric:
             base_rules_to_use += """
 REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
 - Como este es un cuestionario de preguntas abiertas, USA el campo 'comentarios' de la herramienta 'guardar_encuesta' para guardar todas las respuestas de las preguntas planteadas recopiladas en forma de texto descriptivo.
@@ -377,11 +379,11 @@ async def entrypoint(ctx: JobContext):
         # Llamamos a on_enter explícitamente para asegurar que el agente salude una vez
         asyncio.create_task(agent_instance.on_enter())
 
-        # Sonido ambiente (reducido volumen aún más para evitar interferencias)
-        background_audio = BackgroundAudioPlayer(
-            ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.05),
-        )
-        await background_audio.start(room=ctx.room, agent_session=session)
+        # Sonido ambiente deshabilitado para evitar eco e interferencias con SIP
+        # background_audio = BackgroundAudioPlayer(
+        #     ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.05),
+        # )
+        # await background_audio.start(room=ctx.room, agent_session=session)
         
         await finished.wait()
     
@@ -391,23 +393,37 @@ async def entrypoint(ctx: JobContext):
     finally:
         logger.info(f"--- 🏁 FIN DE SESIÓN AGENTE (Job: {job_id}) ---")
         data_saved = getattr(agent_instance, 'data_saved', False) if 'agent_instance' in dir() else False
-        if not data_saved:
-            logger.warning(f"⚠️ La sesión terminó sin guardar datos (Survey ID: {survey_id}). Marcando como 'unreached'...")
-            try:
-                fallback_payload = {
-                    "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
-                    "status": "unreached",
-                    "comentarios": "Llamada finalizada sin datos (Posible No Contesta / Cuelgue inmediato)"
-                }
-                server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
-                async def do_fallback():
-                    async with aiohttp.ClientSession() as sess:
-                        url = f"{server_url}/guardar-encuesta"
-                        async with sess.post(url, json=fallback_payload, timeout=5) as r:
-                             logger.info(f"✅ (Fallback) Status guardado como 'unreached'")
-                asyncio.create_task(do_fallback())
-            except Exception as ex:
-                 logger.error(f"❌ (Fallback) Error salvando fallback status: {ex}")
+        
+        transcript = ""
+        try:
+            if 'session' in dir():
+                for m in session.chat_ctx.messages:
+                    if m.role == "user" and m.content:
+                        transcript += f"Cliente: {m.content}\n"
+                    elif m.role == "assistant" and m.content:
+                        transcript += f"Agente: {m.content}\n"
+        except Exception as ex:
+            logger.error(f"Error generando transcripción: {ex}")
+            
+        try:
+            fallback_payload = {
+                "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
+                "transcription": transcript,
+            }
+            if not data_saved:
+                logger.warning(f"⚠️ La sesión terminó sin guardar datos (Survey ID: {survey_id}). Marcando como 'unreached'...")
+                fallback_payload["status"] = "unreached"
+                fallback_payload["comentarios"] = "Llamada finalizada sin datos (Posible No Contesta / Cuelgue inmediato)"
+                
+            server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
+            async def do_final_save():
+                async with aiohttp.ClientSession() as sess:
+                    url = f"{server_url}/guardar-encuesta"
+                    async with sess.post(url, json=fallback_payload, timeout=5) as r:
+                         logger.info(f"✅ Transcripción y datos finales guardados")
+            asyncio.create_task(do_final_save())
+        except Exception as ex:
+             logger.error(f"❌ Error salvando fallback/transcripción: {ex}")
 
 if __name__ == "__main__":
     cli.run_app(server)

@@ -28,26 +28,33 @@ const AgentManagementView: React.FC = () => {
     const loadData = async () => {
         setLoading(true);
         try {
-            // Load empresas
-            let empQuery = supabase.from("empresas").select("*").order("nombre");
-            if (!isPlatformOwner && profile?.empresa_id) {
-                empQuery = empQuery.eq('id', profile.empresa_id);
-            }
-            const { data: empData } = await empQuery;
-            setEmpresas(empData || []);
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000));
 
-            // Load agents - if admin of a company, filter by empresa_id
-            let query = supabase.from("agent_config").select("*, empresas(*)").order("created_at", { ascending: false });
+            const fetchData = async () => {
+                // Load empresas
+                let empQuery = supabase.from("empresas").select("*").order("nombre");
+                if (!isPlatformOwner && profile?.empresa_id) {
+                    empQuery = empQuery.eq('id', profile.empresa_id);
+                }
+                const { data: empData } = await empQuery;
+                setEmpresas(empData || []);
 
-            if (isRole('admin') && !isPlatformOwner && profile?.empresa_id) {
-                // Admin can only see their company's agents
-                query = query.eq("empresa_id", profile.empresa_id);
-            }
+                // Load agents - if admin of a company, filter by empresa_id
+                let query = supabase.from("agent_config").select("*, empresas(*)").order("created_at", { ascending: false });
 
-            const { data: agentsData } = await query;
-            setAgents(agentsData || []);
+                if (isRole('admin') && !isPlatformOwner && profile?.empresa_id) {
+                    // Admin can only see their company's agents
+                    query = query.eq("empresa_id", profile.empresa_id);
+                }
+
+                const { data: agentsData } = await query;
+                setAgents(agentsData || []);
+            };
+
+            await Promise.race([fetchData(), timeoutPromise]);
         } catch (err) {
             console.error("Error loading data:", err);
+            // Si hay timeout u otro error, se reflejará que no se pudo cargar
         } finally {
             setLoading(false);
         }
