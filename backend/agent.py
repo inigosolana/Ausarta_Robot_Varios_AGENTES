@@ -131,13 +131,12 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         logger.info(f"Agente '{agent_name}' creado (Survey: {self.survey_id})")
 
     async def on_enter(self):
-        """Método para lanzar el saludo inicial."""
+        """Método llamado cuando el agente entra en la sesión. Lanza el saludo inicial."""
         if not self.session:
             logger.warning("No session available in on_enter")
             return
         logger.info(f"Saludando en sala: {self.room_name}")
         await asyncio.sleep(1.2)
-        # En VoicePipelineAgent usamos 'say' para mensajes dirigidos
         await self.session.say(self.greeting, allow_interruptions=False)
 
     async def _fire_and_forget_save(self, url, payload):
@@ -360,12 +359,8 @@ async def entrypoint(ctx: JobContext):
             agent=agent_instance,
         )
         
-        # --- SALUDO CONTROLADO ---
-        async def say_greeting():
-            await asyncio.sleep(1.5)
-            await session.say(agent_instance.greeting, allow_interruptions=False)
-            
-        asyncio.create_task(say_greeting())
+        # NOTA: on_enter() del DynamicAgent se encarga del saludo.
+        # NO llamamos a say_greeting() por separado para evitar doble saludo.
         
         # --- EVENTOS ---
         finished = asyncio.Event()
@@ -425,12 +420,12 @@ async def entrypoint(ctx: JobContext):
                     }
                     
                     server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
-                    async def do_final_save():
+                    try:
                         async with aiohttp.ClientSession() as sess:
                             url = f"{server_url}/guardar-encuesta"
-                            await sess.post(url, json=fallback_payload, timeout=5)
-                    
-                    asyncio.create_task(do_final_save())
+                            await asyncio.wait_for(sess.post(url, json=fallback_payload), timeout=5)
+                    except Exception as save_err:
+                        logger.error(f"Error en guardado final: {save_err}")
             except Exception as ex:
                  logger.error(f"❌ Error salvando datos finales: {ex}")
         else:
