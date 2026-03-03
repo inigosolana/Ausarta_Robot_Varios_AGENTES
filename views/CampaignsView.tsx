@@ -15,6 +15,7 @@ interface Campaign {
   status: string; // pending, running, completed, paused
   scheduled_time: string | null;
   created_at: string;
+  empresa_id: number | null;
   total_leads?: number;
   called_leads?: number;
   failed_leads?: number;
@@ -134,9 +135,7 @@ export function CampaignsView() {
 
   useEffect(() => {
     loadCampaigns();
-    if (isPlatformOwner) {
-      loadEmpresas();
-    }
+    loadEmpresas();
   }, [profile, isPlatformOwner]);
 
   useEffect(() => {
@@ -144,8 +143,34 @@ export function CampaignsView() {
   }, [profile, isPlatformOwner, selectedEmpresa]);
 
   const loadEmpresas = async () => {
-    const { data } = await supabase.from('empresas').select('*').order('nombre');
-    if (data) setEmpresas(data);
+    try {
+      const resp = await fetch(`${API_URL}/api/empresas`);
+      if (resp.ok) {
+        const data = await resp.json();
+        // data here is a list of all companies
+        let filtered = data;
+
+        // If not platform owner, restrict to their own company
+        if (!isPlatformOwner && profile?.empresa_id) {
+          filtered = data.filter((e: Empresa) => e.id === profile.empresa_id);
+        }
+
+        setEmpresas(Array.isArray(filtered) ? filtered : []);
+      }
+    } catch (e) {
+      console.error("Error loading empresas from API:", e);
+      // Fallback to Supabase direct if API fails
+      try {
+        let query = supabase.from('empresas').select('*').order('nombre');
+        if (!isPlatformOwner && profile?.empresa_id) {
+          query = query.eq('id', profile.empresa_id);
+        }
+        const { data } = await query;
+        if (data) setEmpresas(data);
+      } catch (e2) {
+        console.error("Fallback loadEmpresas failed:", e2);
+      }
+    }
   };
 
   const loadAgents = async () => {
@@ -249,6 +274,11 @@ export function CampaignsView() {
     });
   };
 
+  const handleCreateNewForCompany = (empId: number) => {
+    setSelectedEmpresa(empId);
+    setShowCreate(true);
+  };
+
   const handleCreate = async () => {
     if (!name || !selectedAgent) {
       setError(t('Please complete the required fields', 'Por favor, completa los campos requeridos'));
@@ -276,7 +306,7 @@ export function CampaignsView() {
         campaign: {
           name,
           agent_id: selectedAgent,
-          empresa_id: selectedAgentData ? (selectedAgentData as any).empresa_id : selectedEmpresa || profile?.empresa_id,
+          empresa_id: selectedEmpresa || (selectedAgentData ? (selectedAgentData as any).empresa_id : profile?.empresa_id),
           scheduled_time: scheduledTime ? new Date(scheduledTime).toISOString() : null,
           status: 'pending',
           retry_interval: retryInterval || 60
@@ -871,81 +901,130 @@ export function CampaignsView() {
       </div>
 
       <div className="space-y-8">
-        {Object.entries(groupedCampaignsByCompany).length === 0 ? (
+        {empresas.length === 0 && campaigns.length === 0 ? (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center text-gray-500">
-            {t("No campaigns found. Create your first campaign to get started.", "No se encontraron campañas. Crea tu primera campaña para empezar.")}
+            {t("No companies or campaigns found.", "No se encontraron empresas ni campañas.")}
           </div>
         ) : (
-          groupedEntries.sort((a, b) => a[0].localeCompare(b[0])).map(([companyName, companyCampaigns]) => (
-            <div key={companyName} className="space-y-3">
-              <div className="flex items-center gap-2 px-1">
-                <Building2 className="w-5 h-5 text-blue-600" />
-                <h2 className="text-lg font-bold text-gray-800 uppercase tracking-wider">{companyName}</h2>
-                <div className="h-px flex-1 bg-gray-100 ml-2"></div>
-                <span className="text-xs font-medium text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full border border-gray-100">
-                  {companyCampaigns.length} {companyCampaigns.length === 1 ? t("Campaña", "Campaña") : t("Campañas", "Campañas")}
-                </span>
-              </div>
+          empresas.map((empresa) => {
+            const companyCampaigns = campaigns.filter(c => c.empresa_id === empresa.id);
+            return (
+              <div key={empresa.id} className="space-y-3">
+                <div className="flex items-center justify-between px-1">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-5 h-5 text-blue-600" />
+                    <h2 className="text-lg font-bold text-gray-800 uppercase tracking-wider">{empresa.nombre}</h2>
+                    <span className="text-xs font-medium text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full border border-gray-100">
+                      {companyCampaigns.length} {companyCampaigns.length === 1 ? t("Campaña", "Campaña") : t("Campañas", "Campañas")}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleCreateNewForCompany(empresa.id)}
+                    className="flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-xs font-semibold"
+                  >
+                    <Plus className="w-3 h-3" />
+                    {t("New Campaign", "Nueva Campaña")}
+                  </button>
+                </div>
 
+                <div className="h-px bg-gray-100 mb-4"></div>
+
+                {companyCampaigns.length === 0 ? (
+                  <div className="bg-gray-50 rounded-xl border border-gray-100 p-8 text-center text-gray-400 flex flex-col items-center gap-2">
+                    <History className="w-8 h-8 opacity-20" />
+                    <p className="text-sm">{t("No campaigns for this company yet.", "Aún no hay campañas para esta empresa.")}</p>
+                    <button
+                      onClick={() => handleCreateNewForCompany(empresa.id)}
+                      className="text-blue-600 text-xs font-medium hover:underline"
+                    >
+                      {t("Create the first one", "Crea la primera")}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <table className="w-full text-left">
+                      <thead className="bg-gray-50 border-b border-gray-100">
+                        <tr>
+                          <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Campaign Name", "Nombre de la Campaña")}</th>
+                          <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Status", "Estado")}</th>
+                          <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Progress", "Progreso")}</th>
+                          <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center">{t("Scheduled", "Planificado")}</th>
+                          <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Actions", "Acciones")}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {companyCampaigns.map((campaign) => (
+                          <tr key={campaign.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => loadCampaignDetails(campaign)}>
+                            <td className="px-6 py-4 text-sm font-medium text-gray-900">{campaign.name}</td>
+                            <td className="px-6 py-4">
+                              <StatusBadge status={campaign.status} />
+                            </td>
+                            <td className="px-6 py-4 w-48">
+                              <div className="flex flex-col gap-1">
+                                <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-green-500"
+                                    style={{ width: `${Math.min(100, ((campaign.called_leads || 0) / (campaign.total_leads || 1)) * 100)}%` }}
+                                  />
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  {campaign.called_leads || 0} / {campaign.total_leads || 0} {t("calls", "llamadas")}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-500 font-mono text-center">
+                              {campaign.scheduled_time ? new Date(campaign.scheduled_time).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : '-'}
+                            </td>
+                            <td className="px-6 py-4 text-right text-sm font-medium" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  onClick={() => openEditModal(campaign)}
+                                  className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                  title="Edit Campaign"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm(t('Delete campaign?', '¿Eliminar campaña?'))) {
+                                      handleDelete(campaign.id);
+                                    }
+                                  }}
+                                  className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                  title="Delete Campaign"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+
+        {/* Handle campaigns without company assigned (if any) */}
+        {(() => {
+          const orphaned = campaigns.filter(c => !c.empresa_id || !empresas.find(e => e.id === c.empresa_id));
+          if (orphaned.length === 0) return null;
+          return (
+            <div className="space-y-3 mt-10 opacity-60">
+              <div className="flex items-center gap-2 px-1">
+                <h2 className="text-lg font-bold text-gray-500 uppercase tracking-wider italic">{t("Orphaned Campaigns (No Company)", "Campañas Huérfanas (Sin Empresa)")}</h2>
+              </div>
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                 <table className="w-full text-left">
-                  <thead className="bg-gray-50 border-b border-gray-100">
-                    <tr>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Campaign Name", "Nombre de la Campaña")}</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Status", "Estado")}</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Progress", "Progreso")}</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Scheduled", "Planificado")}</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Created", "Creado")}</th>
-                      <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("Actions", "Acciones")}</th>
-                    </tr>
-                  </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {companyCampaigns.map((campaign) => (
+                    {orphaned.map((campaign) => (
                       <tr key={campaign.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => loadCampaignDetails(campaign)}>
                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{campaign.name}</td>
-                        <td className="px-6 py-4">
+                        <td className="px-6 py-4 text-right">
                           <StatusBadge status={campaign.status} />
-                        </td>
-                        <td className="px-6 py-4 w-48">
-                          <div className="flex flex-col gap-1">
-                            <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-green-500"
-                                style={{ width: `${((campaign.called_leads || 0) / (campaign.total_leads || 1)) * 100}%` }}
-                              />
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              {campaign.called_leads || 0} / {campaign.total_leads || 0} {t("calls", "llamadas")}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-500 font-mono">
-                          {campaign.scheduled_time ? new Date(campaign.scheduled_time).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : '-'}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-500">
-                          {campaign.created_at ? new Date(campaign.created_at).toLocaleDateString() : '-'}
-                        </td>
-                        <td className="px-6 py-4 text-right text-sm font-medium" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex justify-end gap-2">
-                            <button
-                              onClick={() => openEditModal(campaign)}
-                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                              title="Edit Campaign"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (window.confirm(t('Delete campaign?', '¿Eliminar campaña?'))) {
-                                  handleDelete(campaign.id);
-                                }
-                              }}
-                              className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                              title="Delete Campaign"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
                         </td>
                       </tr>
                     ))}
@@ -953,8 +1032,8 @@ export function CampaignsView() {
                 </table>
               </div>
             </div>
-          ))
-        )}
+          );
+        })()}
       </div>
       {renderEditModal()}
     </div>
