@@ -21,10 +21,11 @@ from livekit.agents import (
     room_io,
     utils,
     stt,
-    AutoSubscribe
+    AutoSubscribe,
+    llm,
+    pipeline
 )
 from livekit.plugins import (
-    noise_cancellation,
     silero,
     openai,
     deepgram, 
@@ -137,10 +138,8 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
             return
         logger.info(f"Saludando en sala: {self.room_name}")
         await asyncio.sleep(1.2)
-        await self.session.generate_reply(
-            instructions=f"Di el saludo inicial: '{self.greeting}'",
-            allow_interruptions=False
-        )
+        # En VoicePipelineAgent usamos 'say' para mensajes dirigidos
+        await self.session.say(self.greeting, allow_interruptions=False)
 
     async def _fire_and_forget_save(self, url, payload):
         try:
@@ -211,10 +210,7 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         Debes proporcionar obligatoriamente el mensaje de despedida.
         """
         logger.info(f"Forzando despedida: {mensaje_despedida_manual}")
-        asyncio.create_task(self.session.generate_reply(
-            instructions=f"Di exactamente: '{mensaje_despedida_manual}' y no digas nada más.",
-            allow_interruptions=False
-        ))
+        asyncio.create_task(self.session.say(mensaje_despedida_manual, allow_interruptions=False))
         
         async def delayed_hangup():
             await asyncio.sleep(8.0) 
@@ -321,7 +317,7 @@ async def entrypoint(ctx: JobContext):
         vad_model, agent_config = await asyncio.gather(vad_task, config_task)
         logger.info(f"✅ [{job_id}] VAD y configuración cargados.")
 
-        # --- PASO 4: Crear el agente ---
+        # --- PASO 4: Crear el asistente ---
         agent_instance = DynamicAgent(room_name=room_name, agent_config=agent_config)
         
         llm_model = agent_config.get("llm_model", "llama-3.3-70b-versatile")
@@ -332,16 +328,21 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"🤖 [{job_id}] Config: LLM='{llm_model}', Voice='{voice_id}', Lang='{language}', STT='{stt_provider}'")
 
         if language in ["eu", "gl"] or stt_provider == "openai":
-            # Deepgram Nova-3 no soporta Euskera ni Gallego, forzamos OpenAI
-            if language in ["eu", "gl"] and stt_provider == "deepgram":
-                logger.warning(f"⚠️ Idioma '{language}' no soportado por Deepgram STT en Nova-3. Usando OpenAI como fallback.")
             stt_plugin = openai.STT(language=language)
             logger.info("🎙️ Usando STT: OpenAI Whisper")
         else:
             stt_plugin = deepgram.STT(model="nova-3", language=language)
             logger.info("🎙️ Usando STT: Deepgram Nova-3")
 
-        session = AgentSession(
+        # Creamos el chat_context con las instrucciones
+        initial_ctx = llm.ChatContext().append(
+            role="system",
+            text=agent_instance.instructions,
+        )
+
+        # Usamos VoicePipelineAgent que es el estándar actual y permite desactivar filtros de ruido
+        assistant = pipeline.VoicePipelineAgent(
+            vad=vad_model,
             stt=stt_plugin,
             llm=openai.LLM(
                 model=llm_model, 
@@ -354,14 +355,25 @@ async def entrypoint(ctx: JobContext):
                 voice=voice_id,
                 language=language
             ),
-            vad=vad_model,
+            chat_ctx=initial_ctx,
+            fnc_ctx=agent_instance, # Pasamos la instancia de DynamicAgent como contexto de funciones
+            noise_cancellation=None, # <-- ¡CRÍTICO! Desactiva el requerimiento de LiveKit Cloud
             preemptive_generation=False,
         )
 
-        @session.on("user_speech_committed")
-        def on_user_speech(msg: stt.SpeechEvent):
-            logger.info(f"🗣️ [{job_id}] USUARIO: {msg.alternatives[0].text}")
+        assistant.start(ctx.room)
         
+        # Guardamos la sesión para poder usarla en herramientas
+        agent_instance.session = assistant
+        
+        # --- SALUDO CONTROLADO ---
+        async def say_greeting():
+            await asyncio.sleep(1.5)
+            await assistant.say(agent_instance.greeting, allow_interruptions=False)
+            
+        asyncio.create_task(say_greeting())
+        
+        # --- EVENTOS ---
         finished = asyncio.Event()
 
         @ctx.room.on("disconnected")
@@ -371,33 +383,16 @@ async def entrypoint(ctx: JobContext):
 
         @ctx.room.on("participant_disconnected")
         def on_participant_disconnected(participant: rtc.RemoteParticipant):
-            logger.info(f"[{job_id}] Participante {participant.identity} se desconectó.")
             if not participant.identity.startswith("agent-"):
-                logger.info(f"[{job_id}] O Cliente se fue de la sala {room_name}. Procediendo a colgar la sala completamente.")
-                # Llamar API para destruir sala directamente, el servidor cortará a este agente de inmediato.
+                logger.info(f"[{job_id}] Cliente se desconectó. Terminando sala.")
                 async def force_hangup_room():
                     url = f"{agent_instance.server_url}/colgar"
                     try:
                          async with aiohttp.ClientSession() as http_sess:
                              await http_sess.post(url, timeout=5, json={"nombre_sala": room_name})
-                    except Exception as he:
-                         logger.error(f"Error forzando cuelgue: {he}")
+                    except: pass
                 asyncio.create_task(force_hangup_room())
 
-        # Iniciar sesión
-        agent_instance.session = session
-        await session.start(agent=agent_instance, room=ctx.room)
-        
-        # --- SALUDO CONTROLADO ---
-        # Llamamos a on_enter explícitamente para asegurar que el agente salude una vez
-        asyncio.create_task(agent_instance.on_enter())
-
-        # Sonido ambiente deshabilitado para evitar eco e interferencias con SIP
-        # background_audio = BackgroundAudioPlayer(
-        #     ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.05),
-        # )
-        # await background_audio.start(room=ctx.room, agent_session=session)
-        
         await finished.wait()
     
     except Exception as e:
@@ -410,15 +405,15 @@ async def entrypoint(ctx: JobContext):
         raw_messages = []
         transcript = ""
         try:
-            if 'session' in dir():
-                for m in session.chat_ctx.messages:
+            if 'assistant' in locals():
+                for m in assistant.chat_ctx.messages:
                     if m.content:
                         raw_messages.append({"role": m.role, "content": m.content})
                         role_label = "Cliente" if m.role == "user" else "Agente"
                         transcript += f"{role_label}: {m.content}\n"
                 
                 # Enviar a n8n para procesamiento externo (sin carga en Python)
-                if 'agent_instance' in dir():
+                if 'agent_instance' in locals():
                     asyncio.create_task(agent_instance.notify_n8n_transcription(survey_id, raw_messages))
         except Exception as ex:
             logger.error(f"Error procesando historia: {ex}")
