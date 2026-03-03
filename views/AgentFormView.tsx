@@ -304,6 +304,21 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
                                     />
                                 </div>
+                                {!isPlatformOwner && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">{t('Agent Language', 'Idioma del Agente')}</label>
+                                        <select
+                                            value={aiConfig.language || 'es'}
+                                            onChange={(e) => setAiConfig({ ...aiConfig, language: e.target.value })}
+                                            className="w-full px-3 py-2 border rounded-lg bg-white"
+                                        >
+                                            <option value="es">{t('Spanish', 'Español')} (es)</option>
+                                            <option value="en">{t('English', 'Inglés')} (en)</option>
+                                            <option value="eu">{t('Basque', 'Euskera')} (eu)</option>
+                                            <option value="gl">{t('Galician', 'Gallego')} (gl)</option>
+                                        </select>
+                                    </div>
+                                )}
                                 {isPlatformOwner ? (
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Company / Project', 'Empresa / Proyecto')} *</label>
@@ -345,28 +360,32 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                 </div>
                             )}
 
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Initial Greeting', 'Saludo Inicial')}</label>
-                                <input
-                                    type="text"
-                                    value={formData.greeting}
-                                    onChange={(e) => setFormData({ ...formData, greeting: e.target.value })}
-                                    placeholder={t('Hello, I am...', 'Hola, soy...')}
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                />
-                                <p className="text-xs text-gray-400 mt-1">{t('The first thing the agent will say when answering.', 'Lo primero que dirá el agente al contestar.')}</p>
-                            </div>
+                            {isPlatformOwner && (
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Initial Greeting', 'Saludo Inicial')}</label>
+                                    <input
+                                        type="text"
+                                        value={formData.greeting}
+                                        onChange={(e) => setFormData({ ...formData, greeting: e.target.value })}
+                                        placeholder={t('Hello, I am...', 'Hola, soy...')}
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                    />
+                                    <p className="text-xs text-gray-400 mt-1">{t('The first thing the agent will say when answering.', 'Lo primero que dirá el agente al contestar.')}</p>
+                                </div>
+                            )}
 
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Description', 'Descripción')}</label>
-                                <textarea
-                                    rows={2}
-                                    value={formData.description}
-                                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                    placeholder={t('Brief description of the agent\'s purpose', 'Breve descripción del propósito del agente')}
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none resize-none"
-                                />
-                            </div>
+                            {isPlatformOwner && (
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Description', 'Descripción')}</label>
+                                    <textarea
+                                        rows={2}
+                                        value={formData.description}
+                                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                        placeholder={t('Brief description of the agent\'s purpose', 'Breve descripción del propósito del agente')}
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none resize-none"
+                                    />
+                                </div>
+                            )}
                         </section>
 
                         {/* Instructions */}
@@ -441,99 +460,122 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                             <p className="text-xs text-gray-500">{t('Define the agent\'s personality, mission, and rules here.', 'Define aquí la personalidad, misión y reglas del agente.')}</p>
                         </section>
 
-                        {/* Critical Rules */}
-                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                                <X size={20} className="text-red-500" />
-                                {t('Critical Rules (Non-negotiable)', 'Reglas Críticas (No negociables)')}
-                            </h3>
-                            <textarea
-                                rows={5}
-                                value={formData.critical_rules}
-                                onChange={(e) => setFormData({ ...formData, critical_rules: e.target.value })}
-                                placeholder={t('Ex: Do not hang up without thanking first. Do not give technical information. Repeat if the client does not understand...', 'Ej: No colgar sin antes agradecer. No dar información técnica. Repetir si el cliente no entiende...')}
-                                className="w-full px-4 py-3 border border-red-100 rounded-lg focus:ring-2 focus:ring-red-500/20 outline-none font-mono text-sm bg-red-50/20"
-                            />
-                            <p className="text-xs text-gray-500">{t('These rules will be applied with maximum priority over any other instruction.', 'Estas reglas se aplicarán con máxima prioridad sobre cualquier otra instrucción.')}</p>
-                        </section>
+                        {/* Critical Rules (Only for Admins) */}
+                        {isPlatformOwner && (
+                            <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                                    <X size={20} className="text-red-500" />
+                                    {t('Critical Rules (Non-negotiable)', 'Reglas Críticas (No negociables)')}
+                                </h3>
+                                <textarea
+                                    rows={5}
+                                    value={formData.critical_rules}
+                                    onChange={(e) => setFormData({ ...formData, critical_rules: e.target.value })}
+                                    placeholder={t('Ex: Do not hang up without thanking first. Do not give technical information. Repeat if the client does not understand...', 'Ej: No colgar sin antes agradecer. No dar información técnica. Repetir si el cliente no entiende...')}
+                                    className="w-full px-4 py-3 border border-red-100 rounded-lg focus:ring-2 focus:ring-red-500/20 outline-none font-mono text-sm bg-red-50/20"
+                                />
+                                <p className="text-xs text-gray-500">{t('These rules will be applied with maximum priority over any other instruction.', 'Estas reglas se aplicarán con máxima prioridad sobre cualquier otra instrucción.')}</p>
+                            </section>
+                        )}
                     </div>
 
                     {/* Right Column: AI Config */}
                     <div className="space-y-6">
-                        {/* LLM Config */}
+                        {/* LLM Config (Only Provider/Model for Admins) */}
                         <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
                             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                                <Brain size={16} /> {t('Language Model (LLM)', 'Modelo de Lenguaje (LLM)')}
+                                <Brain size={16} /> {t('Intelligence and Language', 'Inteligencia e Idioma')}
                             </h3>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
-                                <select
-                                    value={aiConfig.llm_provider}
-                                    onChange={(e) => {
-                                        const p = e.target.value;
-                                        let m = 'llama-3.3-70b-versatile';
-                                        if (p === 'google') m = 'models/gemini-2.0-flash';
-                                        if (p === 'openai') m = 'gpt-4o';
-                                        if (p === 'deepseek') m = 'deepseek-chat';
-                                        setAiConfig({ ...aiConfig, llm_provider: p, llm_model: m });
-                                    }}
-                                    className="w-full px-3 py-2 border rounded-lg bg-gray-50"
-                                >
-                                    <option value="openai">OpenAI (GPT-4o)</option>
-                                    <option value="groq">Groq (Llama 3, Mixtral)</option>
-                                    <option value="google">Google Gemini</option>
-                                    <option value="deepseek">DeepSeek (V3, R1)</option>
-                                </select>
-                            </div>
 
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Agent Language', 'Idioma del Agente')}</label>
-                                <select
-                                    value={aiConfig.language || 'es'}
-                                    onChange={(e) => setAiConfig({ ...aiConfig, language: e.target.value })}
-                                    className="w-full px-3 py-2 border rounded-lg bg-white"
-                                >
-                                    <option value="es">{t('Spanish', 'Español')} (es)</option>
-                                    <option value="en">{t('English', 'Inglés')} (en)</option>
-                                    <option value="eu">{t('Basque', 'Euskera')} (eu)</option>
-                                    <option value="gl">{t('Galician', 'Gallego')} (gl)</option>
-                                </select>
-                            </div>
+                            {isPlatformOwner && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
+                                    <select
+                                        value={aiConfig.llm_provider}
+                                        onChange={(e) => {
+                                            const p = e.target.value;
+                                            let m = 'llama-3.3-70b-versatile';
+                                            if (p === 'google') m = 'models/gemini-2.0-flash';
+                                            if (p === 'openai') m = 'gpt-4o';
+                                            if (p === 'deepseek') m = 'deepseek-chat';
+                                            setAiConfig({ ...aiConfig, llm_provider: p, llm_model: m });
+                                        }}
+                                        className="w-full px-3 py-2 border rounded-lg bg-gray-50"
+                                    >
+                                        <option value="openai">OpenAI (GPT-4o)</option>
+                                        <option value="groq">Groq (Llama 3, Mixtral)</option>
+                                        <option value="google">Google Gemini</option>
+                                        <option value="deepseek">DeepSeek (V3, R1)</option>
+                                    </select>
+                                </div>
+                            )}
 
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
-                                <select
-                                    value={aiConfig.llm_model}
-                                    onChange={(e) => setAiConfig({ ...aiConfig, llm_model: e.target.value })}
-                                    className="w-full px-3 py-2 border rounded-lg bg-white"
-                                >
-                                    {aiConfig.llm_provider === 'openai' ? (
-                                        <>
-                                            <option value="gpt-4o">GPT-4o (High Intelligence)</option>
-                                            <option value="gpt-4o-mini">GPT-4o mini (Fast & Cheap)</option>
-                                            <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                                        </>
-                                    ) : aiConfig.llm_provider === 'google' ? (
-                                        <>
-                                            <option value="models/gemini-2.0-flash">Gemini 2.0 Flash (Fast)</option>
-                                            <option value="models/gemini-2.0-pro-exp-02-05">Gemini 2.0 Pro (Most Powerful)</option>
-                                            <option value="models/gemini-2.0-flash-lite">Gemini 2.0 Flash Lite</option>
-                                            <option value="models/gemini-1.5-pro">Gemini 1.5 Pro</option>
-                                            <option value="models/gemini-1.5-flash">Gemini 1.5 Flash</option>
-                                        </>
-                                    ) : aiConfig.llm_provider === 'deepseek' ? (
-                                        <>
-                                            <option value="deepseek-chat">DeepSeek-V3 (Chat)</option>
-                                            <option value="deepseek-reasoner">DeepSeek-R1 (Reasoning)</option>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
-                                            <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
-                                        </>
-                                    )}
-                                </select>
-                            </div>
+                            {isPlatformOwner && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Agent Language', 'Idioma del Agente')}</label>
+                                    <select
+                                        value={aiConfig.language || 'es'}
+                                        onChange={(e) => setAiConfig({ ...aiConfig, language: e.target.value })}
+                                        className="w-full px-3 py-2 border rounded-lg bg-white"
+                                    >
+                                        <option value="es">{t('Spanish', 'Español')} (es)</option>
+                                        <option value="en">{t('English', 'Inglés')} (en)</option>
+                                        <option value="eu">{t('Basque', 'Euskera')} (eu)</option>
+                                        <option value="gl">{t('Galician', 'Gallego')} (gl)</option>
+                                    </select>
+                                </div>
+                            )}
+
+                            {!isPlatformOwner && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Intelligence Level', 'Nivel de Inteligencia')}</label>
+                                    <select
+                                        value={aiConfig.llm_model}
+                                        onChange={(e) => setAiConfig({ ...aiConfig, llm_model: e.target.value })}
+                                        className="w-full px-3 py-2 border rounded-lg bg-white"
+                                    >
+                                        <option value="gpt-4o">Alta (Recomendado)</option>
+                                        <option value="gpt-4o-mini">Básica (Rápido)</option>
+                                    </select>
+                                </div>
+                            )}
+
+                            {isPlatformOwner && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
+                                    <select
+                                        value={aiConfig.llm_model}
+                                        onChange={(e) => setAiConfig({ ...aiConfig, llm_model: e.target.value })}
+                                        className="w-full px-3 py-2 border rounded-lg bg-white"
+                                    >
+                                        {aiConfig.llm_provider === 'openai' ? (
+                                            <>
+                                                <option value="gpt-4o">GPT-4o (High Intelligence)</option>
+                                                <option value="gpt-4o-mini">GPT-4o mini (Fast & Cheap)</option>
+                                                <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                                            </>
+                                        ) : aiConfig.llm_provider === 'google' ? (
+                                            <>
+                                                <option value="models/gemini-2.0-flash">Gemini 2.0 Flash (Fast)</option>
+                                                <option value="models/gemini-2.0-pro-exp-02-05">Gemini 2.0 Pro (Most Powerful)</option>
+                                                <option value="models/gemini-2.0-flash-lite">Gemini 2.0 Flash Lite</option>
+                                                <option value="models/gemini-1.5-pro">Gemini 1.5 Pro</option>
+                                                <option value="models/gemini-1.5-flash">Gemini 1.5 Flash</option>
+                                            </>
+                                        ) : aiConfig.llm_provider === 'deepseek' ? (
+                                            <>
+                                                <option value="deepseek-chat">DeepSeek-V3 (Chat)</option>
+                                                <option value="deepseek-reasoner">DeepSeek-R1 (Reasoning)</option>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
+                                                <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+                                            </>
+                                        )}
+                                    </select>
+                                </div>
+                            )}
                         </section>
 
                         {/* TTS Config */}
@@ -541,103 +583,90 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                             <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
                                 <Speaker size={16} /> {t('Voice (TTS)', 'Voz (TTS)')}
                             </h3>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
-                                <select
-                                    value={aiConfig.tts_provider}
-                                    onChange={(e) => setAiConfig({ ...aiConfig, tts_provider: e.target.value })}
-                                    className="w-full px-3 py-2 border rounded-lg bg-gray-50"
-                                >
-                                    <option value="cartesia">Cartesia (Sonic)</option>
-                                    <option value="openai">OpenAI TTS</option>
-                                    <option value="elevenlabs">ElevenLabs</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
-                                <input
-                                    type="text"
-                                    value={aiConfig.tts_model}
-                                    onChange={(e) => setAiConfig({ ...aiConfig, tts_model: e.target.value })}
-                                    className="w-full px-3 py-2 border rounded-lg"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Voice (Voice ID)', 'Voz (Voice ID)')}</label>
-                                {aiConfig.tts_provider === 'elevenlabs' ? (
+                            {isPlatformOwner && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
                                     <select
-                                        value={aiConfig.tts_voice}
-                                        onChange={(e) => setAiConfig({ ...aiConfig, tts_voice: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg font-mono text-xs bg-white"
+                                        value={aiConfig.tts_provider}
+                                        onChange={(e) => setAiConfig({ ...aiConfig, tts_provider: e.target.value })}
+                                        className="w-full px-3 py-2 border rounded-lg bg-gray-50"
                                     >
-                                        <option value="gD1lexrzCvxYPHUuTDs3">{t('Spanish (Gisela)', 'Española (Gisela)')}</option>
-                                        {hasPermission('premium_voice') && (
-                                            <option value="a2f12ebd-80df-4de7-83f3-809599135b1d">{t('Ausarta Voice (Premium)', 'Voz Ausarta (Premium)')}</option>
-                                        )}
-                                        {/* Fallback for custom IDs if already set */}
-                                        {!["gD1lexrzCvxYPHUuTDs3", "a2f12ebd-80df-4de7-83f3-809599135b1d"].includes(aiConfig.tts_voice) && (
-                                            <option value={aiConfig.tts_voice}>ID: {aiConfig.tts_voice}</option>
-                                        )}
+                                        <option value="cartesia">Cartesia (Sonic)</option>
+                                        <option value="openai">OpenAI TTS</option>
+                                        <option value="elevenlabs">ElevenLabs</option>
                                     </select>
-                                ) : aiConfig.tts_provider === 'cartesia' ? (
-                                    <select
-                                        value={aiConfig.tts_voice}
-                                        onChange={(e) => setAiConfig({ ...aiConfig, tts_voice: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg font-mono text-xs bg-white"
-                                    >
-                                        <option value="cefcb124-080b-4655-b31f-932f3ee743de">{t('Spanish - Female', 'Castellano - Chica')}</option>
-                                        <option value="3380a516-6acc-4389-97c8-68273b540dd3">{t('Spanish - Male', 'Castellano - Chico')}</option>
-                                        {hasPermission('premium_voice') && (
-                                            <option value="44c5567b-1b68-4873-8231-4e7660f749ad">{t('Spanish - Female (Ausarta)', 'Castellano - Chica (Ausarta)')}</option>
-                                        )}
-                                        <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">{t('Basque - Female', 'Euskera - Chica')}</option>
-                                        <option value="a62209c3-9f0a-4474-9b51-84b191593f49">{t('Basque - Male', 'Euskera - Chico')}</option>
-                                        <option value="96eade6e-d863-4f9a-8b08-5d7b74d1643b">{t('Galician - Female', 'Gallego - Chica')}</option>
-                                        <option value="4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2">{t('Galician - Male', 'Gallego - Chico')}</option>
-                                        <option value="62ae83ad-4f6a-430b-af41-a9bede9286ca">{t('English - Female', 'Inglés - Chica')}</option>
-                                        <option value="0ad65e7f-006c-47cf-bd31-52279d487913">{t('English - Male', 'Inglés - Chico')}</option>
-                                        {!["cefcb124-080b-4655-b31f-932f3ee743de", "3380a516-6acc-4389-97c8-68273b540dd3", "44c5567b-1b68-4873-8231-4e7660f749ad", "a62209c3-9f0a-4474-9b51-84b191593f49", "99543693-cf6e-4e1d-9259-2e5cc9a0f76b", "4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2", "96eade6e-d863-4f9a-8b08-5d7b74d1643b", "62ae83ad-4f6a-430b-af41-a9bede9286ca", "0ad65e7f-006c-47cf-bd31-52279d487913"].includes(aiConfig.tts_voice) && (
-                                            <option value={aiConfig.tts_voice}>{t('Custom', 'Personalizado')}: {aiConfig.tts_voice}</option>
-                                        )}
-                                    </select>
-                                ) : (
+                                </div>
+                            )}
+                            {isPlatformOwner && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
                                     <input
                                         type="text"
-                                        value={aiConfig.tts_voice}
-                                        onChange={(e) => setAiConfig({ ...aiConfig, tts_voice: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg font-mono text-xs"
-                                        placeholder={t('Type voice ID', 'Escribe el ID de voz')}
+                                        value={aiConfig.tts_model}
+                                        onChange={(e) => setAiConfig({ ...aiConfig, tts_model: e.target.value })}
+                                        className="w-full px-3 py-2 border rounded-lg"
                                     />
-                                )}
+                                </div>
+                            )}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Select Voice', 'Seleccionar Voz')}</label>
+                                <select
+                                    value={aiConfig.tts_voice}
+                                    onChange={(e) => setAiConfig({ ...aiConfig, tts_voice: e.target.value })}
+                                    className="w-full px-3 py-2 border rounded-lg font-medium text-sm bg-white"
+                                >
+                                    <optgroup label={t('Spanish', 'Español')}>
+                                        <option value="cefcb124-080b-4655-b31f-932f3ee743de">{t('Female (Castilian)', 'Chica (Castellano)')}</option>
+                                        <option value="3380a516-6acc-4389-97c8-68273b540dd3">{t('Male (Castilian)', 'Chico (Castellano)')}</option>
+                                        <option value="44c5567b-1b68-4873-8231-4e7660f749ad">{t('Female (Ausarta)', 'Chica (Ausarta)')}</option>
+                                    </optgroup>
+                                    <optgroup label={t('Basque', 'Euskera')}>
+                                        <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">{t('Female', 'Chica')}</option>
+                                        <option value="a62209c3-9f0a-4474-9b51-84b191593f49">{t('Male', 'Chico')}</option>
+                                    </optgroup>
+                                    <optgroup label={t('Galician', 'Gallego')}>
+                                        <option value="96eade6e-d863-4f9a-8b08-5d7b74d1643b">{t('Female', 'Chica')}</option>
+                                        <option value="4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2">{t('Male', 'Chico')}</option>
+                                    </optgroup>
+                                    <optgroup label={t('English', 'Inglés')}>
+                                        <option value="62ae83ad-4f6a-430b-af41-a9bede9286ca">{t('Female', 'Chica')}</option>
+                                        <option value="0ad65e7f-006c-47cf-bd31-52279d487913">{t('Male', 'Chico')}</option>
+                                    </optgroup>
+                                    {isPlatformOwner && !["cefcb124-080b-4655-b31f-932f3ee743de", "3380a516-6acc-4389-97c8-68273b540dd3", "44c5567b-1b68-4873-8231-4e7660f749ad", "a62209c3-9f0a-4474-9b51-84b191593f49", "99543693-cf6e-4e1d-9259-2e5cc9a0f76b", "4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2", "96eade6e-d863-4f9a-8b08-5d7b74d1643b", "62ae83ad-4f6a-430b-af41-a9bede9286ca", "0ad65e7f-006c-47cf-bd31-52279d487913"].includes(aiConfig.tts_voice) && (
+                                        <option value={aiConfig.tts_voice}>{t('Custom', 'Personalizado')}: {aiConfig.tts_voice}</option>
+                                    )}
+                                </select>
                             </div>
                         </section>
 
-                        {/* STT Config */}
-                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                                <Mic size={16} /> {t('Transcription (STT)', 'Transcripción (STT)')}
-                            </h3>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
-                                <select
-                                    value={aiConfig.stt_provider}
-                                    onChange={(e) => setAiConfig({ ...aiConfig, stt_provider: e.target.value })}
-                                    className="w-full px-3 py-2 border rounded-lg bg-gray-50"
-                                >
-                                    <option value="deepgram">Deepgram</option>
-                                    <option value="openai">OpenAI Whisper</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
-                                <input
-                                    type="text"
-                                    value={aiConfig.stt_model}
-                                    onChange={(e) => setAiConfig({ ...aiConfig, stt_model: e.target.value })}
-                                    className="w-full px-3 py-2 border rounded-lg"
-                                />
-                            </div>
-                        </section>
+                        {/* STT Config (Only if Platform Owner) */}
+                        {isPlatformOwner && (
+                            <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                                <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                                    <Mic size={16} /> {t('Transcription (STT)', 'Transcripción (STT)')}
+                                </h3>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
+                                    <select
+                                        value={aiConfig.stt_provider}
+                                        onChange={(e) => setAiConfig({ ...aiConfig, stt_provider: e.target.value })}
+                                        className="w-full px-3 py-2 border rounded-lg bg-gray-50"
+                                    >
+                                        <option value="deepgram">Deepgram</option>
+                                        <option value="openai">OpenAI Whisper</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
+                                    <input
+                                        type="text"
+                                        value={aiConfig.stt_model}
+                                        onChange={(e) => setAiConfig({ ...aiConfig, stt_model: e.target.value })}
+                                        className="w-full px-3 py-2 border rounded-lg"
+                                    />
+                                </div>
+                            </section>
+                        )}
                     </div>
                 </div>
             )}
