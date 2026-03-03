@@ -101,9 +101,19 @@ class DynamicAgent(Agent):
         base_rules_to_use = BASE_RULES
         inst_lower = agent_instructions.lower()
         has_preguntas = any(p in inst_lower for p in ["pregunta 1", "pregunta 2", "pregunta:"])
-        is_numeric = any(n in inst_lower for n in ["1 al 10", "0 al 10", "del uno al diez", "numérica", "puntuación"])
+        # Detección de tipo de encuesta para el prompt
+        is_numeric = any(kw in inst_lower for kw in ["1 al 10", "0 al 10", "del uno al diez", "numérica", "puntuación"])
+        if "dakota" in agent_name.lower():
+            is_numeric = True
         
-        if has_preguntas and not is_numeric:
+        if is_numeric:
+            base_rules_to_use += """
+REGLA ESPECIAL PARA ENCUESTAS NUMÉRICAS:
+- Esta es una encuesta de puntuación del 0 al 10.
+- Debes obtener una nota numérica para cada pregunta. 
+- Si el cliente responde con texto, pídele amablemente una puntuación del 0 al 10.
+"""
+        elif has_preguntas:
             base_rules_to_use += """
 REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
 - Como este es un cuestionario de preguntas abiertas, USA el campo 'comentarios' de la herramienta 'guardar_encuesta' para guardar todas las respuestas de las preguntas planteadas recopiladas en forma de texto descriptivo.
@@ -117,10 +127,14 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         full_instructions += f"{agent_instructions}\n"
 
         super().__init__(instructions=full_instructions)
+        self.session: Optional[AgentSession] = None
         logger.info(f"Agente '{agent_name}' creado (Survey: {self.survey_id})")
 
     async def on_enter(self):
         """Método para lanzar el saludo inicial."""
+        if not self.session:
+            logger.warning("No session available in on_enter")
+            return
         logger.info(f"Saludando en sala: {self.room_name}")
         await asyncio.sleep(1.2)
         await self.session.generate_reply(
@@ -371,6 +385,7 @@ async def entrypoint(ctx: JobContext):
                 asyncio.create_task(force_hangup_room())
 
         # Iniciar sesión
+        agent_instance.session = session
         await session.start(agent=agent_instance, room=ctx.room)
         
         # --- SALUDO CONTROLADO ---
