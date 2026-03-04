@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { Download, Search, RefreshCw, FileText } from 'lucide-react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { Download, Search, RefreshCw, FileText, Target, ThumbsDown, Clock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { AnalyticsDashboard } from '../components/AnalyticsDashboard';
 
 interface SurveyResult {
     id: number;
@@ -18,6 +19,7 @@ interface SurveyResult {
     transcription: string | null;
     llm_model: string | null;
     tipo_resultados?: string | null;
+    datos_extra?: any;
 }
 
 interface Props {
@@ -103,6 +105,14 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
 
         return matchesSearch && matchesTipo;
     });
+
+    const activeAgentType = useMemo(() => {
+        if (selectedTipo !== 'all') return selectedTipo;
+        if (filteredResults.length > 0 && (selectedAgentId !== 'all' || campaignId)) {
+            return filteredResults[0].tipo_resultados || 'PREGUNTAS_ABIERTAS';
+        }
+        return null;
+    }, [filteredResults, selectedTipo, selectedAgentId, campaignId]);
 
     const exportCSV = () => {
         const headers = [
@@ -219,6 +229,16 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                 </div>
             </div>
 
+            {/* Dashboard Section */}
+            {activeAgentType && filteredResults.length > 0 && (
+                <div className="mb-6">
+                    <AnalyticsDashboard
+                        tipoResultados={activeAgentType}
+                        results={filteredResults}
+                    />
+                </div>
+            )}
+
             {/* Table */}
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
@@ -304,6 +324,40 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                                                 </div>
                                                             ))}
                                                         </div>
+                                                    </div>
+                                                );
+                                            } else if (type === 'CUALIFICACION_LEAD') {
+                                                const isLead = row.datos_extra?.lead_cualificado;
+                                                return (
+                                                    <div className="flex flex-col items-center">
+                                                        <Badge />
+                                                        {isLead === true ? (
+                                                            <span className="flex items-center gap-1 bg-green-100 text-green-700 text-xs px-2 py-1 rounded-md font-bold shadow-sm">
+                                                                <Target size={14} /> HOT LEAD
+                                                            </span>
+                                                        ) : isLead === false ? (
+                                                            <span className="flex items-center gap-1 bg-red-100 text-red-700 text-xs px-2 py-1 rounded-md font-bold shadow-sm">
+                                                                <ThumbsDown size={14} /> DESCARTADO
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-gray-400 text-xs">-</span>
+                                                        )}
+                                                    </div>
+                                                );
+                                            } else if (type === 'AGENDAMIENTO_CITA') {
+                                                const hasCita = row.datos_extra?.cita_agendada;
+                                                const fecha = row.datos_extra?.fecha_cita;
+                                                return (
+                                                    <div className="flex flex-col items-center">
+                                                        <Badge />
+                                                        {hasCita ? (
+                                                            <div className="bg-purple-100 text-purple-800 text-xs px-3 py-1.5 rounded-lg border border-purple-200 text-center font-medium shadow-sm">
+                                                                <Clock size={14} className="inline mr-1" />
+                                                                {fecha || 'Cita Agendada'}
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-gray-400 text-xs">Sin fecha</span>
+                                                        )}
                                                     </div>
                                                 );
                                             } else {
