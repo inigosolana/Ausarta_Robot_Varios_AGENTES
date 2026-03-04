@@ -46,6 +46,7 @@ class FinEncuesta(BaseModel):
     comentarios: Optional[str] = None 
     status: Optional[str] = None
     transcription: Optional[str] = None
+    datos_extra: Optional[dict] = None
 
 class ColgarLlamada(BaseModel):
     nombre_sala: str 
@@ -174,7 +175,8 @@ def get_calls_supabase(limit=50):
                 
                 "llm_model": c.get('llm_model', "Unknown"),
                 "comentarios": c.get('comentarios'),
-                "transcription": c.get('transcription')
+                "transcription": c.get('transcription'),
+                "datos_extra": c.get('datos_extra')
             })
         return mapped
     except Exception as e:
@@ -252,6 +254,8 @@ async def guardar_encuesta(datos: FinEncuesta):
         updates["comentarios"] = val_comentarios
     if datos.transcription is not None:
         updates["transcription"] = datos.transcription
+    if datos.datos_extra is not None:
+        updates["datos_extra"] = datos.datos_extra
     
     # Lógica de estados
     if datos.status:

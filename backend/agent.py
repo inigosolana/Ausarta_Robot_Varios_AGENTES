@@ -4,6 +4,7 @@ import os
 import aiohttp
 import asyncio
 import sys
+import json
 from dotenv import load_dotenv
 from livekit import rtc
 from livekit.agents import (
@@ -440,36 +441,88 @@ async def entrypoint(ctx: JobContext):
                 
             # SIEMPRE guardar transcripción y datos finales en Supabase
             url_guardar = f"{internal_api_url}/guardar-encuesta"
+            
+            # Analytics post-llamada: Extraer JSON si no es numérica
+            agent_type = agent_config.get("agent_type", "ENCUESTA_NUMERICA")
+            datos_extra = None
+            if transcript and agent_type != "ENCUESTA_NUMERICA":
+                logger.info(f"🧠 Extrayendo datos_extra con LLM para encuesta {survey_id} (Tipo: {agent_type})")
+                try:
+                    system_prompt = "Eres un analista experto en conversaciones telefónicas. Revisa la transcripción y extrae la información clave del cliente en formato JSON estructurado. Responde ÚNICAMENTE con JSON válido."
+                    if agent_type == "CUALIFICACION_LEAD":
+                        system_prompt += (
+                            " Extrae los campos: 'lead_cualificado' (booleano), "
+                            "'interes' (string: 'alto', 'medio', 'bajo'), y "
+                            "'motivo_rechazo' (string corto o null si no aplica)."
+                        )
+                    elif agent_type == "AGENDAMIENTO_CITA":
+                        system_prompt += (
+                            " Extrae los campos: 'cita_agendada' (booleano), "
+                            "'fecha_cita' (string formato libre, ej. 'Mañana a las 10'), y "
+                            "'disponibilidad' (string resumen de cuándo está disponible)."
+                        )
+                    else:
+                        system_prompt += " Extrae los 3 puntos más importantes (array de strings bajo la clave 'puntos_clave')."
+                        
+                    groq_api_key = os.getenv("GROQ_API_KEY")
+                    if groq_api_key:
+                        async with aiohttp.ClientSession() as llm_sess:
+                            headers = {
+                                "Authorization": f"Bearer {groq_api_key}",
+                                "Content-Type": "application/json"
+                            }
+                            payload_llm = {
+                                "model": "llama-3.3-70b-versatile",
+                                "messages": [
+                                    {"role": "system", "content": system_prompt},
+                                    {"role": "user", "content": f"Transcripción:\n{transcript}"}
+                                ],
+                                "response_format": {"type": "json_object"},
+                                "temperature": 0.1
+                            }
+                            async with llm_sess.post("https://api.groq.com/openai/v1/chat/completions", json=payload_llm, headers=headers, timeout=20) as llm_resp:
+                                if llm_resp.status == 200:
+                                    llm_data = await llm_resp.json()
+                                    json_str = llm_data["choices"][0]["message"]["content"]
+                                    datos_extra = json.loads(json_str)
+                                    logger.info(f"✅ JSON datos_extra extraído: {datos_extra}")
+                                else:
+                                    logger.error(f"Error HTTP del LLM al extraer JSON: {llm_resp.status}")
+                except Exception as e:
+                    logger.error(f"Error extrayendo datos con LLM: {e}")
+
             try:
                 if data_saved:
-                    # El LLM ya guardó notas, pero TAMBIÉN necesitamos guardar la transcripción
-                    if transcript:
-                        logger.info(f"📝 Guardando transcripción para encuesta {survey_id} (datos ya guardados por tool)")
+                    # El LLM ya guardó notas, pero TAMBIÉN necesitamos guardar la transcripción y datos_extra
+                    if transcript or datos_extra:
+                        logger.info(f"📝 Guardando transcripción/datos_extra para encuesta {survey_id} (datos numéricos ya guardados por tool)")
                         transcript_payload = {
                             "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
-                            "transcription": transcript
+                            "transcription": transcript,
+                            "datos_extra": datos_extra
                         }
                         try:
                             async with aiohttp.ClientSession() as sess:
                                 async with sess.post(url_guardar, json=transcript_payload, timeout=10) as resp:
-                                    logger.info(f"✅ Transcripción guardada: HTTP {resp.status}")
+                                    logger.info(f"✅ Extras guardados: HTTP {resp.status}")
                         except Exception as save_err:
-                            logger.error(f"Error guardando transcripción: {save_err}")
+                            logger.error(f"Error guardando extras: {save_err}")
                 else:
-                    # No se guardaron datos → fallback completo
-                    logger.warning(f"⚠️ La sesión terminó sin guardar datos explícitos (Survey ID: {survey_id})")
+                    # No se guardaron datos numéricos → fallback completo
+                    logger.warning(f"⚠️ La sesión terminó sin guardar datos explícitos por tool (Survey ID: {survey_id})")
                     fallback_payload = {
                         "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
                         "transcription": transcript,
-                        "status": "unreached",
-                        "comentarios": "Llamada finalizada sin interacción completa (Posible No Contesta / Cuelgue)"
+                        "status": "unreached" if not transcript else "completed", 
+                        "comentarios": "Llamada finalizada sin interacción completa" if not transcript else "LLamada procesada via post-call",
+                        "datos_extra": datos_extra
                     }
                     try:
                         async with aiohttp.ClientSession() as sess:
                             async with sess.post(url_guardar, json=fallback_payload, timeout=10) as resp:
-                                logger.info(f"✅ Fallback guardado: HTTP {resp.status}")
+                                logger.info(f"✅ Fallback (con extras) guardado: HTTP {resp.status}")
                     except Exception as save_err:
-                        logger.error(f"Error en guardado final: {save_err}")
+                        logger.error(f"Error en guardado final de fallback: {save_err}")
             except Exception as ex:
                  logger.error(f"❌ Error salvando datos finales: {ex}")
         else:
