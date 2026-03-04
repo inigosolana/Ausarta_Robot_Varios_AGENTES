@@ -33,6 +33,15 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
         if not campaign.scheduled_time and status_final == 'pending':
             status_final = 'active'
 
+        # Multiply by unit
+        interval_raw = campaign.retry_interval
+        if campaign.retry_unit == 'minutes':
+            interval_raw *= 60
+        elif campaign.retry_unit == 'hours':
+            interval_raw *= 3600
+        elif campaign.retry_unit == 'days':
+            interval_raw *= 86400
+
         camp_data = {
             "name": campaign.name,
             "agent_id": campaign.agent_id,
@@ -40,7 +49,8 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
             "status": status_final,
             "scheduled_time": campaign.scheduled_time.isoformat() if campaign.scheduled_time else None,
             "retries_count": campaign.retries_count,
-            "retry_interval": campaign.retry_interval * 60,
+            "retry_interval": interval_raw,
+            "retry_unit": campaign.retry_unit,
             "created_at": datetime.utcnow().isoformat()
         }
         res_camp = supabase.table("campaigns").insert(camp_data).execute()
@@ -63,6 +73,24 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
         
     except Exception as e:
         logger.error(f"Error creando campaña: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.put("/campaigns/{campaign_id}")
+async def update_campaign(campaign_id: int, payload: dict):
+    if not supabase: return {"error": "No DB"}
+    try:
+        if "retry_interval" in payload and "retry_unit" in payload:
+            raw = payload["retry_interval"]
+            unit = payload["retry_unit"]
+            if unit == 'minutes': raw *= 60
+            elif unit == 'hours': raw *= 3600
+            elif unit == 'days': raw *= 86400
+            payload["retry_interval"] = raw
+
+        supabase.table("campaigns").update(payload).eq("id", campaign_id).execute()
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Error updating campaign {campaign_id}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.get("/results/{result_id}/transcription")
@@ -235,4 +263,46 @@ async def get_agent_config_by_survey(survey_id: int):
             
     except Exception as e:
         logger.error(f"Error agent config by survey: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.post("/campaigns/{campaign_id}/retry")
+async def retry_campaign(campaign_id: int):
+    if not supabase: return {"error": "No DB"}
+    try:
+        # Reintentar todos los leads fallidos (failed, unreached, incomplete)
+        statuses_to_retry = ['failed', 'unreached', 'incomplete']
+        res = supabase.table("campaign_leads").update({
+            "status": "pending",
+            "retries_attempted": 0,
+            "error_msg": None,
+            "next_retry_at": None
+        }).eq("campaign_id", campaign_id).in_("status", statuses_to_retry).execute()
+        
+        # También reactivar la campaña
+        supabase.table("campaigns").update({"status": "active"}).eq("id", campaign_id).execute()
+        
+        return {"status": "success", "retried_count": len(res.data)}
+    except Exception as e:
+        logger.error(f"Error retrying campaign {campaign_id}: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.post("/campaigns/leads/{lead_id}/retry")
+async def retry_lead(lead_id: int):
+    if not supabase: return {"error": "No DB"}
+    try:
+        res = supabase.table("campaign_leads").update({
+            "status": "pending",
+            "retries_attempted": 0,
+            "error_msg": None,
+            "next_retry_at": None
+        }).eq("id", lead_id).execute()
+        
+        if res.data:
+            camp_id = res.data[0].get("campaign_id")
+            if camp_id:
+                supabase.table("campaigns").update({"status": "active"}).eq("id", camp_id).execute()
+        
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Error retrying lead {lead_id}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})

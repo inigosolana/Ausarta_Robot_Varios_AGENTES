@@ -78,6 +78,20 @@ export function CampaignsView() {
     } else {
       setEditTime("");
     }
+
+    // Set retry interval and unit if available
+    if ((camp as any).retry_unit) {
+      setEditRetryUnit((camp as any).retry_unit);
+      const rawInterval = (camp as any).retry_interval || 60;
+      const unit = (camp as any).retry_unit;
+      if (unit === 'days') setEditRetryInterval(Math.floor(rawInterval / 86400));
+      else if (unit === 'hours') setEditRetryInterval(Math.floor(rawInterval / 3600));
+      else setEditRetryInterval(Math.floor(rawInterval / 60));
+    } else {
+      // Legacy or default
+      setEditRetryInterval(Math.floor(((camp as any).retry_interval || 3600) / 60));
+      setEditRetryUnit('minutes');
+    }
   };
 
   const handleUpdateCampaign = async () => {
@@ -85,7 +99,9 @@ export function CampaignsView() {
     try {
       const payload = {
         name: editName,
-        scheduled_time: editTime ? new Date(editTime).toISOString() : null
+        scheduled_time: editTime ? new Date(editTime).toISOString() : null,
+        retry_interval: editRetryInterval,
+        retry_unit: editRetryUnit
       };
       const res = await fetch(`${API_URL}/api/campaigns/${editingCampaign.id}`, {
         method: 'PUT',
@@ -117,7 +133,10 @@ export function CampaignsView() {
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [manualInput, setManualInput] = useState('');
   const [scheduledTime, setScheduledTime] = useState('');
-  const [retryInterval, setRetryInterval] = useState<number>(60); // Default
+  const [retryInterval, setRetryInterval] = useState<number>(60);
+  const [retryUnit, setRetryUnit] = useState<'minutes' | 'hours' | 'days'>('minutes');
+  const [editRetryInterval, setEditRetryInterval] = useState<number>(60);
+  const [editRetryUnit, setEditRetryUnit] = useState<'minutes' | 'hours' | 'days'>('minutes');
 
   const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
@@ -309,7 +328,8 @@ export function CampaignsView() {
           empresa_id: selectedEmpresa || (selectedAgentData ? (selectedAgentData as any).empresa_id : profile?.empresa_id),
           scheduled_time: scheduledTime ? new Date(scheduledTime).toISOString() : null,
           status: 'pending',
-          retry_interval: retryInterval || 60
+          retry_interval: retryInterval || 60,
+          retry_unit: retryUnit
         },
         leads
       };
@@ -429,6 +449,27 @@ export function CampaignsView() {
                 onChange={(e) => setEditTime(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t("Retry Interval", "Intervalo de Reintento")}</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  value={editRetryInterval}
+                  onChange={(e) => setEditRetryInterval(Number(e.target.value))}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <select
+                  value={editRetryUnit}
+                  onChange={(e) => setEditRetryUnit(e.target.value as any)}
+                  className="w-1/3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="minutes">{t("Minutes", "Minutos")}</option>
+                  <option value="hours">{t("Hours", "Horas")}</option>
+                  <option value="days">{t("Days", "Dias")}</option>
+                </select>
+              </div>
             </div>
           </div>
           <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
@@ -851,15 +892,26 @@ export function CampaignsView() {
             </div>
 
             <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Retry Interval (minutes)", "Intervalo de Reintento (minutos)")}</label>
-              <input
-                type="number"
-                min="1"
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg"
-                value={retryInterval}
-                onChange={(e) => setRetryInterval(Number(e.target.value))}
-                placeholder={t("Default: 60", "Por defecto: 60")}
-              />
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Retry Interval", "Intervalo de Reintento")}</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none"
+                  value={retryInterval}
+                  onChange={(e) => setRetryInterval(Number(e.target.value))}
+                  placeholder={t("Default: 60", "Por defecto: 60")}
+                />
+                <select
+                  value={retryUnit}
+                  onChange={(e) => setRetryUnit(e.target.value as any)}
+                  className="w-1/3 px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none bg-white"
+                >
+                  <option value="minutes">{t("Minutes", "Minutos")}</option>
+                  <option value="hours">{t("Hours", "Horas")}</option>
+                  <option value="days">{t("Days", "Dias")}</option>
+                </select>
+              </div>
               <p className="text-xs text-gray-500 mt-1">{t("Wait time before retrying a failed call.", "Tiempo de espera antes de reintentar una llamada fallida.")}</p>
             </div>
           </div>

@@ -31,6 +31,7 @@ class CampaignModel(BaseModel):
     scheduled_time: Optional[datetime] = None
     retries_count: int = 3
     retry_interval: int = 180
+    retry_unit: str = "minutes"
 
 class LlmConfig(BaseModel):
     llm_provider: str
