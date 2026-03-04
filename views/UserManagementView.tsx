@@ -109,6 +109,13 @@ const UserManagementView: React.FC = () => {
             return;
         }
 
+        // AUSARTA PROTECTION: Admins of Ausarta cannot create users IN Ausarta
+        const selectedEmpresa = empresas.find(e => e.id === Number(newEmpresaId));
+        if (currentProfile?.empresas?.nombre === 'Ausarta' && currentProfile?.role === 'admin' && selectedEmpresa?.nombre === 'Ausarta') {
+            alert(t('As an administrator, you cannot create users within the Ausarta company. This action is reserved for Superadmins.', 'Como administrador, no puedes crear usuarios dentro de la empresa Ausarta. Esta acción está reservada para Superadmins.'));
+            return;
+        }
+
         // Admins are locked to their company unless platform owner
         const finalEmpresaId = isPlatformOwner ? newEmpresaId : currentProfile?.empresa_id;
 
@@ -339,9 +346,10 @@ const UserManagementView: React.FC = () => {
         if (!currentProfile) return false;
         if (currentProfile.id === targetUser.id) return false; // Can't manage self
 
-        // Special case: Only Superadmins can manage Ausarta Admins
-        if (targetUser.role === 'admin' && targetUser.empresas?.nombre === 'Ausarta') {
-            return currentProfile.role === 'superadmin';
+        // AUSARTA PROTECTION: Admins of Ausarta (even if platform owners) 
+        // CANNOT manage users of the Ausarta company (ID 1/Nombre Ausarta)
+        if (targetUser.empresas?.nombre === 'Ausarta' && currentProfile.role === 'admin') {
+            return false;
         }
 
         if (currentProfile.role === 'superadmin') return true;
@@ -583,9 +591,11 @@ const UserManagementView: React.FC = () => {
                                                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white font-medium"
                                             >
                                                 <option value="">-- {t('None', 'Ninguna')} --</option>
-                                                {empresas.map(emp => (
-                                                    <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                                                ))}
+                                                {empresas
+                                                    .filter(emp => !(currentProfile?.role === 'admin' && emp.nombre === 'Ausarta'))
+                                                    .map(emp => (
+                                                        <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                                                    ))}
                                             </select>
                                         </div>
                                     ) : (

@@ -93,7 +93,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         const isActuallyAusarta = realProfile.empresas?.nombre === 'Ausarta' || realProfile.email === 'admin@ausarta.net';
-        const canSpoof = (realProfile.role === 'superadmin' || realProfile.email === 'admin@ausarta.net') && isActuallyAusarta;
+        const canSpoof = (realProfile.role === 'superadmin' || realProfile.role === 'admin' || realProfile.email === 'admin@ausarta.net') && isActuallyAusarta;
 
         if (canSpoof && (spoofedRole || spoofedEmpresa)) {
             // Need to fetch company data if spoofedEmpresa is set
