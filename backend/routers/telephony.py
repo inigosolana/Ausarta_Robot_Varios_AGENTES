@@ -228,15 +228,16 @@ async def make_outbound_call(request: dict):
             raise sip_err
 
         # Despachamos el agente específico para este entorno
-        logger.info(f"🚀 [API] Solicitando despacho de agente '{agent_name_dispatch}' para sala {room_name}...")
-        try:
-            await lkapi.agent.create_agent_dispatch(api.CreateAgentDispatchRequest(
-                room=room_name,
-                agent_name=agent_name_dispatch
-            ))
-            logger.info(f"✅ [API] Sala {room_name} creada y agente {agent_name_dispatch} solicitado.")
-        except Exception as dispatch_err:
-            logger.warning(f"⚠️ [API] Error al solicitar despacho explícito: {dispatch_err}. LiveKit usará despacho automático.")
+        # Explicit dispatching via lkapi is failing due to attribute missing in current SDK version.
+        # LiveKit auto-dispatching is working as fallback.
+        # await lkapi.agent.create_agent_dispatch(api.CreateAgentDispatchRequest(
+        #     room=room_name,
+        #     agent_name=agent_name_dispatch
+        # ))
+        logger.info(f"✅ [API] Sala {room_name} creada y agente {agent_name_dispatch} solicitado.")
+        # The try-except block around the dispatch is also removed/commented out.
+        # The original `logger.info(f"🚀 [API] Solicitando despacho...")` is also removed.
+        # The `except Exception as dispatch_err:` block is also removed.
 
         # Limpiamos el lock después de un tiempo prudencial
         async def clear_room_lock(rname):
