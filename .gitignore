@@ -50,3 +50,6 @@ backend/venv/
 *.db
 *.sqlite
 *.sqlite3
+
+# Agent Skills
+.agent/skills/
