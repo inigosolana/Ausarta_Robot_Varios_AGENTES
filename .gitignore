@@ -51,5 +51,6 @@ backend/venv/
 *.sqlite
 *.sqlite3
 
-# Agent Skills
-.agent/skills/
+# Agent Settings & Skills
+.agent/
+.agents/
