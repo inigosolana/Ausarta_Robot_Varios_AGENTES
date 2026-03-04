@@ -39,8 +39,8 @@ const AgentManagementView: React.FC = () => {
 
             // Load agents
             let query = supabase.from("agent_config").select("*, empresas(*)").order("created_at", { ascending: false });
-            if (isRole('admin') && !isPlatformOwner && profile?.empresa_id) {
-                // Admin can only see their company's agents
+            // Cualquier usuario no-platformOwner solo ve agentes de su empresa
+            if (!isPlatformOwner && profile?.empresa_id) {
                 query = query.eq("empresa_id", profile.empresa_id);
             }
             const { data: agentsData, error: agentsError } = await query;

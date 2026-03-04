@@ -44,6 +44,11 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     const [empresas, setEmpresas] = useState<any[]>([]);
     const [agents, setAgents] = useState<any[]>([]);
     const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | 'all'>(empresaId || 'all');
+
+    // Para usuarios no-platformOwner, forzar siempre su empresa_id
+    const effectiveEmpresaId = !isPlatformOwner && profile?.empresa_id
+        ? profile.empresa_id
+        : selectedEmpresaId;
     const [selectedAgentId, setSelectedAgentId] = useState<number | 'all'>('all');
     const [selectedTipo, setSelectedTipo] = useState<string | 'all'>('all');
 
@@ -53,7 +58,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
             const BASE_URL = import.meta.env.VITE_API_URL || '';
             const params = new URLSearchParams();
 
-            if (selectedEmpresaId !== 'all') params.append('empresa_id', String(selectedEmpresaId));
+            if (effectiveEmpresaId !== 'all') params.append('empresa_id', String(effectiveEmpresaId));
             if (selectedAgentId !== 'all') params.append('agent_id', String(selectedAgentId));
             if (agentId) params.append('agent_id', String(agentId));
             if (campaignId) params.append('campaign_id', String(campaignId));
@@ -84,16 +89,16 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     useEffect(() => {
         const fetchAgents = async () => {
             const BASE_URL = import.meta.env.VITE_API_URL || window.location.origin;
-            const url = selectedEmpresaId !== 'all' ? `${BASE_URL}/api/agents?empresa_id=${selectedEmpresaId}` : `${BASE_URL}/api/agents`;
+            const url = effectiveEmpresaId !== 'all' ? `${BASE_URL}/api/agents?empresa_id=${effectiveEmpresaId}` : `${BASE_URL}/api/agents`;
             const res = await fetch(url);
             if (res.ok) setAgents(await res.json());
         };
         fetchAgents();
-    }, [selectedEmpresaId]);
+    }, [effectiveEmpresaId]);
 
     useEffect(() => {
         loadResults();
-    }, [profile, selectedEmpresaId, selectedAgentId, agentId, campaignId]);
+    }, [profile, effectiveEmpresaId, selectedAgentId, agentId, campaignId]);
 
     const filteredResults = results.filter(r => {
         const matchesSearch = r.telefono.includes(searchTerm) ||

@@ -295,15 +295,20 @@ const DashboardView: React.FC<Props> = ({ empresaId, agentId, campaignId, title,
                                     <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
                                         {(() => {
                                             switch (call.status) {
+                                                case 'completada':
                                                 case 'completed':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-green-500 text-white uppercase shadow-sm">{t('Completed', 'Completa')}</span>;
+                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-green-500 text-white uppercase shadow-sm">{t('Completed', 'Completada')}</span>;
+                                                case 'parcial':
                                                 case 'incomplete':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-blue-400 text-white uppercase shadow-sm">{t('Incomplete', 'Incompleta')}</span>;
+                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-orange-400 text-white uppercase shadow-sm">{t('Partial', 'Parcial')}</span>;
+                                                case 'rechazada':
                                                 case 'rejected_opt_out':
                                                 case 'rejected':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-red-500 text-white uppercase shadow-sm">{t('Rejected', 'Rechazada')}</span>;
+                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-red-700 text-white uppercase shadow-sm">{t('Rejected', 'Rechazada')}</span>;
+                                                case 'fallida':
                                                 case 'failed':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-orange-400 text-white uppercase shadow-sm">{t('Failed', 'Fallida')}</span>;
+                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-purple-500 text-white uppercase shadow-sm">{t('Failed', 'Fallida')}</span>;
+                                                case 'no_contesta':
                                                 case 'unreached':
                                                     return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-amber-400 text-white uppercase shadow-sm">{t('Unreached', 'No Contesta')}</span>;
                                                 default:
