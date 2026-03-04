@@ -1,0 +1,366 @@
+{
+    "updatedAt": "2026-03-04T17:34:05.467Z",
+    "createdAt": "2026-03-03T07:33:12.847Z",
+    "id": "ja9QYHNbqS3grvKJ",
+    "name": "Procesamiento de Transcripciones - Ausarta Voice AI",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+        {
+            "id": "webhook_node_123",
+            "name": "Webhook",
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "transcripciones-voice-ai",
+                "responseMode": "responseNode"
+            },
+            "position": [
+                100,
+                300
+            ],
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1
+        },
+        {
+            "id": "respond_node",
+            "name": "RespondProcessing",
+            "parameters": {
+                "options": {
+                    "responseCode": 200
+                },
+                "respondWith": "json",
+                "responseBody": "={\n  \"status\": \"processing\",\n  \"survey_id\": \"{{ $json.body.survey_id }}\"\n}"
+            },
+            "position": [
+                300,
+                300
+            ],
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1
+        },
+        {
+            "id": "code_format_input",
+            "name": "FormatTranscription",
+            "parameters": {
+                "jsCode": "const body = $input.item.json.body || {};\nif (!body.messages || body.messages.length === 0) {\n  throw new Error(\"Faltan mensajes en la transcripción\");\n}\nif (!body.survey_id) {\n  throw new Error(\"Falta survey_id\");\n}\nlet transcript = \"\";\nfor (const msg of body.messages) {\n  const role = msg.role === 'user' ? 'Cliente' : 'Agente';\n  transcript += `${role}: ${msg.content}\\n`;\n}\nreturn [{\n  id: body.survey_id,\n  transcription: transcript.trim()\n}];",
+                "language": "javaScript",
+                "mode": "runOnceForEachItem"
+            },
+            "position": [
+                500,
+                300
+            ],
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2
+        },
+        {
+            "credentials": {
+                "supabaseApi": {
+                    "id": "v8Epggpt6LC5dFEf",
+                    "name": "Supabase API Auto"
+                }
+            },
+            "id": "supabase_get_encuesta",
+            "name": "GetEncuesta",
+            "parameters": {
+                "filters": {
+                    "conditions": [
+                        {
+                            "column": "id",
+                            "operator": "eq",
+                            "value": "={{ $('FormatTranscription').item.json.id }}"
+                        }
+                    ]
+                },
+                "operation": "getAll",
+                "tableId": "encuestas"
+            },
+            "position": [
+                700,
+                300
+            ],
+            "type": "n8n-nodes-base.supabase",
+            "typeVersion": 1
+        },
+        {
+            "credentials": {
+                "supabaseApi": {
+                    "id": "v8Epggpt6LC5dFEf",
+                    "name": "Supabase API Auto"
+                }
+            },
+            "id": "supabase_get_agent",
+            "name": "GetAgentConfig",
+            "parameters": {
+                "filters": {
+                    "conditions": [
+                        {
+                            "column": "id",
+                            "operator": "eq",
+                            "value": "={{ $json.agent_id }}"
+                        }
+                    ]
+                },
+                "operation": "getAll",
+                "tableId": "agent_config"
+            },
+            "position": [
+                900,
+                300
+            ],
+            "type": "n8n-nodes-base.supabase",
+            "typeVersion": 1
+        },
+        {
+            "id": "code_prompt",
+            "name": "FormatPrompt",
+            "parameters": {
+                "jsCode": "const agent = $input.item.json;\nconst transcriptNode = $('FormatTranscription').first().json;\nconst isNumeric = agent.name && agent.name.toLowerCase().includes('dakota');\n\nlet prompt = `Eres un asistente supervisor que audita y extrae información de transcripciones de llamadas comerciales.\\nDebes devolver OBLIGATORIAMENTE un objeto JSON estructurado y válido con los siguientes campos:\\n\\nSi la encuesta es de TIPO NUMÉRICO (evaluaciones de 1 a 10):\\n{\\n  \"nota_comercial\": (número del 1 al 10 o null),\\n  \"nota_instalador\": (número del 1 al 10 o null),\\n  \"nota_rapidez\": (número del 1 al 10 o null),\\n  \"comentarios\": \"Breve resumen de por qué han dado esa puntuación o notas extra.\"\\n}\\n\\nSi la encuesta es de TIPO ABIERTO (no piden notas del 1 al 10):\\n{\\n  \"nota_comercial\": null,\\n  \"nota_instalador\": null,\\n  \"nota_rapidez\": null,\\n  \"comentarios\": \"Aquí pondrás el resumen detallado de las respuestas obtenidas de todas las preguntas abiertas explicadas adecuadamente.\"\\n}\\n\\nTen en cuenta que el tipo de esta evaluación se considera: ${isNumeric ? 'NUMÉRICO' : 'ABIERTO'}.\\n\\nInstrucciones originales del agente en la llamada:\\n\"\"\"\\n${agent.instructions}\\n\"\"\"\\n`;\n\nreturn [{\n  survey_id: transcriptNode.id,\n  transcription: transcriptNode.transcription,\n  prompt: prompt\n}];",
+                "language": "javaScript",
+                "mode": "runOnceForEachItem"
+            },
+            "position": [
+                1100,
+                300
+            ],
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2
+        },
+        {
+            "id": "http_llm",
+            "name": "EvaluateTranscript",
+            "continueOnFail": true,
+            "parameters": {
+                "authentication": "predefinedCredentialType",
+                "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"{{ $json.prompt }}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.transcription }}\"\n    }\n  ],\n  \"response_format\": { \"type\": \"json_object\" }\n}",
+                "jsonHeaders": "={\n  \"Content-Type\": \"application/json\"\n}",
+                "method": "POST",
+                "nodeCredentialType": "httpHeaderAuth",
+                "sendBody": true,
+                "sendHeaders": true,
+                "specifyBody": "json",
+                "url": "https://api.groq.com/openai/v1/chat/completions"
+            },
+            "position": [
+                1300,
+                300
+            ],
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "vM3WkPytJ6M2G1fS"
+                }
+            }
+        },
+        {
+            "id": "is_success_llm",
+            "name": "IsSuccessLLM",
+            "parameters": {
+                "conditions": {
+                    "boolean": [
+                        {
+                            "value1": "={{ $json.error == undefined }}",
+                            "value2": true
+                        }
+                    ]
+                }
+            },
+            "position": [
+                1500,
+                300
+            ],
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1
+        },
+        {
+            "id": "code_parse",
+            "name": "ParseLLMResponse",
+            "parameters": {
+                "jsCode": "const response = $input.item.json.choices[0].message.content;\nconst promptNode = $('FormatPrompt').first().json;\nconst survey_id = promptNode.survey_id;\nconst transcription = promptNode.transcription;\n\nlet parsed = {};\nlet isError = false;\nlet errorMsg = null;\ntry {\n  let cleanJson = response.replace(/```json/g, '').replace(/```/g, '').trim();\n  parsed = JSON.parse(cleanJson);\n} catch (e) {\n  isError = true;\n  errorMsg = \"Parse JSON error: \" + response;\n}\nif (isError) {\n  return [{\n    id: survey_id,\n    status: \"failed_parsing\",\n    comentarios: errorMsg\n  }];\n}\n\nreturn [{\n  id: survey_id,\n  transcription: transcription,\n  nota_comercial: parsed.nota_comercial || null,\n  nota_instalador: parsed.nota_instalador || null,\n  nota_rapidez: parsed.nota_rapidez || null,\n  comentarios: parsed.comentarios || null,\n  llm_model: \"Llama 3.3 (n8n Eval)\",\n  status: \"completed\"\n}];",
+                "language": "javaScript",
+                "mode": "runOnceForEachItem"
+            },
+            "position": [
+                1700,
+                200
+            ],
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2
+        },
+        {
+            "id": "format_error",
+            "name": "FormatErrorDB",
+            "parameters": {
+                "jsCode": "const promptNode = $('FormatPrompt').first().json;\nreturn [{\n  id: promptNode.survey_id,\n  status: \"failed_parsing\",\n  comentarios: \"Error from Groq: \" + JSON.stringify($input.item.json.error)\n}];",
+                "language": "javaScript",
+                "mode": "runOnceForEachItem"
+            },
+            "position": [
+                1700,
+                400
+            ],
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2
+        },
+        {
+            "credentials": {
+                "supabaseApi": {
+                    "id": "v8Epggpt6LC5dFEf",
+                    "name": "Supabase API Auto"
+                }
+            },
+            "id": "supabase_update_node",
+            "name": "UpdateTranscription",
+            "parameters": {
+                "dataToSend": "autoMapInputData",
+                "filters": {
+                    "conditions": [
+                        {
+                            "column": "id",
+                            "operator": "eq",
+                            "value": "={{$json.id}}"
+                        }
+                    ]
+                },
+                "operation": "update",
+                "tableId": "encuestas"
+            },
+            "position": [
+                1900,
+                300
+            ],
+            "type": "n8n-nodes-base.supabase",
+            "typeVersion": 1
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "RespondProcessing",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "RespondProcessing": {
+            "main": [
+                [
+                    {
+                        "node": "FormatTranscription",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "FormatTranscription": {
+            "main": [
+                [
+                    {
+                        "node": "GetEncuesta",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "GetEncuesta": {
+            "main": [
+                [
+                    {
+                        "node": "GetAgentConfig",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "GetAgentConfig": {
+            "main": [
+                [
+                    {
+                        "node": "FormatPrompt",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "FormatPrompt": {
+            "main": [
+                [
+                    {
+                        "node": "EvaluateTranscript",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "EvaluateTranscript": {
+            "main": [
+                [
+                    {
+                        "node": "IsSuccessLLM",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "IsSuccessLLM": {
+            "main": [
+                [
+                    {
+                        "node": "ParseLLMResponse",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "FormatErrorDB",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "ParseLLMResponse": {
+            "main": [
+                [
+                    {
+                        "node": "UpdateTranscription",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "FormatErrorDB": {
+            "main": [
+                [
+                    {
+                        "node": "UpdateTranscription",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveDataErrorExecution": "all",
+        "saveDataSuccessExecution": "all",
+        "saveManualExecutions": true,
+        "saveExecutionProgress": true,
+        "callerPolicy": "workflowsFromSameOwner",
+        "availableInMCP": false
+    }
+}
