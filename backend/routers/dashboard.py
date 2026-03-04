@@ -1,8 +1,10 @@
 from fastapi import APIRouter
 from typing import Optional
 from services.supabase_service import supabase, get_ui_cache
+from services.livekit_service import lkapi
 import os
 import asyncio
+import time
 from concurrent.futures import ThreadPoolExecutor
 import logging
 
@@ -12,7 +14,13 @@ logger = logging.getLogger("api-backend")
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
 @router.get("/dashboard/stats")
-async def get_dashboard_stats(empresa_id: Optional[int] = None, agent_id: Optional[int] = None, campaign_id: Optional[int] = None):
+async def get_dashboard_stats(
+    empresa_id: Optional[int] = None, 
+    agent_id: Optional[int] = None, 
+    campaign_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
     if not supabase: return {"error": "Database not connected"}
     
     def fetch_total():
@@ -20,6 +28,8 @@ async def get_dashboard_stats(empresa_id: Optional[int] = None, agent_id: Option
         if empresa_id: q = q.eq("empresa_id", empresa_id)
         if agent_id: q = q.eq("agent_id", agent_id)
         if campaign_id: q = q.eq("campaign_id", campaign_id)
+        if start_date: q = q.gte("fecha", start_date)
+        if end_date: q = q.lte("fecha", end_date)
         r = q.execute()
         return r.count if r.count is not None else 0
 
@@ -28,6 +38,8 @@ async def get_dashboard_stats(empresa_id: Optional[int] = None, agent_id: Option
         if empresa_id: q = q.eq("empresa_id", empresa_id)
         if agent_id: q = q.eq("agent_id", agent_id)
         if campaign_id: q = q.eq("campaign_id", campaign_id)
+        if start_date: q = q.gte("fecha", start_date)
+        if end_date: q = q.lte("fecha", end_date)
         r = q.execute()
         return r.count if r.count is not None else 0
 
@@ -36,10 +48,16 @@ async def get_dashboard_stats(empresa_id: Optional[int] = None, agent_id: Option
             camps_res = supabase.table("campaigns").select("id").eq("empresa_id", empresa_id).execute()
             camp_ids = [c['id'] for c in camps_res.data]
             if camp_ids:
-                r = supabase.table("campaign_leads").select("id", count="exact").eq("status", "pending").in_("campaign_id", camp_ids).execute()
+                q = supabase.table("campaign_leads").select("id", count="exact").eq("status", "pending").in_("campaign_id", camp_ids)
+                if start_date: q = q.gte("created_at", start_date)
+                if end_date: q = q.lte("created_at", end_date)
+                r = q.execute()
                 return r.count if r.count is not None else 0
             return 0
-        r = supabase.table("campaign_leads").select("id", count="exact").eq("status", "pending").execute()
+        q = supabase.table("campaign_leads").select("id", count="exact").eq("status", "pending")
+        if start_date: q = q.gte("created_at", start_date)
+        if end_date: q = q.lte("created_at", end_date)
+        r = q.execute()
         return r.count if r.count is not None else 0
 
     def fetch_scores():
@@ -47,6 +65,8 @@ async def get_dashboard_stats(empresa_id: Optional[int] = None, agent_id: Option
         if empresa_id: q = q.eq("empresa_id", empresa_id)
         if agent_id: q = q.eq("agent_id", agent_id)
         if campaign_id: q = q.eq("campaign_id", campaign_id)
+        if start_date: q = q.gte("fecha", start_date)
+        if end_date: q = q.lte("fecha", end_date)
         return q.execute().data
 
     def check_question_based():
@@ -102,7 +122,13 @@ async def get_dashboard_stats(empresa_id: Optional[int] = None, agent_id: Option
         return {"total_calls": 0, "completed_calls": 0, "pending_calls": 0, "avg_scores": {}}
 
 @router.get("/dashboard/recent-calls")
-async def get_recent_calls(empresa_id: Optional[int] = None, agent_id: Optional[int] = None, campaign_id: Optional[int] = None):
+async def get_recent_calls(
+    empresa_id: Optional[int] = None, 
+    agent_id: Optional[int] = None, 
+    campaign_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
     if not supabase: return []
     try:
         cols = "id, telefono, campaign_name, nombre_cliente, fecha, status, llm_model, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez"
@@ -110,6 +136,8 @@ async def get_recent_calls(empresa_id: Optional[int] = None, agent_id: Optional[
         if empresa_id: query = query.eq("empresa_id", empresa_id)
         if agent_id: query = query.eq("agent_id", agent_id)
         if campaign_id: query = query.eq("campaign_id", campaign_id)
+        if start_date: query = query.gte("fecha", start_date)
+        if end_date: query = query.lte("fecha", end_date)
         response = query.order("fecha", desc=True).limit(50).execute()
         mapped = []
         for r in (response.data or []):
@@ -142,7 +170,13 @@ async def get_recent_calls(empresa_id: Optional[int] = None, agent_id: Optional[
         return []
 
 @router.get("/results")
-async def get_all_results(empresa_id: Optional[int] = None, agent_id: Optional[int] = None, campaign_id: Optional[int] = None):
+async def get_all_results(
+    empresa_id: Optional[int] = None, 
+    agent_id: Optional[int] = None, 
+    campaign_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
     if not supabase: return []
     try:
         cols = "id, telefono, fecha, completada, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, campaign_id, campaign_name, agent_id, status, llm_model, seconds_used, empresa_id"
@@ -150,6 +184,8 @@ async def get_all_results(empresa_id: Optional[int] = None, agent_id: Optional[i
         if empresa_id: query = query.eq("empresa_id", empresa_id)
         if agent_id: query = query.eq("agent_id", agent_id)
         if campaign_id: query = query.eq("campaign_id", campaign_id)
+        if start_date: query = query.gte("fecha", start_date)
+        if end_date: query = query.lte("fecha", end_date)
         response = query.order("fecha", desc=True).execute()
         results = response.data
         
@@ -251,11 +287,17 @@ async def get_integrations():
     return integrations
 
 @router.get("/dashboard/usage-stats")
-async def get_usage_stats(empresa_id: Optional[int] = None):
+async def get_usage_stats(
+    empresa_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
     if not supabase: return {"total_tokens": 0, "total_minutes": 0, "per_model_stats": []}
     try:
         query = supabase.table("encuestas").select("llm_model, seconds_used, status")
         if empresa_id: query = query.eq("empresa_id", empresa_id)
+        if start_date: query = query.gte("fecha", start_date)
+        if end_date: query = query.lte("fecha", end_date)
         
         loop = asyncio.get_event_loop()
         res = await loop.run_in_executor(executor, query.execute)
@@ -305,3 +347,50 @@ async def get_ai_limits():
     except Exception as e:
         logger.error(f"Error fetching AI limits: {e}")
         return default_limits
+
+@router.get("/dashboard/live-sessions")
+async def get_live_sessions():
+    """List active LiveKit rooms for supervision."""
+    if not lkapi:
+        return []
+    try:
+        from livekit import api
+        # List sessions
+        rooms_res = await lkapi.room.list_rooms(api.ListRoomsRequest())
+        sessions = []
+        for r in rooms_res.rooms:
+            sessions.append({
+                "sid": r.sid,
+                "name": r.name,
+                "num_participants": r.num_participants,
+                "created_at": r.creation_time
+            })
+        return sessions
+    except Exception as e:
+        logger.error(f"Error listing LiveKit sessions: {e}")
+        return []
+
+@router.get("/dashboard/token")
+async def get_monitoring_token(room_name: str, identity: str = "supervisor"):
+    """Generate a LiveKit token for monitoring (supervisor)."""
+    if not lkapi:
+        raise HTTPException(status_code=500, detail="LiveKit not configured")
+    try:
+        from livekit import api
+        # Create token
+        token = (
+            api.AccessToken(os.getenv("LIVEKIT_API_KEY"), os.getenv("LIVEKIT_API_SECRET"))
+            .with_identity(f"{identity}_{int(time.time())}")
+            .with_name("Supervisor")
+            .with_grants(api.VideoGrants(
+                room_join=True,
+                room=room_name,
+                can_publish=False, # Supervisor doesn't speak
+                can_subscribe=True,
+                can_publish_data=True
+            ))
+        )
+        return {"token": token.to_jwt()}
+    except Exception as e:
+        logger.error(f"Error generating monitoring token: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

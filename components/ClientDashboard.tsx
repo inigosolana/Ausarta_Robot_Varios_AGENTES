@@ -10,10 +10,14 @@ import {
     Calendar,
     User,
     ChevronRight,
-    TrendingUp
+    TrendingUp,
+    Download,
+    RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
+import { DateRangePicker, getDatesFromRange, DateRange } from './DateRangePicker';
+import { LiveMonitoring } from './LiveMonitoring';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -76,6 +80,7 @@ const ClientDashboard: React.FC<Props> = ({ empresaId }) => {
     const [agents, setAgents] = useState<Agent[]>([]);
     const [recentCalls, setRecentCalls] = useState<Call[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [dateRange, setDateRange] = useState<DateRange>('7d');
 
     const finalEmpresaId = empresaId || profile?.empresa_id;
 
@@ -83,17 +88,25 @@ const ClientDashboard: React.FC<Props> = ({ empresaId }) => {
         if (finalEmpresaId) {
             loadData();
         }
-    }, [finalEmpresaId]);
+    }, [finalEmpresaId, dateRange]);
 
     const loadData = async () => {
         try {
             setIsLoading(true);
-            const queryStr = `?empresa_id=${finalEmpresaId}`;
+            const params = new URLSearchParams();
+            if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
+
+            // Date filtering
+            const dates = getDatesFromRange(dateRange);
+            if (dates.start) params.append('start_date', dates.start);
+            if (dates.end) params.append('end_date', dates.end);
+
+            const queryStr = params.toString() ? `?${params.toString()}` : '';
 
             const [statsRes, usageRes, agentsRes, callsRes] = await Promise.all([
                 fetch(`${API_URL}/api/dashboard/stats${queryStr}`),
                 fetch(`${API_URL}/api/dashboard/usage-stats${queryStr}`),
-                fetch(`${API_URL}/api/agents${queryStr}`),
+                fetch(`${API_URL}/api/agents?empresa_id=${finalEmpresaId}`), // Agents don't need date filter usually
                 fetch(`${API_URL}/api/dashboard/recent-calls${queryStr}`)
             ]);
 
@@ -112,6 +125,33 @@ const ClientDashboard: React.FC<Props> = ({ empresaId }) => {
         }
     };
 
+    const exportCSV = () => {
+        const headers = [
+            t("Teléfono"),
+            t("Campaña"),
+            t("Fecha"),
+            t("Estado")
+        ];
+        const csvContent = [
+            headers.join(","),
+            ...recentCalls.map(c => [
+                c.phone,
+                `"${c.campaign.replace(/"/g, '""')}"`,
+                new Date(c.date).toLocaleString(),
+                c.status
+            ].join(","))
+        ].join("\n");
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", `client_activity_${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     if (isLoading) {
         return (
             <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
@@ -127,15 +167,31 @@ const ClientDashboard: React.FC<Props> = ({ empresaId }) => {
 
     return (
         <div className="space-y-8 animate-fade-in pb-10">
-            {/* Header / Welcome */}
+            {/* Header / Filter */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                    <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white tracking-tight">
-                        {t('Welcome back', 'Bienvenido de nuevo')}, <span className="text-blue-600">{profile?.full_name?.split(' ')[0]}</span>
-                    </h2>
-                    <p className="text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-2">
-                        <Calendar size={14} /> {new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                    </p>
+                <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-200 text-white">
+                        <TrendingUp size={24} />
+                    </div>
+                    <div>
+                        <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+                            {t('Welcome back', 'Bienvenido de nuevo')}, <span className="text-blue-600">{profile?.full_name?.split(' ')[0]}</span>
+                        </h2>
+                        <p className="text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-2 text-sm">
+                            <Calendar size={14} /> {new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                    <DateRangePicker value={dateRange} onChange={setDateRange} />
+                    <button
+                        onClick={loadData}
+                        className="p-2.5 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-gray-800"
+                        title={t('Refresh data', 'Refrescar datos')}
+                    >
+                        <RefreshCw size={18} className={isLoading ? "animate-spin" : "text-gray-500"} />
+                    </button>
                 </div>
             </div>
 
@@ -271,66 +327,82 @@ const ClientDashboard: React.FC<Props> = ({ empresaId }) => {
                 </div>
             </div>
 
-            {/* Recent Activity Mini-Table */}
-            <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
-                <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-xl font-bold text-gray-800 dark:text-white">{t('Live Activity Feed', 'Última Actividad Real')}</h3>
-                    <button className="text-blue-600 text-sm font-bold hover:underline">{t('View all results', 'Ver todos los resultados')}</button>
+            {/* Supervision & Activity */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-10">
+                <div className="lg:col-span-1">
+                    <LiveMonitoring />
                 </div>
 
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead className="text-left border-b border-gray-100 dark:border-gray-700">
-                            <tr>
-                                <th className="pb-4 text-xs font-bold text-gray-400 uppercase tracking-widest">{t('Contact', 'Contacto')}</th>
-                                <th className="pb-4 text-xs font-bold text-gray-400 uppercase tracking-widest">{t('Time', 'Hora')}</th>
-                                <th className="pb-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-center">{t('Status', 'Resultado')}</th>
-                                <th className="pb-4"></th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
-                            {recentCalls.map((call) => (
-                                <tr key={call.id} className="group hover:bg-gray-50/50 dark:hover:bg-gray-700/20 transition-colors">
-                                    <td className="py-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-500">
-                                                <User size={14} />
-                                            </div>
-                                            <div>
-                                                <p className="text-sm font-bold text-gray-900 dark:text-white">{call.phone}</p>
-                                                <p className="text-[10px] text-blue-500 font-bold uppercase tracking-tight">{call.campaign}</p>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td className="py-4 text-xs text-gray-500 dark:text-gray-400 font-medium">
-                                        {new Date(call.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </td>
-                                    <td className="py-4 text-center">
-                                        {(() => {
-                                            const status = call.status.toLowerCase();
-                                            if (status === 'completada' || status === 'completed')
-                                                return <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-[10px] font-extrabold uppercase">{t('Success', 'Éxito')}</span>;
-                                            if (status === 'parcial')
-                                                return <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full text-[10px] font-extrabold uppercase">{t('Partial', 'Parcial')}</span>;
-                                            if (status === 'rechazada' || status === 'rejected')
-                                                return <span className="px-3 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-full text-[10px] font-extrabold uppercase">{t('Rejected', 'Rechazada')}</span>;
-                                            return <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-500 rounded-full text-[10px] font-extrabold uppercase">{call.status}</span>;
-                                        })()}
-                                    </td>
-                                    <td className="py-4 text-right">
-                                        <button className="p-2 text-gray-300 hover:text-blue-600 transition-colors">
-                                            <ChevronRight size={18} />
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                    {recentCalls.length === 0 && (
-                        <div className="text-center py-10">
-                            <p className="text-gray-400 text-sm italic">{t('No activity yet today', 'Sin actividad reciente hoy.')}</p>
+                <div className="lg:col-span-2 bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="text-xl font-bold text-gray-800 dark:text-white">{t('Live Activity Feed', 'Última Actividad Real')}</h3>
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={exportCSV}
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-all border border-gray-100 dark:border-gray-600"
+                            >
+                                <Download size={14} />
+                                {t('Export CSV', 'Exportar CSV')}
+                            </button>
+                            <button className="text-blue-600 dark:text-blue-400 text-sm font-bold hover:underline">{t('View all results', 'Ver todos los resultados')}</button>
                         </div>
-                    )}
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead className="text-left border-b border-gray-100 dark:border-gray-700">
+                                <tr>
+                                    <th className="pb-4 text-xs font-bold text-gray-400 uppercase tracking-widest">{t('Contact', 'Contacto')}</th>
+                                    <th className="pb-4 text-xs font-bold text-gray-400 uppercase tracking-widest">{t('Time', 'Hora')}</th>
+                                    <th className="pb-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-center">{t('Status', 'Resultado')}</th>
+                                    <th className="pb-4"></th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
+                                {recentCalls.map((call) => (
+                                    <tr key={call.id} className="group hover:bg-gray-50/50 dark:hover:bg-gray-700/20 transition-colors">
+                                        <td className="py-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-500">
+                                                    <User size={14} />
+                                                </div>
+                                                <div>
+                                                    <p className="text-sm font-bold text-gray-900 dark:text-white">{call.phone}</p>
+                                                    <p className="text-[10px] text-blue-500 font-bold uppercase tracking-tight">{call.campaign}</p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="py-4 text-xs text-gray-500 dark:text-gray-400 font-medium">
+                                            {new Date(call.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </td>
+                                        <td className="py-4 text-center">
+                                            {(() => {
+                                                const status = call.status.toLowerCase();
+                                                if (status === 'completada' || status === 'completed')
+                                                    return <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-[10px] font-extrabold uppercase">{t('Success', 'Éxito')}</span>;
+                                                if (status === 'parcial')
+                                                    return <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full text-[10px] font-extrabold uppercase">{t('Partial', 'Parcial')}</span>;
+                                                if (status === 'rechazada' || status === 'rejected')
+                                                    return <span className="px-3 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-full text-[10px] font-extrabold uppercase">{t('Rejected', 'Rechazada')}</span>;
+                                                return <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-500 rounded-full text-[10px] font-extrabold uppercase">{call.status}</span>;
+                                            })()}
+                                        </td>
+                                        <td className="py-4 text-right">
+                                            <button className="p-2 text-gray-300 hover:text-blue-600 transition-colors">
+                                                <ChevronRight size={18} />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                        {recentCalls.length === 0 && (
+                            <div className="text-center py-10">
+                                <p className="text-gray-400 text-sm italic">{t('No activity yet today', 'Sin actividad reciente hoy.')}</p>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

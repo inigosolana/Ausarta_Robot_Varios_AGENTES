@@ -5,111 +5,131 @@ import {
     BarChart2,
     Timer,
     User,
-    Zap
+    Zap,
+    Download,
+    Calendar,
+    RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
+import { DateRangePicker, getDatesFromRange, DateRange } from './DateRangePicker';
+import { LiveMonitoring } from './LiveMonitoring';
 
 // API URL - Consistent with other views
 const API_URL = import.meta.env.VITE_API_URL || '';
-
-interface Props {
-    empresaId?: number;
-    agentId?: number;
-    campaignId?: number;
-    title?: string;
-    hideIntegrations?: boolean;
-}
 
 interface DashboardStats {
     total_calls: number;
     completed_calls: number;
     pending_calls: number;
-    is_question_based?: boolean;
     avg_scores: {
         comercial: number;
         instalador: number;
         rapidez: number;
         overall: number;
     };
+    is_question_based?: boolean;
 }
 
 interface Call {
     id: number;
-    phone: number;
+    phone: string;
     campaign: string;
     date: string;
     status: string;
-    scores: {
+    llm_model: string;
+    scores?: {
         comercial: number | null;
         instalador: number | null;
         rapidez: number | null;
     };
-    llm_model?: string | null;
 }
 
 interface Integration {
     name: string;
     provider: string;
     active: boolean;
-    model?: string;
+    status?: string | number;
     url?: string;
-    env_var?: string;
+    icon?: React.ElementType;
 }
 
-const StatCard = ({ title, value, icon: Icon, color }: any) => (
-    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm flex items-center justify-between dark:text-white">
-        <div>
-            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
-            <h3 className="text-3xl font-bold text-gray-800 dark:text-gray-100 mt-2">{value}</h3>
-        </div>
-        <div className={`p-3 rounded-full bg-${color}-50 text-${color}-600`}>
-            <Icon size={24} />
-        </div>
-    </div>
-);
+interface StatCardProps {
+    title: string;
+    value: string | number;
+    icon: React.ElementType;
+    color: 'blue' | 'green' | 'purple' | 'orange';
+}
 
-const IntegrationCard: React.FC<{ integ: Integration }> = ({ integ }) => {
-    const { t } = useTranslation();
+const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, color }) => {
+    const colors = {
+        blue: 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400',
+        green: 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400',
+        purple: 'bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400',
+        orange: 'bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400',
+    };
+
     return (
-        <div className={`p-4 rounded-xl border flex items-center justify-between ${integ.active ? 'bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800'}`}>
-            <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-full ${integ.active ? 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400'}`}>
-                    <Zap size={18} />
-                </div>
-                <div>
-                    <h4 className="font-semibold text-gray-900 dark:text-white text-sm">{integ.name}</h4>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{integ.provider} • {integ.model || 'Cloud'}</p>
-                    {!integ.active && integ.env_var && (
-                        <code className="text-[10px] bg-red-100 text-red-700 px-1 rounded block mt-1 w-fit">
-                            {t('Missing', 'Falta')}: {integ.env_var}
-                        </code>
-                    )}
-                    {integ.active && integ.env_var && (
-                        <code className="text-[10px] bg-green-100 text-green-700 px-1 rounded block mt-1 w-fit">
-                            {t('active', 'activo')}: {integ.env_var}
-                        </code>
-                    )}
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm animate-slide-up">
+            <div className="flex items-center justify-between mb-4">
+                <div className={`p-3 rounded-lg ${colors[color]}`}>
+                    <Icon size={24} />
                 </div>
             </div>
-            <div className={`px-2 py-1 rounded text-xs font-bold uppercase ${integ.active ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'}`}>
-                {integ.active ? t('Active', 'Activo') : t('Offline', 'Desconectado')}
+            <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</h3>
+            <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{value}</p>
+        </div>
+    );
+};
+
+const IntegrationCard: React.FC<Integration> = ({ name, provider, active, status, url }) => {
+    return (
+        <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-100 dark:border-gray-700 transition-all hover:bg-white dark:hover:bg-gray-700 hover:shadow-sm">
+            <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${active ? 'bg-green-100 text-green-600 dark:bg-green-900/30' : 'bg-red-100 text-red-600 dark:bg-red-900/30'}`}>
+                    <Zap size={20} />
+                </div>
+                <div>
+                    <h4 className="text-sm font-bold text-gray-800 dark:text-white">{name}</h4>
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-wider">{provider}</p>
+                </div>
+            </div>
+            <div className="text-right">
+                <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${active ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'}`}>
+                    {active ? 'ONLINE' : 'OFFLINE'}
+                </span>
+                {status && <p className="text-[10px] text-gray-400 mt-1">{status}</p>}
             </div>
         </div>
     );
 };
 
-const AdminDashboard: React.FC<Props> = ({ empresaId, agentId, campaignId, title, hideIntegrations }) => {
+interface AdminDashboardProps {
+    title?: string;
+    empresaId?: number;
+    agentId?: number;
+    campaignId?: number;
+    hideIntegrations?: boolean;
+}
+
+const AdminDashboard: React.FC<AdminDashboardProps> = ({
+    title,
+    empresaId,
+    agentId,
+    campaignId,
+    hideIntegrations = false
+}) => {
     const { profile, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [recentCalls, setRecentCalls] = useState<Call[]>([]);
     const [integrations, setIntegrations] = useState<Integration[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [dateRange, setDateRange] = useState<DateRange>('7d');
 
     useEffect(() => {
         loadData();
-    }, [profile]);
+    }, [profile, dateRange]);
 
     const loadData = async () => {
         try {
@@ -120,6 +140,11 @@ const AdminDashboard: React.FC<Props> = ({ empresaId, agentId, campaignId, title
             if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
             if (agentId) params.append('agent_id', String(agentId));
             if (campaignId) params.append('campaign_id', String(campaignId));
+
+            // Date filtering
+            const dates = getDatesFromRange(dateRange);
+            if (dates.start) params.append('start_date', dates.start);
+            if (dates.end) params.append('end_date', dates.end);
 
             const queryStr = params.toString() ? `?${params.toString()}` : '';
 
@@ -140,26 +165,70 @@ const AdminDashboard: React.FC<Props> = ({ empresaId, agentId, campaignId, title
         }
     };
 
-    if (isLoading) return <div className="p-8 text-center text-gray-500">{t('Loading dashboard...', 'Cargando dashboard...')}</div>;
+    const exportCSV = () => {
+        const headers = [
+            t("ID"),
+            t("Teléfono / Campaña", "Phone / Campaign"),
+            t("Fecha", "Date"),
+            t("Estado", "Status"),
+            t("Modelo AI", "AI Model"),
+            t("C / I / R")
+        ];
+        const csvContent = [
+            headers.join(","),
+            ...recentCalls.map(c => [
+                c.id,
+                `"${c.phone} - ${c.campaign.replace(/"/g, '""')}"`,
+                new Date(c.date).toLocaleString(),
+                c.status,
+                c.llm_model || "Standard",
+                `${c.scores?.comercial ?? '-'} / ${c.scores?.instalador ?? '-'} / ${c.scores?.rapidez ?? '-'}`
+            ].join(","))
+        ].join("\n");
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", `dashboard_activity_${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    if (isLoading && !stats) return <div className="p-8 text-center text-gray-500">{t('Loading dashboard...', 'Cargando dashboard...')}</div>;
 
     return (
         <div className="space-y-8 animate-fade-in">
-            {/* Header */}
-            {!title && (
-                <div>
+            {/* Header / Filter */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                {!title && (
                     <div className="flex items-center gap-3">
                         <img src="/ausarta.png" alt="Logo" className="h-10 w-auto object-contain dark:invert" />
-                        <h2 className="text-3xl font-bold text-gray-900 dark:text-white">{t('Admin Dashboard', 'Panel de Administración')}</h2>
+                        <div>
+                            <h2 className="text-3xl font-bold text-gray-900 dark:text-white">{t('Admin Dashboard', 'Panel de Administración')}</h2>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm">{t('System health and global stats', 'Salud del sistema y estadísticas globales')}</p>
+                        </div>
                     </div>
-                    <p className="text-gray-500 dark:text-gray-400 mt-1">{t('System health and global stats', 'Salud del sistema y estadísticas globales')}</p>
+                )}
+                {title && (
+                    <div>
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{title}</h2>
+                        <p className="text-gray-500 dark:text-gray-400 mt-1 text-sm">{t('Activity summary', 'Resumen de actividad')}</p>
+                    </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2">
+                    <DateRangePicker value={dateRange} onChange={setDateRange} />
+                    <button
+                        onClick={loadData}
+                        className="p-2 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                        title={t('Refresh data', 'Refrescar datos')}
+                    >
+                        <RefreshCw size={18} className={isLoading ? "animate-spin" : "text-gray-500"} />
+                    </button>
                 </div>
-            )}
-            {title && (
-                <div>
-                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{title}</h2>
-                    <p className="text-gray-500 dark:text-gray-400 mt-1 text-sm">{t('Activity summary', 'Resumen de actividad')}</p>
-                </div>
-            )}
+            </div>
 
             {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -191,132 +260,101 @@ const AdminDashboard: React.FC<Props> = ({ empresaId, agentId, campaignId, title
                     />
                 )}
                 <StatCard
-                    title={t('Pending', 'Pendientes')}
+                    title={t('Pending Calls', 'Llamadas en Curso')}
                     value={stats?.pending_calls || 0}
                     icon={Timer}
-                    color="yellow"
+                    color="orange"
                 />
             </div>
 
-            {/* Integrations Status */}
-            {!hideIntegrations && integrations.length > 0 && (
-                <div>
-                    <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
-                        <Zap size={20} className="text-yellow-500" /> {t('Services Status (APIs)', 'Estado de Servicios (APIs)')}
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        {integrations.map((intext, i) => (
-                            <IntegrationCard key={i} integ={intext} />
-                        ))}
-                    </div>
-                </div>
-            )}
+            {/* Main Content Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Integration Status & Supervision */}
+                <div className="lg:col-span-1 space-y-8">
+                    <LiveMonitoring />
 
-            {/* Scores Breakdown (Only if NOT question based) */}
-            {!stats?.is_question_based && stats?.avg_scores && (
-                <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm animate-fade-in">
-                    <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
-                        <BarChart2 className="text-blue-500" />
-                        {t('Scores Breakdown', 'Desglose de Puntuaciones')}
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                        {[
-                            { label: t('Sales Score', 'Punt. Comercial'), value: stats.avg_scores.comercial, color: 'blue' },
-                            { label: t('Installer Score', 'Punt. Instalador'), value: stats.avg_scores.instalador, color: 'green' },
-                            { label: t('Speed Score', 'Punt. Rapidez'), value: stats.avg_scores.rapidez, color: 'purple' },
-                        ].map((item, idx) => (
-                            <div key={idx} className="space-y-3">
-                                <div className="flex justify-between items-end">
-                                    <span className="text-sm font-medium text-gray-500">{item.label}</span>
-                                    <span className="text-2xl font-bold text-gray-900">{item.value}/10</span>
-                                </div>
-                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                                    <div
-                                        className={`h-full bg-${item.color}-500 transition-all duration-1000`}
-                                        style={{ width: `${item.value * 10}%` }}
-                                    />
-                                </div>
+                    {!hideIntegrations && (
+                        <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm animate-slide-up">
+                            <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4">{t('Core Integrations', 'Integraciones Principales')}</h3>
+                            <div className="space-y-4">
+                                {integrations.map((int, i) => (
+                                    <IntegrationCard key={i} {...int} />
+                                ))}
                             </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {/* Recent Activity */}
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-                <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4">{t('Latest Global Activity', 'Última Actividad Global')}</h3>
-                <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                        <thead className="bg-gray-50 dark:bg-gray-800/50">
-                            <tr>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">{t('Phone / Campaign', 'Teléfono / Campaña')}</th>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('Date', 'Fecha')}</th>
-                                <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    {stats?.is_question_based ? t('Answers', 'Respuestas') : 'C / I / R'}
-                                </th>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('AI / Model', 'IA / Modelo')}</th>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('Status', 'Estado')}</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                            {recentCalls.map((call) => (
-                                <tr key={call.id} className="dark:text-gray-200">
-                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 flex items-center gap-2">
-                                        <div className="flex flex-col">
-                                            <div className="flex items-center gap-1">
-                                                <User size={12} className="text-gray-400" />
-                                                <span className="font-medium text-xs dark:text-gray-200">{call.phone}</span>
-                                            </div>
-                                            <span className="text-[10px] text-blue-600 font-bold uppercase tracking-tighter ml-4">{call.campaign}</span>
-                                        </div>
-                                    </td>
-                                    <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
-                                        {new Date(call.date).toLocaleString()}
-                                    </td>
-                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-center font-mono font-bold text-gray-700 dark:text-gray-300">
-                                        {stats?.is_question_based ? (
-                                            <span className="text-xs font-normal text-gray-400 italic">{t('See in results', 'Ver en resultados')}</span>
-                                        ) : (
-                                            `${call.scores?.comercial ?? '-'} / ${call.scores?.instalador ?? '-'} / ${call.scores?.rapidez ?? '-'}`
-                                        )}
-                                    </td>
-                                    <td className="px-3 py-2 whitespace-nowrap">
-                                        <div className="flex flex-col">
-                                            <span className="text-[9px] text-gray-400 font-bold uppercase">{call.llm_model?.split(' ')[0] || 'AI'}</span>
-                                            <span className="text-[10px] text-gray-600 dark:text-gray-400 truncate max-w-[80px]">{(call.llm_model || 'Standard').replace('Groq ', '')}</span>
-                                        </div>
-                                    </td>
-                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
-                                        {(() => {
-                                            switch (call.status) {
-                                                case 'completada':
-                                                case 'completed':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-green-500 text-white uppercase shadow-sm">{t('Completed', 'Completada')}</span>;
-                                                case 'parcial':
-                                                case 'incomplete':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-orange-400 text-white uppercase shadow-sm">{t('Partial', 'Parcial')}</span>;
-                                                case 'rechazada':
-                                                case 'rejected_opt_out':
-                                                case 'rejected':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-red-700 text-white uppercase shadow-sm">{t('Rejected', 'Rechazada')}</span>;
-                                                case 'fallida':
-                                                case 'failed':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-purple-500 text-white uppercase shadow-sm">{t('Failed', 'Fallida')}</span>;
-                                                case 'no_contesta':
-                                                case 'unreached':
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-amber-400 text-white uppercase shadow-sm">{t('Unreached', 'No Contesta')}</span>;
-                                                default:
-                                                    return <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-400 text-white uppercase shadow-sm">{t('Pending', 'Pendiente')}</span>;
-                                            }
-                                        })()}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                    {recentCalls.length === 0 && (
-                        <p className="text-center text-gray-400 py-8 text-sm">{t('No recent calls', 'No hay llamadas recientes')}</p>
+                        </div>
                     )}
+                </div>
+
+                {/* Recent Activity */}
+                <div className="lg:col-span-2 space-y-8">
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden animate-slide-up">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-lg font-bold text-gray-800 dark:text-white">{t('Latest Global Activity', 'Última Actividad Global')}</h3>
+                            <button
+                                onClick={exportCSV}
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-all border border-blue-100 dark:border-blue-800"
+                            >
+                                <Download size={14} />
+                                {t('Export CSV', 'Exportar CSV')}
+                            </button>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left">
+                                <thead className="text-xs uppercase text-gray-400 border-b border-gray-50 dark:border-gray-700">
+                                    <tr>
+                                        <th className="pb-3 font-semibold">{t('Phone/Campaign')}</th>
+                                        <th className="pb-3 font-semibold">{t('Date')}</th>
+                                        <th className="pb-3 font-semibold">{t('Status')}</th>
+                                        {!stats?.is_question_based && <th className="pb-3 font-semibold">{t('CIR')}</th>}
+                                        <th className="pb-3 font-semibold">{t('Model', 'Modelo')}</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
+                                    {recentCalls.map((call) => (
+                                        <tr key={call.id} className="text-sm group hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                            <td className="py-4">
+                                                <div className="font-bold text-gray-800 dark:text-white">{call.phone}</div>
+                                                <div className="text-xs text-gray-400">{call.campaign}</div>
+                                            </td>
+                                            <td className="py-4 text-gray-500 dark:text-gray-400">
+                                                {new Date(call.date).toLocaleString()}
+                                            </td>
+                                            <td className="py-4">
+                                                <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${call.status === 'completada' ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300' :
+                                                        call.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' :
+                                                            'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                                                    }`}>
+                                                    {call.status.toUpperCase()}
+                                                </span>
+                                            </td>
+                                            {!stats?.is_question_based && (
+                                                <td className="py-4">
+                                                    <div className="flex gap-1 text-[10px] font-bold">
+                                                        <span className="text-blue-500">{call.scores?.comercial ?? '-'}</span>
+                                                        <span className="text-gray-300">/</span>
+                                                        <span className="text-green-500">{call.scores?.instalador ?? '-'}</span>
+                                                        <span className="text-gray-300">/</span>
+                                                        <span className="text-purple-500">{call.scores?.rapidez ?? '-'}</span>
+                                                    </div>
+                                                </td>
+                                            )}
+                                            <td className="py-4">
+                                                <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                                                    <Zap size={10} /> {call.llm_model || 'GPT-4o'}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {recentCalls.length === 0 && (
+                                <div className="text-center py-12 text-gray-400 italic">
+                                    {t('No recent activity', 'Sin actividad reciente')}
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

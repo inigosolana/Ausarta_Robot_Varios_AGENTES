@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Download, Search, RefreshCw, FileText, Target, ThumbsDown, Clock } from 'lucide-react';
+import { Download, Search, RefreshCw, FileText, Target, ThumbsDown, Clock, Calendar } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { AnalyticsDashboard } from '../components/AnalyticsDashboard';
+import { DateRangePicker, getDatesFromRange, DateRange } from '../components/DateRangePicker';
 
 interface SurveyResult {
     id: number;
@@ -48,6 +49,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
         : selectedEmpresaId;
     const [selectedAgentId, setSelectedAgentId] = useState<number | 'all'>('all');
     const [selectedTipo, setSelectedTipo] = useState<string | 'all'>('all');
+    const [dateRange, setDateRange] = useState<DateRange>('all');
 
     const loadResults = async () => {
         setLoading(true);
@@ -59,6 +61,11 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
             if (selectedAgentId !== 'all') params.append('agent_id', String(selectedAgentId));
             if (agentId) params.append('agent_id', String(agentId));
             if (campaignId) params.append('campaign_id', String(campaignId));
+
+            // Date filtering
+            const dates = getDatesFromRange(dateRange);
+            if (dates.start) params.append('start_date', dates.start);
+            if (dates.end) params.append('end_date', dates.end);
 
             const queryStr = params.toString() ? `?${params.toString()}` : '';
             const res = await fetch(`${BASE_URL}/api/results${queryStr}`);
@@ -95,7 +102,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
 
     useEffect(() => {
         loadResults();
-    }, [profile, effectiveEmpresaId, selectedAgentId, agentId, campaignId]);
+    }, [profile, effectiveEmpresaId, selectedAgentId, agentId, campaignId, dateRange]);
 
     const filteredResults = results.filter(r => {
         const matchesSearch = r.telefono.includes(searchTerm) ||
@@ -229,17 +236,21 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                         className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-black/20"
                     />
                 </div>
+
+                <DateRangePicker value={dateRange} onChange={setDateRange} />
             </div>
 
             {/* Dashboard Section */}
-            {activeAgentType && filteredResults.length > 0 && (
-                <div className="mb-6">
-                    <AnalyticsDashboard
-                        tipoResultados={activeAgentType}
-                        results={filteredResults}
-                    />
-                </div>
-            )}
+            {
+                activeAgentType && filteredResults.length > 0 && (
+                    <div className="mb-6">
+                        <AnalyticsDashboard
+                            tipoResultados={activeAgentType}
+                            results={filteredResults}
+                        />
+                    </div>
+                )
+            }
 
             {/* Table */}
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -443,65 +454,67 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
             </div>
 
             {/* Transcript Modal */}
-            {viewingTranscript && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
-                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-                            <div>
-                                <h3 className="text-lg font-bold text-gray-900">{t("Transcription", "Transcripción")} #{viewingTranscript.id}</h3>
-                                <p className="text-xs text-gray-500">{viewingTranscript.telefono} • {new Date(viewingTranscript.fecha).toLocaleString()}</p>
-                            </div>
-                            <button
-                                onClick={() => setViewingTranscript(null)}
-                                className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-900 bg-white border border-gray-200 rounded-full hover:shadow-sm transition-all"
-                            >
-                                ✕
-                            </button>
-                        </div>
-
-                        <div className="p-6 overflow-y-auto space-y-4 bg-gray-50/20">
-                            {viewingTranscript.transcription ? (
-                                viewingTranscript.transcription.split('\n').filter(l => l.trim()).map((line, i) => {
-                                    const isAgente = line.startsWith('Agente:');
-                                    return (
-                                        <div key={i} className={`flex ${isAgente ? 'justify-start' : 'justify-end'}`}>
-                                            <div className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm shadow-sm border ${isAgente
-                                                ? 'bg-blue-600 text-white border-blue-700 rounded-tl-none'
-                                                : 'bg-white text-gray-800 border-gray-100 rounded-tr-none'
-                                                }`}>
-                                                <p className="font-semibold text-[10px] uppercase tracking-wider mb-1 opacity-70">
-                                                    {isAgente ? t('Ausarta Robot') : t('Cliente', 'Customer')}
-                                                </p>
-                                                <p className="leading-relaxed">
-                                                    {line.replace(/^(Agente|Cliente): /, '')}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    );
-                                })
-                            ) : (
-                                <div className="text-center py-12">
-                                    <div className="bg-gray-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
-                                        <FileText className="text-gray-400" />
-                                    </div>
-                                    <p className="text-gray-500 font-medium">{t("No transcription available", "No hay transcripción disponible")}</p>
-                                    <p className="text-xs text-gray-400">{t("The call might have been too short or no speech detected.", "La llamada pudo ser muy corta o no se detectó voz.")}</p>
+            {
+                viewingTranscript && (
+                    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
+                            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                                <div>
+                                    <h3 className="text-lg font-bold text-gray-900">{t("Transcription", "Transcripción")} #{viewingTranscript.id}</h3>
+                                    <p className="text-xs text-gray-500">{viewingTranscript.telefono} • {new Date(viewingTranscript.fecha).toLocaleString()}</p>
                                 </div>
-                            )}
-                        </div>
+                                <button
+                                    onClick={() => setViewingTranscript(null)}
+                                    className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-900 bg-white border border-gray-200 rounded-full hover:shadow-sm transition-all"
+                                >
+                                    ✕
+                                </button>
+                            </div>
 
-                        <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex justify-end">
-                            <button
-                                onClick={() => setViewingTranscript(null)}
-                                className="px-6 py-2 bg-gray-900 text-white text-sm font-semibold rounded-xl hover:bg-black transition-all shadow-lg"
-                            >
-                                {t("Close View", "Cerrar Vista")}
-                            </button>
+                            <div className="p-6 overflow-y-auto space-y-4 bg-gray-50/20">
+                                {viewingTranscript.transcription ? (
+                                    viewingTranscript.transcription.split('\n').filter(l => l.trim()).map((line, i) => {
+                                        const isAgente = line.startsWith('Agente:');
+                                        return (
+                                            <div key={i} className={`flex ${isAgente ? 'justify-start' : 'justify-end'}`}>
+                                                <div className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm shadow-sm border ${isAgente
+                                                    ? 'bg-blue-600 text-white border-blue-700 rounded-tl-none'
+                                                    : 'bg-white text-gray-800 border-gray-100 rounded-tr-none'
+                                                    }`}>
+                                                    <p className="font-semibold text-[10px] uppercase tracking-wider mb-1 opacity-70">
+                                                        {isAgente ? t('Ausarta Robot') : t('Cliente', 'Customer')}
+                                                    </p>
+                                                    <p className="leading-relaxed">
+                                                        {line.replace(/^(Agente|Cliente): /, '')}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                ) : (
+                                    <div className="text-center py-12">
+                                        <div className="bg-gray-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
+                                            <FileText className="text-gray-400" />
+                                        </div>
+                                        <p className="text-gray-500 font-medium">{t("No transcription available", "No hay transcripción disponible")}</p>
+                                        <p className="text-xs text-gray-400">{t("The call might have been too short or no speech detected.", "La llamada pudo ser muy corta o no se detectó voz.")}</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex justify-end">
+                                <button
+                                    onClick={() => setViewingTranscript(null)}
+                                    className="px-6 py-2 bg-gray-900 text-white text-sm font-semibold rounded-xl hover:bg-black transition-all shadow-lg"
+                                >
+                                    {t("Close View", "Cerrar Vista")}
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 };
 
