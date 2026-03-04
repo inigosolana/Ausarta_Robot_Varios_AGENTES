@@ -156,17 +156,32 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
 
     async def on_enter(self, *args, **kwargs) -> None:
         """Método llamado cuando el agente entra en la sesión. Lanza el saludo inicial."""
-        # En versiones recientes de LiveKit, la sesión se accede vía self.session (property)
-        if not self.session:
-            logger.warning("No session available in on_enter")
+        # Aseguramos que survey_id sea correcto antes de saludar
+        logger.info(f"--- 🎭 AGENTE EN SALA: {self.room_name} (Survey ID: {self.survey_id}) ---")
+        
+        # En versiones recientes de LiveKit, la sesión se accede vía self.session
+        # Si no está asoaciada aún, intentamos obtenerla de los argumentos si viniera
+        current_session = getattr(self, 'session', None)
+        if not current_session:
+            logger.warning(f"⚠️ [{self.room_name}] No session available in on_enter immediately.")
+            # Pequeña espera para que se asocie
+            await asyncio.sleep(0.5)
+            current_session = getattr(self, 'session', None)
+
+        if not current_session:
+            logger.error(f"❌ [{self.room_name}] No se pudo obtener la sesión para saludar.")
             return
-        logger.info(f"Saludando en sala: {self.room_name}")
+
+        logger.info(f"🎙️ Saludando en sala: {self.room_name} con: {self.greeting}")
         await asyncio.sleep(1.2)
-        await self.session.say(self.greeting, allow_interruptions=False)
+        try:
+            await current_session.say(self.greeting, allow_interruptions=False)
+        except Exception as e:
+            logger.error(f"❌ Error al saludar: {e}")
 
     async def notify_n8n_transcription(self, survey_id: str, messages: list):
         """Envía la transcripción cruda a n8n para que él la procese."""
-        webhook_url = os.getenv("N8N_WEBHOOK_URL_TRANSCRIPTS")
+        webhook_url = os.getenv("N8N_WEBHOOK_URL_TRANSCRIPTS") or os.getenv("N8N_WEBHOOK_URL")
         if not webhook_url: return
         try:
             payload = {
@@ -321,19 +336,17 @@ async def entrypoint(ctx: JobContext):
     # --- PASO 2: Conectar a la sala ---
     is_duplicate = False
     try:
-        logger.info(f"⏱️ [{job_id}] Conectando a sala...")
+        logger.info(f"⏱️ [{job_id}] Intentando conectar a sala {room_name}...")
         await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
         
         # --- CONTROL DE DUPLICIDAD ---
-        # Si ya hay otro agente (nosotros mismos u otra instancia) como participante, salimos.
-        # LiveKit suele tener al agente como un participante de tipo AGENT.
         agent_participants = [p for p in ctx.room.remote_participants.values() if getattr(p, 'kind', None) == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT or p.identity.startswith("agent-")]
-        if len(agent_participants) > 0:
-            logger.warning(f"⚠️ [{job_id}] Ya hay un agente en la sala {room_name} ({agent_participants[0].identity}). Cancelando esta instancia para evitar doble voz.")
+        if len(agent_participants) > 1: # Ya estamos nosotros (1), si hay más (1+) es que hay otro
+            logger.warning(f"⚠️ [{job_id}] Ya un agente en la sala {room_name}. Cancelando duplicado.")
             is_duplicate = True
             return
 
-        logger.info(f"✅ [{job_id}] Conectado (Instancia única).")
+        logger.info(f"✅ [{job_id}] Conectado a sala {room_name}. Participantes: {len(ctx.room.remote_participants)}")
 
         # --- PASO 3: Cargar config ---
         vad_task = asyncio.to_thread(silero.VAD.load, min_silence_duration=0.5)
@@ -414,7 +427,7 @@ async def entrypoint(ctx: JobContext):
     
     finally:
         if not is_duplicate:
-            logger.info(f"--- 🏁 FIN DE SESIÓN AGENTE (Job: {job_id}) ---")
+            logger.info(f"--- 🏁 FIN DE SESIÓN AGENTE (Job: {job_id}, Room: {room_name}, Survey: {survey_id}) ---")
             agent_instance_exists = 'agent_instance' in locals()
             data_saved = getattr(agent_instance, 'data_saved', False) if agent_instance_exists else False
             

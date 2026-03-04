@@ -911,3 +911,8 @@ Time-based workflows - 28% have schedule triggers
 **Related Files**:
 - **[SKILL.md](SKILL.md)** - Configuration workflow and philosophy
 - **[DEPENDENCIES.md](DEPENDENCIES.md)** - Property dependency rules
+
+### 🚨 REGLAS ESTRICTAS DE SEGURIDAD Y NODOS (CRÍTICO) 🚨
+1. **CERO TEXTO PLANO PARA API KEYS:** NUNCA, bajo ninguna circunstancia, escribas API Keys, Tokens o contraseñas en los `headerParameters` o `bodyParameters` de un nodo HTTP Request. Debes usar SIEMPRE el sistema de credenciales nativo de n8n configurando el parámetro `"credentials"`.
+2. **USO DE NODOS NATIVOS:** Si existe un nodo nativo en n8n para un servicio (como Telegram, Slack, OpenAI), DEBES usar el nodo nativo (`n8n-nodes-base.telegram`, etc.) en lugar de construir un `httpRequest` genérico.
+3. **TOLERANCIA A FALLOS:** En nodos que llamen a APIs externas inestables (como LLMs o Groq), configura siempre opciones de manejo de errores como `"continueOnFail": true` si el workflow debe seguir notificando el error aunque la IA falle.

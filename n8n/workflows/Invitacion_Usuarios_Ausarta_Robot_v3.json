@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-04T12:58:12.012Z",
+  "updatedAt": "2026-03-04T18:16:00.000Z",
   "createdAt": "2026-02-24T13:49:09.664Z",
   "id": "MkglONaefdeNTLrm",
   "name": "Invitacion_Usuarios_Ausarta_Robot_v3",
@@ -18,8 +18,8 @@
       "id": "webhook-123456789",
       "name": "Webhook",
       "position": [
-        112,
-        208
+        100,
+        200
       ],
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
@@ -28,85 +28,71 @@
     },
     {
       "parameters": {
-        "authentication": "none",
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "apikey",
-              "value": "{{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-            },
-            {
-              "name": "Authorization",
-              "value": "Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-            }
-          ]
-        },
-        "jsonBody": "={\n  \"email\": \"{{ $node.Webhook.json.body.email }}\",\n  \"password\": \"{{ $node.Webhook.json.body.password || 'Robot2025!' }}\",\n  \"email_confirm\": true\n}",
         "method": "POST",
-        "options": {},
+        "url": "=https://afrrxeibtrwjaiqmhytu.supabase.co/auth/v1/admin/users",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
         "sendBody": true,
-        "sendHeaders": true,
         "specifyBody": "json",
-        "url": "{{ $env.VITE_SUPABASE_URL }}/auth/v1/admin/users"
+        "jsonBody": "={\n  \"email\": \"{{ $('Webhook').item.json.body.email }}\",\n  \"password\": \"{{ $('Webhook').item.json.body.password || 'Robot2025!' }}\",\n  \"email_confirm\": true\n}"
       },
       "id": "supabase-auth-123",
       "name": "Supabase_Auth",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        352,
-        208
-      ]
+        350,
+        200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "v8Epggpt6LC5dFEf",
+          "name": "Supabase API Auto"
+        }
+      }
     },
     {
       "parameters": {
-        "authentication": "none",
-        "headerParameters": {
-          "parameters": [
+        "tableId": "user_profiles",
+        "operation": "update",
+        "filters": {
+          "conditions": [
             {
-              "name": "apikey",
-              "value": "{{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-            },
-            {
-              "name": "Authorization",
-              "value": "Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-            },
-            {
-              "name": "Prefer",
-              "value": "resolution=merge-duplicates"
+              "column": "id",
+              "operator": "eq",
+              "value": "={{ $('Supabase_Auth').item.json.id }}"
             }
           ]
         },
-        "jsonBody": "={\n  \"id\": \"{{ $node.Supabase_Auth.json.id }}\",\n  \"email\": \"{{ $node.Webhook.json.body.email }}\",\n  \"full_name\": \"{{ $node.Webhook.json.body.full_name }}\",\n  \"role\": \"{{ $node.Webhook.json.body.role }}\",\n  \"empresa_id\": {{ $node.Webhook.json.body.empresa_id }}\n}",
-        "method": "POST",
-        "options": {},
-        "sendBody": true,
-        "sendHeaders": true,
-        "specifyBody": "json",
-        "url": "{{ $env.VITE_SUPABASE_URL }}/rest/v1/user_profiles"
+        "dataToSend": "autoMapInputData"
       },
       "id": "supabase-profile-123",
       "name": "Supabase_Profile",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
       "position": [
-        608,
-        208
-      ]
+        600,
+        200
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "v8Epggpt6LC5dFEf",
+          "name": "Supabase API Auto"
+        }
+      }
     },
     {
       "parameters": {
-        "html": "=<div style=\"font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;\">\n    <div style=\"background-color: #004a99; padding: 20px; text-align: center;\">\n        <img src=\"http://15.216.15.30/ausarta.png\" alt=\"Ausarta\" style=\"height: 50px;\">\n    </div>\n    <div style=\"padding: 30px;\">\n        <h2 style=\"color: #004a99;\">¡Bienvenido a Ausarta Robot!</h2>\n        <p>Hola <strong>{{ $node['Webhook'].json.body.full_name }}</strong>,</p>\n        <p>Tu cuenta de acceso a la plataforma <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\n        <p>A continuación tienes tus credenciales de acceso temporales:</p>\n        <div style=\"background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd;\">\n            <p style=\"margin: 5px 0;\"><strong>Usuario:</strong> {{ $node['Webhook'].json.body.email }}</p>\n            <p style=\"margin: 5px 0;\"><strong>Contraseña temporal:</strong> {{ $node['Webhook'].json.body.password || 'Robot2025!' }}</p>\n        </div>\n        <p><strong>Pasos para comenzar:</strong></p>\n        <ol>\n            <li>Accede a la plataforma en <a href=\"http://15.216.15.30\" style=\"color: #004a99; font-weight: bold;\">15.216.15.30</a>.</li>\n            <li>Inicia sesión con las credenciales indicadas arriba.</li>\n            <li>Por seguridad, te recomendamos cambiar tu contraseña en el apartado de configuración una vez dentro.</li>\n        </ol>\n        <div style=\"text-align: center; margin-top: 30px;\">\n            <a href=\"http://15.216.15.30\" style=\"background-color: #004a99; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold;\">Acceder a la Plataforma</a>\n        </div>\n        <hr style=\"border: 0; border-top: 1px solid #eee; margin: 30px 0;\">\n        <p style=\"font-size: 13px; color: #666;\">\n            Si tienes cualquier duda o problema técnico durante el acceso, por favor ponte en contacto con nosotros escribiendo un correo a <a href=\"mailto:clientes@ausarta.es\" style=\"color: #004a99;\">clientes@ausarta.es</a>.\n        </p>\n    </div>\n</div>"
+        "html": "=<div style=\"font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;\">\n    <div style=\"background-color: #004a99; padding: 20px; text-align: center;\">\n        <img src=\"http://15.216.15.30/ausarta.png\" alt=\"Ausarta\" style=\"height: 50px;\">\n    </div>\n    <div style=\"padding: 30px;\">\n        <h2 style=\"color: #004a99;\">¡Bienvenido a Ausarta Robot!</h2>\n        <p>Hola <strong>{{ $('Webhook').item.json.body.full_name }}</strong>,</p>\n        <p>Tu cuenta de acceso a la plataforma <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\n        <p>A continuación tienes tus credenciales de acceso temporales:</p>\n        <div style=\"background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd;\">\n            <p style=\"margin: 5px 0;\"><strong>Usuario:</strong> {{ $('Webhook').item.json.body.email }}</p>\n            <p style=\"margin: 5px 0;\"><strong>Contraseña temporal:</strong> {{ $('Webhook').item.json.body.password || 'Robot2025!' }}</p>\n        </div>\n        <p><strong>Pasos para comenzar:</strong></p>\n        <ol>\n            <li>Accede a la plataforma en <a href=\"http://15.216.15.30\" style=\"color: #004a99; font-weight: bold;\">15.216.15.30</a>.</li>\n            <li>Inicia sesión con las credenciales indicadas arriba.</li>\n            <li>Por seguridad, te recomendamos cambiar tu contraseña en el apartado de configuración una vez dentro.</li>\n        </ol>\n        <p style=\"font-size: 13px; color: #666;\">\n            Si tienes cualquier duda técnica, escribe a <a href=\"mailto:clientes@ausarta.es\" style=\"color: #004a99;\">clientes@ausarta.es</a>.\n        </p>\n    </div>\n</div>"
       },
       "id": "email-123456789",
       "name": "Enviar_Email_Bienvenida",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        864,
-        208
+        850,
+        200
       ],
-      "webhookId": "4bfc5867-139e-4ca2-a773-3eafbc6a284a",
       "credentials": {
         "smtp": {
           "id": "D1gBpu0AEp8AueAF",
@@ -124,8 +110,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        1152,
-        208
+        1100,
+        200
       ]
     }
   ],
@@ -191,238 +177,9 @@
   "pinData": {},
   "versionId": "a613de38-fe73-42d4-b609-6c895e0294c0",
   "activeVersionId": "a613de38-fe73-42d4-b609-6c895e0294c0",
-  "versionCounter": 65,
+  "versionCounter": 66,
   "triggerCount": 1,
-  "shared": [
-    {
-      "updatedAt": "2026-02-24T13:49:09.667Z",
-      "createdAt": "2026-02-24T13:49:09.667Z",
-      "role": "workflow:owner",
-      "workflowId": "MkglONaefdeNTLrm",
-      "projectId": "ijbwk55HPKJ5DPss",
-      "project": {
-        "updatedAt": "2025-12-11T08:54:51.702Z",
-        "createdAt": "2025-12-10T13:46:26.449Z",
-        "id": "ijbwk55HPKJ5DPss",
-        "name": "inigo solana <inigo.solana@ausarta.es>",
-        "type": "personal",
-        "icon": null,
-        "description": null,
-        "projectRelations": [
-          {
-            "updatedAt": "2025-12-10T13:46:26.452Z",
-            "createdAt": "2025-12-10T13:46:26.452Z",
-            "userId": "770335f9-a6c2-46ca-824f-d6bc6859540e",
-            "projectId": "ijbwk55HPKJ5DPss",
-            "user": {
-              "updatedAt": "2026-03-04T08:56:01.000Z",
-              "createdAt": "2025-12-10T13:46:26.442Z",
-              "id": "770335f9-a6c2-46ca-824f-d6bc6859540e",
-              "email": "inigo.solana@ausarta.es",
-              "firstName": "inigo",
-              "lastName": "solana",
-              "personalizationAnswers": {
-                "version": "v4",
-                "personalization_survey_submitted_at": "2025-12-11T08:55:07.101Z",
-                "personalization_survey_n8n_version": "1.123.4",
-                "companySize": "100-499",
-                "companyType": "saas",
-                "role": "business-owner",
-                "reportedSource": "google"
-              },
-              "settings": {
-                "easyAIWorkflowOnboarded": true,
-                "firstSuccessfulWorkflowId": "MkglONaefdeNTLrm",
-                "userActivated": true,
-                "userActivatedAt": 1772015350689
-              },
-              "disabled": false,
-              "mfaEnabled": false,
-              "lastActiveAt": "2026-03-04",
-              "isPending": false
-            }
-          }
-        ]
-      }
-    }
-  ],
+  "shared": [],
   "tags": [],
-  "activeVersion": {
-    "updatedAt": "2026-03-04T12:58:12.013Z",
-    "createdAt": "2026-03-04T12:58:12.013Z",
-    "versionId": "a613de38-fe73-42d4-b609-6c895e0294c0",
-    "workflowId": "MkglONaefdeNTLrm",
-    "nodes": [
-      {
-        "parameters": {
-          "httpMethod": "POST",
-          "options": {},
-          "path": "d0952789-a4a1-4eae-b0db-494356a9e3fa",
-          "respondWith": "text",
-          "responseMode": "responseNode"
-        },
-        "id": "webhook-123456789",
-        "name": "Webhook",
-        "position": [
-          112,
-          208
-        ],
-        "type": "n8n-nodes-base.webhook",
-        "typeVersion": 1,
-        "webhookId": "d0952789-a4a1-4eae-b0db-494356a9e3fa",
-        "onError": "continueRegularOutput"
-      },
-      {
-        "parameters": {
-          "authentication": "none",
-          "headerParameters": {
-            "parameters": [
-              {
-                "name": "apikey",
-                "value": "{{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-              },
-              {
-                "name": "Authorization",
-                "value": "Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-              }
-            ]
-          },
-          "jsonBody": "={\n  \"email\": \"{{ $node.Webhook.json.body.email }}\",\n  \"password\": \"{{ $node.Webhook.json.body.password || 'Robot2025!' }}\",\n  \"email_confirm\": true\n}",
-          "method": "POST",
-          "options": {},
-          "sendBody": true,
-          "sendHeaders": true,
-          "specifyBody": "json",
-          "url": "{{ $env.VITE_SUPABASE_URL }}/auth/v1/admin/users"
-        },
-        "id": "supabase-auth-123",
-        "name": "Supabase_Auth",
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.1,
-        "position": [
-          352,
-          208
-        ]
-      },
-      {
-        "parameters": {
-          "authentication": "none",
-          "headerParameters": {
-            "parameters": [
-              {
-                "name": "apikey",
-                "value": "{{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-              },
-              {
-                "name": "Authorization",
-                "value": "Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-              },
-              {
-                "name": "Prefer",
-                "value": "resolution=merge-duplicates"
-              }
-            ]
-          },
-          "jsonBody": "={\n  \"id\": \"{{ $node.Supabase_Auth.json.id }}\",\n  \"email\": \"{{ $node.Webhook.json.body.email }}\",\n  \"full_name\": \"{{ $node.Webhook.json.body.full_name }}\",\n  \"role\": \"{{ $node.Webhook.json.body.role }}\",\n  \"empresa_id\": {{ $node.Webhook.json.body.empresa_id }}\n}",
-          "method": "POST",
-          "options": {},
-          "sendBody": true,
-          "sendHeaders": true,
-          "specifyBody": "json",
-          "url": "{{ $env.VITE_SUPABASE_URL }}/rest/v1/user_profiles"
-        },
-        "id": "supabase-profile-123",
-        "name": "Supabase_Profile",
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.1,
-        "position": [
-          608,
-          208
-        ]
-      },
-      {
-        "parameters": {
-          "html": "=<div style=\"font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;\">\n    <div style=\"background-color: #004a99; padding: 20px; text-align: center;\">\n        <img src=\"http://15.216.15.30/ausarta.png\" alt=\"Ausarta\" style=\"height: 50px;\">\n    </div>\n    <div style=\"padding: 30px;\">\n        <h2 style=\"color: #004a99;\">¡Bienvenido a Ausarta Robot!</h2>\n        <p>Hola <strong>{{ $node['Webhook'].json.body.full_name }}</strong>,</p>\n        <p>Tu cuenta de acceso a la plataforma <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\n        <p>A continuación tienes tus credenciales de acceso temporales:</p>\n        <div style=\"background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd;\">\n            <p style=\"margin: 5px 0;\"><strong>Usuario:</strong> {{ $node['Webhook'].json.body.email }}</p>\n            <p style=\"margin: 5px 0;\"><strong>Contraseña temporal:</strong> {{ $node['Webhook'].json.body.password || 'Robot2025!' }}</p>\n        </div>\n        <p><strong>Pasos para comenzar:</strong></p>\n        <ol>\n            <li>Accede a la plataforma en <a href=\"http://15.216.15.30\" style=\"color: #004a99; font-weight: bold;\">15.216.15.30</a>.</li>\n            <li>Inicia sesión con las credenciales indicadas arriba.</li>\n            <li>Por seguridad, te recomendamos cambiar tu contraseña en el apartado de configuración una vez dentro.</li>\n        </ol>\n        <div style=\"text-align: center; margin-top: 30px;\">\n            <a href=\"http://15.216.15.30\" style=\"background-color: #004a99; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold;\">Acceder a la Plataforma</a>\n        </div>\n        <hr style=\"border: 0; border-top: 1px solid #eee; margin: 30px 0;\">\n        <p style=\"font-size: 13px; color: #666;\">\n            Si tienes cualquier duda o problema técnico durante el acceso, por favor ponte en contacto con nosotros escribiendo un correo a <a href=\"mailto:clientes@ausarta.es\" style=\"color: #004a99;\">clientes@ausarta.es</a>.\n        </p>\n    </div>\n</div>"
-        },
-        "id": "email-123456789",
-        "name": "Enviar_Email_Bienvenida",
-        "type": "n8n-nodes-base.emailSend",
-        "typeVersion": 2.1,
-        "position": [
-          864,
-          208
-        ],
-        "webhookId": "4bfc5867-139e-4ca2-a773-3eafbc6a284a",
-        "credentials": {
-          "smtp": {
-            "id": "D1gBpu0AEp8AueAF",
-            "name": "SMTP account"
-          }
-        }
-      },
-      {
-        "parameters": {
-          "respondWith": "text",
-          "options": {}
-        },
-        "id": "respond-node-123",
-        "name": "Respond_to_Frontend",
-        "type": "n8n-nodes-base.respondToWebhook",
-        "typeVersion": 1,
-        "position": [
-          1152,
-          208
-        ]
-      }
-    ],
-    "connections": {
-      "Webhook": {
-        "main": [
-          [
-            {
-              "node": "Supabase_Auth",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Supabase_Auth": {
-        "main": [
-          [
-            {
-              "node": "Supabase_Profile",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Supabase_Profile": {
-        "main": [
-          [
-            {
-              "node": "Enviar_Email_Bienvenida",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Enviar_Email_Bienvenida": {
-        "main": [
-          [
-            {
-              "node": "Respond_to_Frontend",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      }
-    },
-    "authors": "inigo solana",
-    "name": null,
-    "description": null
-  }
+  "activeVersion": null
 }

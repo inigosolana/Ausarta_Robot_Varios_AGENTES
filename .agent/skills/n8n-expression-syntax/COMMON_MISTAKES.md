@@ -391,3 +391,11 @@ When expression doesn't work:
 ---
 
 **Related**: See [EXAMPLES.md](EXAMPLES.md) for working examples of correct syntax.
+
+### 🚨 REGLAS DE SINTAXIS Y CONTEXTO DE ERRORES 🚨
+1. **SINTAXIS MODERNA SIEMPRE:** Está prohibido usar la sintaxis antigua `{{ $node['Nombre del Nodo'].json.variable }}`. Debes usar EXCLUSIVAMENTE la sintaxis moderna de n8n: `{{ $('Nombre del Nodo').item.json.variable }}` o evaluar correctamente los datos de entrada directos.
+2. **CONTEXTO RICO EN ERROR TRIGGERS:** Cuando crees un flujo que empiece con `Error Trigger`, SIEMPRE debes extraer los siguientes datos en tus expresiones para enviarlos por notificación o a la IA:
+   - Mensaje de error: `{{ $json.execution.error.message }}`
+   - Nodo que falló: `{{ $json.execution.lastNodeExecuted }}`
+   - Nombre del workflow: `{{ $json.execution.workflow.name }}`
+   - URL directa a la ejecución fallida: `{{ $env.WEBHOOK_URL }}execution/{{ $json.execution.id }}`
