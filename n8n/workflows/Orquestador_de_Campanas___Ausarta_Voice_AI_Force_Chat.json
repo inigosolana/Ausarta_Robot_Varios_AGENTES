@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-04T13:36:56.580Z",
+  "updatedAt": "2026-03-04T13:56:41.111Z",
   "createdAt": "2026-02-27T11:29:32.564Z",
   "id": "c1GO5ZJVQEkxgaLE",
   "name": "Orquestador de Campañas - Ausarta Voice AI (Force Chat)",
@@ -11,7 +11,19 @@
       "id": "fetch_lead_1",
       "name": "FetchOnePendingLead",
       "parameters": {
-        "url": "={{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&select=*,campaigns(agent_id,name)&order=created_at.asc&limit=1"
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "{{ $env.VITE_SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.VITE_SUPABASE_ANON_KEY }}"
+            }
+          ]
+        },
+        "sendHeaders": true
       },
       "position": [
         350,
@@ -89,9 +101,9 @@
   },
   "meta": null,
   "pinData": null,
-  "versionId": "c0a752ff-f4c4-49ec-851a-1b3aa710aeee",
-  "activeVersionId": "c0a752ff-f4c4-49ec-851a-1b3aa710aeee",
-  "versionCounter": 46,
+  "versionId": "c25e6440-f4c0-4db1-b828-fef4ab89a006",
+  "activeVersionId": "c25e6440-f4c0-4db1-b828-fef4ab89a006",
+  "versionCounter": 50,
   "triggerCount": 1,
   "shared": [
     {
@@ -148,16 +160,28 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-03-04T13:36:56.581Z",
-    "createdAt": "2026-03-04T13:36:56.581Z",
-    "versionId": "c0a752ff-f4c4-49ec-851a-1b3aa710aeee",
+    "updatedAt": "2026-03-04T13:56:41.111Z",
+    "createdAt": "2026-03-04T13:56:41.111Z",
+    "versionId": "c25e6440-f4c0-4db1-b828-fef4ab89a006",
     "workflowId": "c1GO5ZJVQEkxgaLE",
     "nodes": [
       {
         "id": "fetch_lead_1",
         "name": "FetchOnePendingLead",
         "parameters": {
-          "url": "={{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&select=*,campaigns(agent_id,name)&order=created_at.asc&limit=1"
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "{{ $env.VITE_SUPABASE_ANON_KEY }}"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer {{ $env.VITE_SUPABASE_ANON_KEY }}"
+              }
+            ]
+          },
+          "sendHeaders": true
         },
         "position": [
           350,

@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-04T13:37:38.304Z",
+  "updatedAt": "2026-03-04T13:56:34.082Z",
   "createdAt": "2026-03-04T10:48:31.416Z",
   "id": "3cLVhxdaKFTer7Ht",
   "name": "Orquestador de Campañas - Ausarta (NUEVO) - Active",
@@ -31,7 +31,19 @@
       "id": "fetch_1_new_act",
       "name": "FetchLead",
       "parameters": {
-        "url": "={{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&or=(next_retry_at.is.null,next_retry_at.lte.{{ $now.toISOString() }})&select=*,campaigns(agent_id,name)&order=created_at.asc&limit=1"
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "{{ $env.VITE_SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.VITE_SUPABASE_ANON_KEY }}"
+            }
+          ]
+        },
+        "sendHeaders": true
       },
       "position": [
         350,
@@ -98,9 +110,9 @@
   },
   "meta": null,
   "pinData": null,
-  "versionId": "ddb75c9c-202a-43a1-a5ab-8a893f0b21e9",
-  "activeVersionId": "ddb75c9c-202a-43a1-a5ab-8a893f0b21e9",
-  "versionCounter": 21,
+  "versionId": "b157a7d1-83df-4845-baf6-a6f3b452e2e3",
+  "activeVersionId": "b157a7d1-83df-4845-baf6-a6f3b452e2e3",
+  "versionCounter": 27,
   "triggerCount": 1,
   "shared": [
     {
@@ -157,9 +169,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-03-04T13:37:38.305Z",
-    "createdAt": "2026-03-04T13:37:38.305Z",
-    "versionId": "ddb75c9c-202a-43a1-a5ab-8a893f0b21e9",
+    "updatedAt": "2026-03-04T13:56:34.082Z",
+    "createdAt": "2026-03-04T13:56:34.082Z",
+    "versionId": "b157a7d1-83df-4845-baf6-a6f3b452e2e3",
     "workflowId": "3cLVhxdaKFTer7Ht",
     "nodes": [
       {
@@ -186,7 +198,19 @@
         "id": "fetch_1_new_act",
         "name": "FetchLead",
         "parameters": {
-          "url": "={{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&or=(next_retry_at.is.null,next_retry_at.lte.{{ $now.toISOString() }})&select=*,campaigns(agent_id,name)&order=created_at.asc&limit=1"
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "apikey",
+                "value": "{{ $env.VITE_SUPABASE_ANON_KEY }}"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer {{ $env.VITE_SUPABASE_ANON_KEY }}"
+              }
+            ]
+          },
+          "sendHeaders": true
         },
         "position": [
           350,
