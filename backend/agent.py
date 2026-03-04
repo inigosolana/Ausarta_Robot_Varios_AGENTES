@@ -6,6 +6,8 @@ import asyncio
 import sys
 import json
 from dotenv import load_dotenv
+load_dotenv() # Cargar antes de cualquier otra cosa para que los decoradores lo vean
+
 from livekit import rtc
 from livekit.agents import (
     Agent,
@@ -88,11 +90,17 @@ class DynamicAgent(Agent):
         self.greeting = agent_config.get("greeting", "Buenas, ¿tiene un momento?")
         
         try:
+            # Soportamos formatos:
+            # 1. inigo_local_encuesta_123
+            # 2. encuesta_123
+            # 3. 123
             parts = room_name.split('_')
-            if len(parts) >= 2 and parts[0] == "encuesta":
-                self.survey_id = parts[1]
-            else:
-                self.survey_id = parts[-1]
+            self.survey_id = parts[-1] if parts else "0"
+            
+            # Verificación extra por si el formato es distinto
+            if not self.survey_id.isdigit() and len(parts) >= 2:
+                # Si el último no es dígito, probamos con el penúltimo
+                self.survey_id = parts[-2]
         except:
             self.survey_id = "0"
 
@@ -283,7 +291,7 @@ async def notify_n8n_alert(message: str, details: dict = None):
 # ============================================================================
 server = AgentServer()
 
-@server.rtc_session(agent_name=os.getenv("AGENT_NAME_DISPATCH", ""))
+@server.rtc_session(agent_name=os.getenv("AGENT_NAME_DISPATCH", "default_agent"))
 async def entrypoint(ctx: JobContext):
     # Identificador único para esta instancia/trabajo
     job_id = ctx.job.id if hasattr(ctx, 'job') else "unknown"
@@ -304,10 +312,9 @@ async def entrypoint(ctx: JobContext):
     survey_id = "0"
     try:
         parts = room_name.split('_')
-        if len(parts) >= 2 and parts[0] == "encuesta":
-            survey_id = parts[1]
-        else:
-            survey_id = parts[-1]
+        survey_id = parts[-1] if parts else "0"
+        if not survey_id.isdigit() and len(parts) >= 2:
+            survey_id = parts[-2]
     except:
         survey_id = "0"
 

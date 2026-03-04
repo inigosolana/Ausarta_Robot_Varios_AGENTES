@@ -196,7 +196,9 @@ async def make_outbound_call(request: dict):
         else:
             encuesta_id = random.randint(1000, 9999)
 
-        room_name = f"encuesta_{encuesta_id}"
+        # Prefijamos la sala con el nombre del despachador para aislar entornos
+        agent_name_dispatch = os.getenv("AGENT_NAME_DISPATCH", "default_agent")
+        room_name = f"{agent_name_dispatch}_encuesta_{encuesta_id}"
         sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
 
         # --- PREVENCIÓN DE DOBLE DESPACHO ---
@@ -225,10 +227,16 @@ async def make_outbound_call(request: dict):
             processing_rooms.discard(room_name)
             raise sip_err
 
-        # Si AGENT_NAME_DISPATCH tiene valor (ej: inigo_local en .env), LiveKit despachará ese agente específico.
-        # Si no tiene valor, usará worker-dispatch por defecto.
-        agent_name_dispatch = os.getenv("AGENT_NAME_DISPATCH", "")
-        logger.info(f"✅ [API] Sala {room_name} creada con participante SIP. LiveKit despachará el agente '{agent_name_dispatch or '(default)'}'.")
+        # Despachamos el agente específico para este entorno
+        logger.info(f"🚀 [API] Solicitando despacho de agente '{agent_name_dispatch}' para sala {room_name}...")
+        try:
+            await lkapi.agent.create_agent_dispatch(api.CreateAgentDispatchRequest(
+                room=room_name,
+                agent_name=agent_name_dispatch
+            ))
+            logger.info(f"✅ [API] Sala {room_name} creada y agente {agent_name_dispatch} solicitado.")
+        except Exception as dispatch_err:
+            logger.warning(f"⚠️ [API] Error al solicitar despacho explícito: {dispatch_err}. LiveKit usará despacho automático.")
 
         # Limpiamos el lock después de un tiempo prudencial
         async def clear_room_lock(rname):

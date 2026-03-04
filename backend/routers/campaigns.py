@@ -31,7 +31,7 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
     try:
         status_final = campaign.status
         if not campaign.scheduled_time and status_final == 'pending':
-            status_final = 'active'
+            status_final = 'running'
 
         # Multiply by unit
         interval_raw = campaign.retry_interval
@@ -279,7 +279,7 @@ async def retry_campaign(campaign_id: int):
         }).eq("campaign_id", campaign_id).in_("status", statuses_to_retry).execute()
         
         # También reactivar la campaña
-        supabase.table("campaigns").update({"status": "active"}).eq("id", campaign_id).execute()
+        supabase.table("campaigns").update({"status": "running"}).eq("id", campaign_id).execute()
         
         return {"status": "success", "retried_count": len(res.data)}
     except Exception as e:
@@ -300,7 +300,7 @@ async def retry_lead(lead_id: int):
         if res.data:
             camp_id = res.data[0].get("campaign_id")
             if camp_id:
-                supabase.table("campaigns").update({"status": "active"}).eq("id", camp_id).execute()
+                supabase.table("campaigns").update({"status": "running"}).eq("id", camp_id).execute()
         
         return {"status": "success"}
     except Exception as e:
