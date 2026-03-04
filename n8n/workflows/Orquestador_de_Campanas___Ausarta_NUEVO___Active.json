@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-04T13:20:05.422Z",
+  "updatedAt": "2026-03-04T13:34:17.539Z",
   "createdAt": "2026-03-04T10:48:31.416Z",
   "id": "3cLVhxdaKFTer7Ht",
   "name": "Orquestador de Campañas - Ausarta (NUEVO) - Active",
@@ -15,7 +15,7 @@
           "interval": [
             {
               "field": "minutes",
-              "interval": 1
+              "interval": 5
             }
           ]
         }
@@ -31,21 +31,7 @@
       "id": "fetch_1_new_act",
       "name": "FetchLead",
       "parameters": {
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "apikey",
-              "value": "{{ $env.VITE_SUPABASE_ANON_KEY }}"
-            },
-            {
-              "name": "Authorization",
-              "value": "Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-            }
-          ]
-        },
-        "method": "GET",
-        "sendHeaders": true,
-        "url": "{{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&select=*,campaigns(agent_id,name)&limit=1"
+        "url": "={{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&select=*,campaigns(agent_id,name)&order=created_at.asc&limit=1"
       },
       "position": [
         350,
@@ -112,9 +98,9 @@
   },
   "meta": null,
   "pinData": null,
-  "versionId": "3133dc57-a888-4757-88d2-fc82e4fd835b",
-  "activeVersionId": "3133dc57-a888-4757-88d2-fc82e4fd835b",
-  "versionCounter": 17,
+  "versionId": "4b360cbc-6da7-4dcb-885f-736df160ea3e",
+  "activeVersionId": "4b360cbc-6da7-4dcb-885f-736df160ea3e",
+  "versionCounter": 19,
   "triggerCount": 1,
   "shared": [
     {
@@ -171,9 +157,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-03-04T13:20:05.423Z",
-    "createdAt": "2026-03-04T13:20:05.423Z",
-    "versionId": "3133dc57-a888-4757-88d2-fc82e4fd835b",
+    "updatedAt": "2026-03-04T13:34:17.540Z",
+    "createdAt": "2026-03-04T13:34:17.540Z",
+    "versionId": "4b360cbc-6da7-4dcb-885f-736df160ea3e",
     "workflowId": "3cLVhxdaKFTer7Ht",
     "nodes": [
       {
@@ -184,7 +170,7 @@
             "interval": [
               {
                 "field": "minutes",
-                "interval": 1
+                "interval": 5
               }
             ]
           }
@@ -200,21 +186,7 @@
         "id": "fetch_1_new_act",
         "name": "FetchLead",
         "parameters": {
-          "headerParameters": {
-            "parameters": [
-              {
-                "name": "apikey",
-                "value": "{{ $env.VITE_SUPABASE_ANON_KEY }}"
-              },
-              {
-                "name": "Authorization",
-                "value": "Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-              }
-            ]
-          },
-          "method": "GET",
-          "sendHeaders": true,
-          "url": "{{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&select=*,campaigns(agent_id,name)&limit=1"
+          "url": "={{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&select=*,campaigns(agent_id,name)&order=created_at.asc&limit=1"
         },
         "position": [
           350,

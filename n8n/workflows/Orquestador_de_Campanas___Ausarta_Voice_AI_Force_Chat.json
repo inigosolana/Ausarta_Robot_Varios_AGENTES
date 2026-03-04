@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-04T13:19:55.541Z",
+  "updatedAt": "2026-03-04T13:34:21.226Z",
   "createdAt": "2026-02-27T11:29:32.564Z",
   "id": "c1GO5ZJVQEkxgaLE",
   "name": "Orquestador de Campañas - Ausarta Voice AI (Force Chat)",
@@ -15,7 +15,7 @@
           "interval": [
             {
               "field": "minutes",
-              "interval": 1
+              "interval": 5
             }
           ]
         }
@@ -31,21 +31,7 @@
       "id": "fetch_lead_1",
       "name": "FetchOnePendingLead",
       "parameters": {
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "apikey",
-              "value": "{{ $env.VITE_SUPABASE_ANON_KEY }}"
-            },
-            {
-              "name": "Authorization",
-              "value": "Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-            }
-          ]
-        },
-        "method": "GET",
-        "sendHeaders": true,
-        "url": "{{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&select=*,campaigns(agent_id,name)&limit=1"
+        "url": "={{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&select=*,campaigns(agent_id,name)&order=created_at.asc&limit=1"
       },
       "position": [
         350,
@@ -134,9 +120,9 @@
   },
   "meta": null,
   "pinData": null,
-  "versionId": "52ca26ad-f45b-4938-890b-996990462676",
-  "activeVersionId": "52ca26ad-f45b-4938-890b-996990462676",
-  "versionCounter": 38,
+  "versionId": "038b8b8c-8169-49a6-ab4c-0d3cf478d6e5",
+  "activeVersionId": "038b8b8c-8169-49a6-ab4c-0d3cf478d6e5",
+  "versionCounter": 40,
   "triggerCount": 2,
   "shared": [
     {
@@ -193,9 +179,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-03-04T13:19:55.542Z",
-    "createdAt": "2026-03-04T13:19:55.542Z",
-    "versionId": "52ca26ad-f45b-4938-890b-996990462676",
+    "updatedAt": "2026-03-04T13:34:21.227Z",
+    "createdAt": "2026-03-04T13:34:21.227Z",
+    "versionId": "038b8b8c-8169-49a6-ab4c-0d3cf478d6e5",
     "workflowId": "c1GO5ZJVQEkxgaLE",
     "nodes": [
       {
@@ -206,7 +192,7 @@
             "interval": [
               {
                 "field": "minutes",
-                "interval": 1
+                "interval": 5
               }
             ]
           }
@@ -222,21 +208,7 @@
         "id": "fetch_lead_1",
         "name": "FetchOnePendingLead",
         "parameters": {
-          "headerParameters": {
-            "parameters": [
-              {
-                "name": "apikey",
-                "value": "{{ $env.VITE_SUPABASE_ANON_KEY }}"
-              },
-              {
-                "name": "Authorization",
-                "value": "Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-              }
-            ]
-          },
-          "method": "GET",
-          "sendHeaders": true,
-          "url": "{{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&select=*,campaigns(agent_id,name)&limit=1"
+          "url": "={{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&select=*,campaigns(agent_id,name)&order=created_at.asc&limit=1"
         },
         "position": [
           350,
