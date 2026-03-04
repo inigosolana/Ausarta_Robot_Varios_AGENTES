@@ -276,15 +276,15 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                     </td>
                                     <td className="px-6 py-4 text-center">
                                         {(() => {
-                                            if (row.status === 'completed') {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-green-500 text-white uppercase shadow-sm">{t('Completa')}</span>;
-                                            } else if (row.status === 'incomplete') {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-blue-400 text-white uppercase shadow-sm">{t('Incompleta')}</span>;
-                                            } else if (row.status === 'rejected_opt_out' || row.status === 'rejected') {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-red-600 text-white uppercase shadow-sm" title="Rechazada por Cliente">{t('Rechazada')}</span>;
-                                            } else if (row.status === 'failed') {
+                                            if (row.status === 'completada' || row.status === 'completed') {
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-green-500 text-white uppercase shadow-sm">{t('Completada')}</span>;
+                                            } else if (row.status === 'parcial' || row.status === 'incomplete') {
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-orange-400 text-white uppercase shadow-sm">{t('Parcial')}</span>;
+                                            } else if (row.status === 'rechazada' || row.status === 'rejected_opt_out' || row.status === 'rejected') {
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-red-700 text-white uppercase shadow-sm" title="No reintentar">{t('Rechazada')}</span>;
+                                            } else if (row.status === 'fallida' || row.status === 'failed') {
                                                 return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-purple-500 text-white uppercase shadow-sm">{t('Fallida')}</span>;
-                                            } else if (row.status === 'unreached') {
+                                            } else if (row.status === 'no_contesta' || row.status === 'unreached') {
                                                 return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-amber-400 text-white uppercase shadow-sm">{t('No Contesta')}</span>;
                                             } else {
                                                 return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-gray-400 text-white uppercase shadow-sm">{t('Pendiente')}</span>;

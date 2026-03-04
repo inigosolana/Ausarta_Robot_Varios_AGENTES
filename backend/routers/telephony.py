@@ -42,13 +42,14 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
     if datos.transcription is not None: update_data["transcription"] = datos.transcription
     if datos.seconds_used is not None: update_data["seconds_used"] = datos.seconds_used
     if datos.llm_model is not None: update_data["llm_model"] = datos.llm_model
+    if datos.datos_extra is not None: update_data["datos_extra"] = datos.datos_extra
     
     status_final = datos.status
     es_completada = False
     
     if datos.status:
         update_data["status"] = datos.status
-        if datos.status == 'completed':
+        if datos.status == 'completada':
             es_completada = True
             update_data["completada"] = 1
             
@@ -59,18 +60,23 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
         return {"status": "ignored", "message": "No data to update"}
         
     if not datos.status and curr_data:
-         if curr_data.get('status') not in ('completed', 'rejected_opt_out'):
-             update_data["status"] = 'incomplete'
+         if curr_data.get('status') not in ('completada', 'rechazada'):
+             update_data["status"] = 'parcial'
 
     print(f"📝 [API] Intentando actualizar encuesta {datos.id_encuesta} con: {update_data}")
     try:
         supabase.table("encuestas").update(update_data).eq("id", datos.id_encuesta).execute()
         print(f"✅ [API] Supabase actualizado para encuesta {datos.id_encuesta}")
         
-        if datos.status in ('completed', 'rejected_opt_out', 'incomplete', 'failed'):
+        if datos.status in ('completada', 'rechazada', 'parcial', 'fallida', 'no_contesta'):
              lead_update = {"status": datos.status}
              
-             if datos.status in ('incomplete', 'failed'):
+             # Rechazada: marcar como no reintentar para excluir de campañas futuras
+             if datos.status == 'rechazada':
+                 lead_update["no_reintentar"] = True
+             
+             # Parcial, Fallida, No Contesta: programar reintento
+             if datos.status in ('parcial', 'fallida', 'no_contesta'):
                  retry_seconds = 3600
                  try:
                      lead_res = supabase.table("campaign_leads").select("campaign_id").eq("call_id", datos.id_encuesta).limit(1).execute()
@@ -88,7 +94,7 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
                  lead_update["next_retry_at"] = next_retry
              supabase.table("campaign_leads").update(lead_update).eq("call_id", datos.id_encuesta).execute()
 
-             if datos.status in ('completed', 'failed', 'rejected_opt_out') and curr_data.get('empresa_id'):
+             if datos.status in ('completada', 'fallida', 'rechazada') and curr_data.get('empresa_id'):
                  result_data = {
                      "nota_comercial": datos.nota_comercial,
                      "nota_instalador": datos.nota_instalador,
@@ -114,7 +120,7 @@ async def trigger_crm_webhook(encuesta_id: int, status: str, result_data: dict, 
         url = cfg["crm_webhook_url"]
         
         payload = {
-            "event": "call_completed" if status in ("completed", "rejected_opt_out") else "call_failed",
+            "event": "call_completed" if status == "completada" else ("call_rejected" if status == "rechazada" else "call_failed"),
             "encuesta_id": encuesta_id,
             "status": status,
             "lead": {

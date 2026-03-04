@@ -148,7 +148,7 @@ def get_calls_supabase(limit=50):
         for c in calls:
             # Map status nicely
             raw_status = c.get('status', 'initiated')
-            if c.get('completada'): raw_status = 'completed'
+            if c.get('completada'): raw_status = 'completada'
             
             res_agent_id = str(c.get('agent_id')) if c.get('agent_id') else ""
             
@@ -261,7 +261,7 @@ async def guardar_encuesta(datos: FinEncuesta):
     if datos.status:
         print(f"🔄 Actualizando status a: {datos.status}")
         updates["status"] = datos.status
-        if datos.status == "completed":
+        if datos.status == 'completada':
              updates["completada"] = 1
     elif val_comentarios is not None:
          # Implicit completion if comments are passed locally (fallback)

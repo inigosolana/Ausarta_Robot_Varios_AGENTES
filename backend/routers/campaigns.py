@@ -131,7 +131,10 @@ async def get_campaign_details(campaign_id: int):
                 logger.error(f"Error fetching surveys for campaign: {e}")
 
         stats = {
-            "total": len(leads), "pending": 0, "calling": 0, "called": 0, "completed": 0, "failed": 0, "incomplete": 0
+            "total": len(leads), "pending": 0, "calling": 0, "called": 0,
+            "completada": 0, "parcial": 0, "rechazada": 0, "fallida": 0, "no_contesta": 0,
+            # Legacy compatibility
+            "completed": 0, "failed": 0, "incomplete": 0
         }
         
         sum_com = 0; count_com = 0

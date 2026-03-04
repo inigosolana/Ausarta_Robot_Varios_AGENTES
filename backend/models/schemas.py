@@ -52,6 +52,7 @@ class EncuestaData(BaseModel):
     transcription: Optional[str] = None
     seconds_used: Optional[int] = None
     llm_model: Optional[str] = None
+    datos_extra: Optional[dict] = None
 
 class CallEndRequest(BaseModel):
     nombre_sala: str

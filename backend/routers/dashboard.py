@@ -221,7 +221,7 @@ async def get_empresas_list():
 async def get_alerts(empresa_id: Optional[int] = None):
     if not supabase: return []
     try:
-        query = supabase.table("encuestas").select("*").eq("status", "failed")
+        query = supabase.table("encuestas").select("*").in_("status", ["fallida", "failed"])
         if empresa_id: query = query.eq("empresa_id", empresa_id)
         res = query.order("fecha", desc=True).limit(5).execute()
         alerts = []
