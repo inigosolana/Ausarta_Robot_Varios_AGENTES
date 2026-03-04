@@ -31,6 +31,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
     const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
     const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
+    const isRegularUser = isRole('usuario');
 
     const isEditing = !!agent?.id;
     const [empresas, setEmpresas] = useState<Empresa[]>([]);
@@ -334,16 +335,18 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                         </select>
                                     </div>
                                 ) : (
-                                    <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Use Case', 'Caso de Uso')}</label>
-                                        <input
-                                            type="text"
-                                            value={formData.use_case}
-                                            onChange={(e) => setFormData({ ...formData, use_case: e.target.value })}
-                                            placeholder={t('Example: Satisfaction Survey', 'Ej: Encuesta de satisfacción')}
-                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                        />
-                                    </div>
+                                    !isRegularUser ? (
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Use Case', 'Caso de Uso')}</label>
+                                            <input
+                                                type="text"
+                                                value={formData.use_case}
+                                                onChange={(e) => setFormData({ ...formData, use_case: e.target.value })}
+                                                placeholder={t('Example: Satisfaction Survey', 'Ej: Encuesta de satisfacción')}
+                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                            />
+                                        </div>
+                                    ) : null
                                 )}
                             </div>
 
@@ -407,47 +410,49 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                     )}
                                 </div>
 
-                                <div className="flex items-center gap-2">
-                                    <select
-                                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 max-w-[150px]"
-                                        onChange={(e) => {
-                                            const template = templates.find(t => t.id === Number(e.target.value));
-                                            if (template) {
-                                                if (confirm(t('Replace current instructions with this template?', '¿Reemplazar las instrucciones actuales con esta plantilla?'))) {
-                                                    setFormData({ ...formData, instructions: template.content });
+                                {!isRegularUser && (
+                                    <div className="flex items-center gap-2">
+                                        <select
+                                            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 max-w-[150px]"
+                                            onChange={(e) => {
+                                                const template = templates.find(t => t.id === Number(e.target.value));
+                                                if (template) {
+                                                    if (confirm(t('Replace current instructions with this template?', '¿Reemplazar las instrucciones actuales con esta plantilla?'))) {
+                                                        setFormData({ ...formData, instructions: template.content });
+                                                    }
                                                 }
-                                            }
-                                        }}
-                                        value=""
-                                    >
-                                        <option value="" disabled>📂 {t('Load Template...', 'Cargar Plantilla...')}</option>
-                                        {templates.map(t => (
-                                            <option key={t.id} value={t.id}>{t.name}</option>
-                                        ))}
-                                    </select>
+                                            }}
+                                            value=""
+                                        >
+                                            <option value="" disabled>📂 {t('Load Template...', 'Cargar Plantilla...')}</option>
+                                            {templates.map(t => (
+                                                <option key={t.id} value={t.id}>{t.name}</option>
+                                            ))}
+                                        </select>
 
-                                    <button
-                                        onClick={async () => {
-                                            const name = prompt(t('Name for the new template:', 'Nombre para la nueva plantilla:'));
-                                            if (name) {
-                                                const { error } = await supabase.from('prompt_templates').insert({
-                                                    name,
-                                                    description: 'Creado desde el editor',
-                                                    content: formData.instructions
-                                                });
-                                                if (!error) {
-                                                    alert(t('Template saved!', 'Plantilla guardada!'));
-                                                    loadTemplates();
-                                                } else {
-                                                    alert(t('Error saving template', 'Error al guardar plantilla'));
+                                        <button
+                                            onClick={async () => {
+                                                const name = prompt(t('Name for the new template:', 'Nombre para la nueva plantilla:'));
+                                                if (name) {
+                                                    const { error } = await supabase.from('prompt_templates').insert({
+                                                        name,
+                                                        description: 'Creado desde el editor',
+                                                        content: formData.instructions
+                                                    });
+                                                    if (!error) {
+                                                        alert(t('Template saved!', 'Plantilla guardada!'));
+                                                        loadTemplates();
+                                                    } else {
+                                                        alert(t('Error saving template', 'Error al guardar plantilla'));
+                                                    }
                                                 }
-                                            }
-                                        }}
-                                        className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg border border-gray-200 transition-colors"
-                                    >
-                                        💾 {t('Save as Template', 'Guardar como Plantilla')}
-                                    </button>
-                                </div>
+                                            }}
+                                            className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg border border-gray-200 transition-colors"
+                                        >
+                                            💾 {t('Save as Template', 'Guardar como Plantilla')}
+                                        </button>
+                                    </div>
+                                )}
                             </div>
 
                             <textarea
@@ -482,101 +487,103 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                     {/* Right Column: AI Config */}
                     <div className="space-y-6">
                         {/* LLM Config (Only Provider/Model for Admins) */}
-                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                                <Brain size={16} /> {t('Intelligence and Language', 'Inteligencia e Idioma')}
-                            </h3>
+                        {!isRegularUser && (
+                            <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                                <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                                    <Brain size={16} /> {t('Intelligence and Language', 'Inteligencia e Idioma')}
+                                </h3>
 
-                            {isPlatformOwner && (
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
-                                    <select
-                                        value={aiConfig.llm_provider}
-                                        onChange={(e) => {
-                                            const p = e.target.value;
-                                            let m = 'llama-3.3-70b-versatile';
-                                            if (p === 'google') m = 'models/gemini-2.0-flash';
-                                            if (p === 'openai') m = 'gpt-4o';
-                                            if (p === 'deepseek') m = 'deepseek-chat';
-                                            setAiConfig({ ...aiConfig, llm_provider: p, llm_model: m });
-                                        }}
-                                        className="w-full px-3 py-2 border rounded-lg bg-gray-50"
-                                    >
-                                        <option value="openai">OpenAI (GPT-4o)</option>
-                                        <option value="groq">Groq (Llama 3, Mixtral)</option>
-                                        <option value="google">Google Gemini</option>
-                                        <option value="deepseek">DeepSeek (V3, R1)</option>
-                                    </select>
-                                </div>
-                            )}
+                                {isPlatformOwner && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
+                                        <select
+                                            value={aiConfig.llm_provider}
+                                            onChange={(e) => {
+                                                const p = e.target.value;
+                                                let m = 'llama-3.3-70b-versatile';
+                                                if (p === 'google') m = 'models/gemini-2.0-flash';
+                                                if (p === 'openai') m = 'gpt-4o';
+                                                if (p === 'deepseek') m = 'deepseek-chat';
+                                                setAiConfig({ ...aiConfig, llm_provider: p, llm_model: m });
+                                            }}
+                                            className="w-full px-3 py-2 border rounded-lg bg-gray-50"
+                                        >
+                                            <option value="openai">OpenAI (GPT-4o)</option>
+                                            <option value="groq">Groq (Llama 3, Mixtral)</option>
+                                            <option value="google">Google Gemini</option>
+                                            <option value="deepseek">DeepSeek (V3, R1)</option>
+                                        </select>
+                                    </div>
+                                )}
 
-                            {isPlatformOwner && (
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Agent Language', 'Idioma del Agente')}</label>
-                                    <select
-                                        value={aiConfig.language || 'es'}
-                                        onChange={(e) => setAiConfig({ ...aiConfig, language: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg bg-white"
-                                    >
-                                        <option value="es">{t('Spanish', 'Español')} (es)</option>
-                                        <option value="en">{t('English', 'Inglés')} (en)</option>
-                                        <option value="eu">{t('Basque', 'Euskera')} (eu)</option>
-                                        <option value="gl">{t('Galician', 'Gallego')} (gl)</option>
-                                    </select>
-                                </div>
-                            )}
+                                {isPlatformOwner && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">{t('Agent Language', 'Idioma del Agente')}</label>
+                                        <select
+                                            value={aiConfig.language || 'es'}
+                                            onChange={(e) => setAiConfig({ ...aiConfig, language: e.target.value })}
+                                            className="w-full px-3 py-2 border rounded-lg bg-white"
+                                        >
+                                            <option value="es">{t('Spanish', 'Español')} (es)</option>
+                                            <option value="en">{t('English', 'Inglés')} (en)</option>
+                                            <option value="eu">{t('Basque', 'Euskera')} (eu)</option>
+                                            <option value="gl">{t('Galician', 'Gallego')} (gl)</option>
+                                        </select>
+                                    </div>
+                                )}
 
-                            {!isPlatformOwner && (
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Intelligence Level', 'Nivel de Inteligencia')}</label>
-                                    <select
-                                        value={aiConfig.llm_model}
-                                        onChange={(e) => setAiConfig({ ...aiConfig, llm_model: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg bg-white"
-                                    >
-                                        <option value="gpt-4o">Alta (Recomendado)</option>
-                                        <option value="gpt-4o-mini">Básica (Rápido)</option>
-                                    </select>
-                                </div>
-                            )}
+                                {!isPlatformOwner && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">{t('Intelligence Level', 'Nivel de Inteligencia')}</label>
+                                        <select
+                                            value={aiConfig.llm_model}
+                                            onChange={(e) => setAiConfig({ ...aiConfig, llm_model: e.target.value })}
+                                            className="w-full px-3 py-2 border rounded-lg bg-white"
+                                        >
+                                            <option value="gpt-4o">Alta (Recomendado)</option>
+                                            <option value="gpt-4o-mini">Básica (Rápido)</option>
+                                        </select>
+                                    </div>
+                                )}
 
-                            {isPlatformOwner && (
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
-                                    <select
-                                        value={aiConfig.llm_model}
-                                        onChange={(e) => setAiConfig({ ...aiConfig, llm_model: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg bg-white"
-                                    >
-                                        {aiConfig.llm_provider === 'openai' ? (
-                                            <>
-                                                <option value="gpt-4o">GPT-4o (High Intelligence)</option>
-                                                <option value="gpt-4o-mini">GPT-4o mini (Fast & Cheap)</option>
-                                                <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                                            </>
-                                        ) : aiConfig.llm_provider === 'google' ? (
-                                            <>
-                                                <option value="models/gemini-2.0-flash">Gemini 2.0 Flash (Fast)</option>
-                                                <option value="models/gemini-2.0-pro-exp-02-05">Gemini 2.0 Pro (Most Powerful)</option>
-                                                <option value="models/gemini-2.0-flash-lite">Gemini 2.0 Flash Lite</option>
-                                                <option value="models/gemini-1.5-pro">Gemini 1.5 Pro</option>
-                                                <option value="models/gemini-1.5-flash">Gemini 1.5 Flash</option>
-                                            </>
-                                        ) : aiConfig.llm_provider === 'deepseek' ? (
-                                            <>
-                                                <option value="deepseek-chat">DeepSeek-V3 (Chat)</option>
-                                                <option value="deepseek-reasoner">DeepSeek-R1 (Reasoning)</option>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
-                                                <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
-                                            </>
-                                        )}
-                                    </select>
-                                </div>
-                            )}
-                        </section>
+                                {isPlatformOwner && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
+                                        <select
+                                            value={aiConfig.llm_model}
+                                            onChange={(e) => setAiConfig({ ...aiConfig, llm_model: e.target.value })}
+                                            className="w-full px-3 py-2 border rounded-lg bg-white"
+                                        >
+                                            {aiConfig.llm_provider === 'openai' ? (
+                                                <>
+                                                    <option value="gpt-4o">GPT-4o (High Intelligence)</option>
+                                                    <option value="gpt-4o-mini">GPT-4o mini (Fast & Cheap)</option>
+                                                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                                                </>
+                                            ) : aiConfig.llm_provider === 'google' ? (
+                                                <>
+                                                    <option value="models/gemini-2.0-flash">Gemini 2.0 Flash (Fast)</option>
+                                                    <option value="models/gemini-2.0-pro-exp-02-05">Gemini 2.0 Pro (Most Powerful)</option>
+                                                    <option value="models/gemini-2.0-flash-lite">Gemini 2.0 Flash Lite</option>
+                                                    <option value="models/gemini-1.5-pro">Gemini 1.5 Pro</option>
+                                                    <option value="models/gemini-1.5-flash">Gemini 1.5 Flash</option>
+                                                </>
+                                            ) : aiConfig.llm_provider === 'deepseek' ? (
+                                                <>
+                                                    <option value="deepseek-chat">DeepSeek-V3 (Chat)</option>
+                                                    <option value="deepseek-reasoner">DeepSeek-R1 (Reasoning)</option>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
+                                                    <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+                                                </>
+                                            )}
+                                        </select>
+                                    </div>
+                                )}
+                            </section>
+                        )}
 
                         {/* TTS Config */}
                         <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
-import type { UserProfile, UserPermission, UserRole } from '../types';
+import type { UserProfile, UserPermission, UserRole, Empresa } from '../types';
 import type { User, Session } from '@supabase/supabase-js';
 
 interface AuthContextType {
@@ -15,6 +15,9 @@ interface AuthContextType {
     hasPermission: (module: string) => boolean;
     isRole: (...roles: UserRole[]) => boolean;
     refreshProfile: () => Promise<void>;
+    realProfile: UserProfile | null;
+    setSpoofedRole: (role: UserRole | null) => void;
+    setSpoofedEmpresa: (empresaId: number | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -32,6 +35,29 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [permissions, setPermissions] = useState<UserPermission[]>([]);
     const [loading, setLoading] = useState(true);
 
+    const [realProfile, setRealProfile] = useState<UserProfile | null>(null);
+
+    // Initialize spoofing from localStorage
+    const [spoofedRole, setSpoofedRoleState] = useState<UserRole | null>(() => {
+        return (localStorage.getItem('spoofedRole') as UserRole) || null;
+    });
+    const [spoofedEmpresa, setSpoofedEmpresaState] = useState<number | null>(() => {
+        const val = localStorage.getItem('spoofedEmpresa');
+        return val ? Number(val) : null;
+    });
+
+    const setSpoofedRole = (role: UserRole | null) => {
+        if (role) localStorage.setItem('spoofedRole', role);
+        else localStorage.removeItem('spoofedRole');
+        setSpoofedRoleState(role);
+    };
+
+    const setSpoofedEmpresa = (empresaId: number | null) => {
+        if (empresaId) localStorage.setItem('spoofedEmpresa', empresaId.toString());
+        else localStorage.removeItem('spoofedEmpresa');
+        setSpoofedEmpresaState(empresaId);
+    };
+
     // Load profile and permissions
     const loadUserData = async (userId: string) => {
         try {
@@ -43,7 +69,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 .single();
 
             if (profileData) {
-                setProfile(profileData as UserProfile);
+                setRealProfile(profileData as UserProfile);
 
                 // Load permissions
                 const { data: permsData } = await supabase
@@ -57,6 +83,37 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             console.error('Error loading user data:', error);
         }
     };
+
+    // Synthesize the effective profile based on spoofing
+    useEffect(() => {
+        if (!realProfile) {
+            setProfile(null);
+            return;
+        }
+
+        const canSpoof = realProfile.role === 'superadmin' || realProfile.email === 'admin@ausarta.net';
+
+        if (canSpoof && (spoofedRole || spoofedEmpresa)) {
+            // Need to fetch company data if spoofedEmpresa is set
+            const getSpoofedCompany = async () => {
+                let companyData = realProfile.empresas;
+                if (spoofedEmpresa && spoofedEmpresa !== realProfile.empresa_id) {
+                    const { data } = await supabase.from('empresas').select('*').eq('id', spoofedEmpresa).single();
+                    if (data) companyData = data;
+                }
+
+                setProfile({
+                    ...realProfile,
+                    role: spoofedRole || realProfile.role,
+                    empresa_id: spoofedEmpresa || realProfile.empresa_id,
+                    empresas: companyData as Empresa | undefined
+                });
+            };
+            getSpoofedCompany();
+        } else {
+            setProfile(realProfile);
+        }
+    }, [realProfile, spoofedRole, spoofedEmpresa]);
 
     const refreshProfile = async () => {
         if (user) await loadUserData(user.id);
@@ -144,7 +201,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return (
         <AuthContext.Provider value={{
             user, session, profile, permissions, loading,
-            signIn, signUp, signOut, hasPermission, isRole, refreshProfile
+            signIn, signUp, signOut, hasPermission, isRole, refreshProfile,
+            realProfile, setSpoofedRole, setSpoofedEmpresa
         }}>
             {children}
         </AuthContext.Provider>

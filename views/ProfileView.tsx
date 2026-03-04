@@ -10,14 +10,16 @@ import type { UserProfile, UserRole, Empresa } from '../types';
 import { toast } from 'react-hot-toast';
 
 export const ProfileView: React.FC = () => {
-    const { profile, refreshProfile } = useAuth();
+    const { profile, realProfile, refreshProfile, setSpoofedRole, setSpoofedEmpresa } = useAuth();
     const { t } = useTranslation();
 
     // Original role/company to detect if they are "actually" a superadmin even if they switched
     // For now, let's assume if they have access to this view and were once superadmin, they can switch.
-    // A better way is checking a 'base_role' or specific emails.
-    const isRootEmail = profile?.email === 'admin@ausarta.net';
-    const canSwitch = profile?.role === 'superadmin' || isRootEmail;
+    // For now, let's assume if they have access to this view and were once superadmin, they can switch.
+    // Use realProfile to check their actual privileges regardless of spoofing
+    const actualProfile = realProfile || profile;
+    const isRootEmail = actualProfile?.email === 'admin@ausarta.net';
+    const canSwitch = actualProfile?.role === 'superadmin' || isRootEmail;
 
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -55,18 +57,27 @@ export const ProfileView: React.FC = () => {
         if (!profile) return;
         setSaving(true);
         try {
+            // Only update personal details in DB
             const { error } = await supabase
                 .from('user_profiles')
                 .update({
                     full_name: fullName,
                     position: position,
-                    role: role,
-                    empresa_id: empresaId,
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', profile.id);
 
             if (error) throw error;
+
+            // Apply Context Spoofing locally
+            if (canSwitch) {
+                // If they matched their actual role, we can remove spoof to save storage
+                const updateRole = role === actualProfile?.role ? null : role;
+                const updateEmpresa = empresaId === actualProfile?.empresa_id ? null : empresaId;
+
+                setSpoofedRole(updateRole);
+                setSpoofedEmpresa(updateEmpresa);
+            }
 
             toast.success(t('Profile updated successfully'));
             await refreshProfile();
@@ -141,7 +152,7 @@ export const ProfileView: React.FC = () => {
                         <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/50 p-4 rounded-xl flex gap-3">
                             <AlertTriangle className="text-amber-600 dark:text-amber-500 shrink-0" size={20} />
                             <p className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
-                                {t('As Superadmin, you can change your role and company context to test the platform as different users.')}
+                                {t('As Superadmin, you can temporarily simulate other roles and companies. These changes only affect your local view and are not saved to the database.', 'Como Superadmin, puedes simular temporalmente otros roles y empresas. Estos cambios solo afectan a tu vista local y no se guardan en la base de datos.')}
                             </p>
                         </div>
                     )}
@@ -224,8 +235,8 @@ export const ProfileView: React.FC = () => {
                                         </select>
                                     </div>
                                     <div className="col-span-full">
-                                        <p className="text-xs text-red-500 font-medium italic">
-                                            {t('Note: If you switch to "User" role, you will lose access to administration panels. You must use this feature with caution.')}
+                                        <p className="text-xs text-blue-500 font-medium italic">
+                                            {t('Note: This is merely a UI simulation. You will still remain a Superadmin in the database. Reset to Superadmin to regain access to blocked panels.')}
                                         </p>
                                     </div>
                                 </div>
