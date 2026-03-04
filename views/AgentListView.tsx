@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Bot, Loader2, Search, Building2, ChevronRight, ArrowLeft, Users, Mail, Trash2, Settings, Phone, Megaphone, BarChart3, Zap } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -189,6 +189,21 @@ const AgentListView: React.FC = () => {
         }
     };
 
+    const handleDeleteAgent = async (id: number) => {
+        if (!confirm(t(
+            "Are you sure you want to delete this agent?",
+            "¿Estás seguro de que quieres eliminar este agente?"
+        ))) return;
+
+        try {
+            await supabase.from("ai_config").delete().eq("agent_id", id);
+            await supabase.from("agent_config").delete().eq("id", id);
+            setAgents(prev => prev.filter(a => a.id !== id));
+        } catch (err) {
+            alert(t("Error deleting agent", "Error al eliminar el agente"));
+        }
+    };
+
     // ===== COMPANY DETAIL VIEW (Read-only agents) =====
     if (selectedEmpresa) {
         return (
@@ -254,7 +269,7 @@ const AgentListView: React.FC = () => {
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                                 {agents.filter(a => a.name.toLowerCase().includes(search.toLowerCase())).map((agent) => (
-                                    <div key={agent.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden p-5 transition-all hover:border-blue-100 hover:shadow-sm">
+                                    <div key={agent.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden p-5 transition-all hover:border-blue-100 hover:shadow-sm relative">
                                         <div className="flex items-center gap-3">
                                             <div className="p-2.5 rounded-xl bg-blue-50 text-blue-600">
                                                 <Bot size={20} />
@@ -264,6 +279,14 @@ const AgentListView: React.FC = () => {
                                                 <p className="text-xs text-gray-400">{agent.use_case || t("No use case", "Sin caso de uso")}</p>
                                             </div>
                                         </div>
+                                        {isPlatformOwner && (
+                                            <button
+                                                onClick={() => handleDeleteAgent(agent.id!)}
+                                                className="absolute top-4 right-4 p-1.5 hover:bg-red-50 text-gray-300 hover:text-red-500 rounded-lg transition-all"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        )}
                                         <p className="text-sm text-gray-500 my-4 line-clamp-2">{agent.description || t("No description", "Sin descripción")}</p>
                                         {agent.ai_config && (
                                             <div className="flex flex-wrap gap-1.5 text-[10px]">
