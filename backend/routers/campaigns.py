@@ -18,6 +18,7 @@ async def delete_campaign(campaign_id: int):
     if not supabase: return {"error": "No DB"}
     try:
         supabase.table("campaign_leads").delete().eq("campaign_id", campaign_id).execute()
+        supabase.table("encuestas").delete().eq("campaign_id", campaign_id).execute()
         supabase.table("campaigns").delete().eq("id", campaign_id).execute()
         return {"status": "ok", "message": f"Campaña {campaign_id} eliminada"}
     except Exception as e:
