@@ -90,6 +90,7 @@ export function CampaignsView() {
       setEditRetryInterval(Math.floor(((camp as any).retry_interval || 3600) / 60));
       setEditRetryUnit('minutes');
     }
+    setEditRetriesCount((camp as any).retries_count || 3);
   };
 
   const handleUpdateCampaign = async () => {
@@ -99,7 +100,8 @@ export function CampaignsView() {
         name: editName,
         scheduled_time: editTime ? new Date(editTime).toISOString() : null,
         retry_interval: editRetryInterval,
-        retry_unit: editRetryUnit
+        retry_unit: editRetryUnit,
+        retries_count: editRetriesCount
       };
       const res = await fetch(`${API_URL}/api/campaigns/${editingCampaign.id}`, {
         method: 'PUT',
@@ -133,8 +135,10 @@ export function CampaignsView() {
   const [scheduledTime, setScheduledTime] = useState('');
   const [retryInterval, setRetryInterval] = useState<number>(60);
   const [retryUnit, setRetryUnit] = useState<'minutes' | 'hours' | 'days'>('minutes');
+  const [retriesCount, setRetriesCount] = useState<number>(3);
   const [editRetryInterval, setEditRetryInterval] = useState<number>(60);
   const [editRetryUnit, setEditRetryUnit] = useState<'minutes' | 'hours' | 'days'>('minutes');
+  const [editRetriesCount, setEditRetriesCount] = useState<number>(3);
 
   const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
@@ -327,7 +331,8 @@ export function CampaignsView() {
           scheduled_time: scheduledTime ? new Date(scheduledTime).toISOString() : null,
           status: 'pending',
           retry_interval: retryInterval || 60,
-          retry_unit: retryUnit
+          retry_unit: retryUnit,
+          retries_count: retriesCount
         },
         leads
       };
@@ -468,6 +473,17 @@ export function CampaignsView() {
                   <option value="days">{t("Days", "Dias")}</option>
                 </select>
               </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t("Number of Retries", "Número de Reintentos")}</label>
+              <input
+                type="number"
+                min="0"
+                max="10"
+                value={editRetriesCount}
+                onChange={(e) => setEditRetriesCount(Number(e.target.value))}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              />
             </div>
           </div>
           <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
@@ -911,6 +927,19 @@ export function CampaignsView() {
                 </select>
               </div>
               <p className="text-xs text-gray-500 mt-1">{t("Wait time before retrying a failed call.", "Tiempo de espera antes de reintentar una llamada fallida.")}</p>
+            </div>
+
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Number of Retries", "Número de Reintentos")}</label>
+              <input
+                type="number"
+                min="0"
+                max="10"
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none"
+                value={retriesCount}
+                onChange={(e) => setRetriesCount(Number(e.target.value))}
+              />
+              <p className="text-xs text-gray-500 mt-1">{t("Max number of automatic retries (0 to 10).", "Número máximo de reintentos automáticos (0 a 10).")}</p>
             </div>
           </div>
         </div>

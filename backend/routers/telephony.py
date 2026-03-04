@@ -78,20 +78,36 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
              # Parcial, Fallida, No Contesta: programar reintento
              if datos.status in ('parcial', 'fallida', 'no_contesta'):
                  retry_seconds = 3600
+                 max_retries = 3
+                 current_retries = 0
                  try:
-                     lead_res = supabase.table("campaign_leads").select("campaign_id").eq("call_id", datos.id_encuesta).limit(1).execute()
+                     # Obtener info del lead y campaña
+                     lead_res = supabase.table("campaign_leads").select("campaign_id, retries_attempted").eq("call_id", datos.id_encuesta).limit(1).execute()
                      if lead_res.data:
+                         current_retries = lead_res.data[0].get('retries_attempted', 0)
                          camp_id = lead_res.data[0]['campaign_id']
-                         camp_res = supabase.table("campaigns").select("retry_interval").eq("id", camp_id).limit(1).execute()
+                         camp_res = supabase.table("campaigns").select("retry_interval, retries_count").eq("id", camp_id).limit(1).execute()
                          if camp_res.data:
-                             camp_retry = camp_res.data[0]['retry_interval']
+                             camp_retry = camp_res.data[0].get('retry_interval')
+                             max_retries = camp_res.data[0].get('retries_count', 3)
                              if camp_retry and camp_retry > 0:
                                  retry_seconds = camp_retry
                  except Exception as ex_interval:
-                     print(f"⚠️ Error fetching campaign retry interval: {ex_interval}")
+                     print(f"⚠️ Error fetching campaign data for retry: {ex_interval}")
 
-                 next_retry = (datetime.utcnow() + timedelta(seconds=retry_seconds)).isoformat()
-                 lead_update["next_retry_at"] = next_retry
+                 new_retries = current_retries + 1
+                 lead_update["retries_attempted"] = new_retries
+                 
+                 # Si aún quedan reintentos, volver a ponerlo en pending y programar
+                 if new_retries < max_retries:
+                     lead_update["status"] = "pending"
+                     next_retry = (datetime.utcnow() + timedelta(seconds=retry_seconds)).isoformat()
+                     lead_update["next_retry_at"] = next_retry
+                     print(f"🔄 [API] Reintento programado ({new_retries}/{max_retries}) para lead de encuesta {datos.id_encuesta} a las {next_retry}")
+                 else:
+                     print(f"🚫 [API] Máximo de reintentos alcanzado ({new_retries}/{max_retries}) para lead de encuesta {datos.id_encuesta}")
+                     # El status se queda como lo que vino (fallida/no_contesta/etc)
+             
              supabase.table("campaign_leads").update(lead_update).eq("call_id", datos.id_encuesta).execute()
 
              if datos.status in ('completada', 'fallida', 'rechazada') and curr_data.get('empresa_id'):

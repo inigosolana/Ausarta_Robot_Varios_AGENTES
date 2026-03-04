@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-04T13:34:17.539Z",
+  "updatedAt": "2026-03-04T13:37:38.304Z",
   "createdAt": "2026-03-04T10:48:31.416Z",
   "id": "3cLVhxdaKFTer7Ht",
   "name": "Orquestador de Campañas - Ausarta (NUEVO) - Active",
@@ -31,7 +31,7 @@
       "id": "fetch_1_new_act",
       "name": "FetchLead",
       "parameters": {
-        "url": "={{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&select=*,campaigns(agent_id,name)&order=created_at.asc&limit=1"
+        "url": "={{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&or=(next_retry_at.is.null,next_retry_at.lte.{{ $now.toISOString() }})&select=*,campaigns(agent_id,name)&order=created_at.asc&limit=1"
       },
       "position": [
         350,
@@ -98,9 +98,9 @@
   },
   "meta": null,
   "pinData": null,
-  "versionId": "4b360cbc-6da7-4dcb-885f-736df160ea3e",
-  "activeVersionId": "4b360cbc-6da7-4dcb-885f-736df160ea3e",
-  "versionCounter": 19,
+  "versionId": "ddb75c9c-202a-43a1-a5ab-8a893f0b21e9",
+  "activeVersionId": "ddb75c9c-202a-43a1-a5ab-8a893f0b21e9",
+  "versionCounter": 21,
   "triggerCount": 1,
   "shared": [
     {
@@ -157,9 +157,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-03-04T13:34:17.540Z",
-    "createdAt": "2026-03-04T13:34:17.540Z",
-    "versionId": "4b360cbc-6da7-4dcb-885f-736df160ea3e",
+    "updatedAt": "2026-03-04T13:37:38.305Z",
+    "createdAt": "2026-03-04T13:37:38.305Z",
+    "versionId": "ddb75c9c-202a-43a1-a5ab-8a893f0b21e9",
     "workflowId": "3cLVhxdaKFTer7Ht",
     "nodes": [
       {
@@ -186,7 +186,7 @@
         "id": "fetch_1_new_act",
         "name": "FetchLead",
         "parameters": {
-          "url": "={{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&select=*,campaigns(agent_id,name)&order=created_at.asc&limit=1"
+          "url": "={{ $env.VITE_SUPABASE_URL }}/rest/v1/campaign_leads?status=eq.pending&or=(next_retry_at.is.null,next_retry_at.lte.{{ $now.toISOString() }})&select=*,campaigns(agent_id,name)&order=created_at.asc&limit=1"
         },
         "position": [
           350,
