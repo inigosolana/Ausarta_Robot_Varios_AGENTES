@@ -56,7 +56,7 @@ const ViewLoader = () => (
 
 
 const App: React.FC = () => {
-  const { user, profile, realProfile, loading, signOut, hasPermission, isRole, refreshProfile, isPlatformOwner } = useAuth();
+  const { user, profile, realProfile, loading, signOut, hasPermission, isRole, refreshProfile, isPlatformOwner, setSpoofedRole, setSpoofedEmpresa } = useAuth();
   const { t, i18n } = useTranslation();
   const [currentView, setCurrentView] = useState<ViewState | 'results' | 'admin' | 'crm' | 'profile'>('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -66,8 +66,10 @@ const App: React.FC = () => {
   const queryClient = useQueryClient();
   const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
-  const isRootUser = realProfile?.email === 'admin@ausarta.net';
-  const canSimulation = (realProfile?.role === 'superadmin' || isRootUser) && realProfile?.empresas?.nombre === 'Ausarta';
+  const isRootUser = realProfile?.email === 'admin@ausarta.net' ||
+    realProfile?.email === 'inigo2.solana@ausarta.net' ||
+    realProfile?.email === 'inigosolana@gmail.com';
+  const canSimulation = (realProfile?.role === 'superadmin' || isRootUser) && (realProfile?.empresas?.nombre === 'Ausarta' || isRootUser);
 
   // Auto-redirect if role change makes current view inaccessible
   useEffect(() => {
@@ -367,14 +369,11 @@ const App: React.FC = () => {
                     <button
                       key={r}
                       title={r}
-                      onClick={async () => {
-                        const { error } = await supabase.from('user_profiles').update({ role: r }).eq('id', profile!.id);
-                        if (!error) {
-                          toast.success(`${t('Switched to')} ${r}`);
-                          await refreshProfile();
-                        }
+                      onClick={() => {
+                        setSpoofedRole(r === realProfile?.role ? null : r);
+                        toast.success(`${t('Simulating')} ${r}`);
                       }}
-                      className={`text-[9px] flex-1 py-1 rounded transition-all font-bold ${profile.role === r
+                      className={`text-[9px] flex-1 py-1 rounded transition-all font-bold ${profile?.role === r
                         ? 'bg-indigo-600 text-white shadow-sm'
                         : 'bg-white dark:bg-gray-800 text-gray-500 hover:bg-indigo-50'
                         }`}
@@ -386,14 +385,11 @@ const App: React.FC = () => {
 
                 {/* Company Switcher */}
                 <select
-                  value={profile.empresa_id || ''}
-                  onChange={async (e) => {
+                  value={profile?.empresa_id || ''}
+                  onChange={(e) => {
                     const val = e.target.value === '' ? null : Number(e.target.value);
-                    const { error } = await supabase.from('user_profiles').update({ empresa_id: val }).eq('id', profile!.id);
-                    if (!error) {
-                      toast.success(t('Company changed'));
-                      await refreshProfile();
-                    }
+                    setSpoofedEmpresa(val === realProfile?.empresa_id ? null : val);
+                    toast.success(t('Viewing company context'));
                   }}
                   className="w-full text-[10px] py-1 px-1 border border-indigo-100 dark:border-indigo-800 dark:bg-gray-800 rounded outline-none focus:ring-1 focus:ring-indigo-500 font-medium"
                 >
@@ -403,18 +399,16 @@ const App: React.FC = () => {
                   ))}
                 </select>
 
-                {profile.role !== 'superadmin' && (
+                {(profile?.role !== realProfile?.role || profile?.empresa_id !== realProfile?.empresa_id) && (
                   <button
-                    onClick={async () => {
-                      const { error } = await supabase.from('user_profiles').update({ role: 'superadmin' }).eq('id', profile!.id);
-                      if (!error) {
-                        toast.success(t('Restored Superadmin role'));
-                        await refreshProfile();
-                      }
+                    onClick={() => {
+                      setSpoofedRole(null);
+                      setSpoofedEmpresa(null);
+                      toast.success(t('Context restored'));
                     }}
                     className="text-[9px] font-bold text-white bg-red-600 py-1 rounded hover:bg-red-700 w-full transition-all"
                   >
-                    {t('Restore Superadmin')}
+                    {t('Restore Reality')}
                   </button>
                 )}
               </div>
