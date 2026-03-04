@@ -44,10 +44,8 @@ interface Agent {
 }
 
 export function CampaignsView() {
-  const { profile, isRole } = useAuth();
+  const { profile, isRole, isPlatformOwner } = useAuth();
   const { t } = useTranslation();
-  const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && (profile?.role === 'admin' || profile?.role === 'superadmin');
-  const isPlatformOwner = profile?.role === 'superadmin' || isAusartaAdmin;
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [showCreate, setShowCreate] = useState(false);

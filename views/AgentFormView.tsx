@@ -26,11 +26,9 @@ const defaultAIConfig: AIConfig = {
 };
 
 const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
-    const { isRole, hasPermission, profile } = useAuth();
+    const { isRole, hasPermission, profile, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
 
-    const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
-    const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
     const isRegularUser = isRole('usuario');
 
     const isEditing = !!agent?.id;

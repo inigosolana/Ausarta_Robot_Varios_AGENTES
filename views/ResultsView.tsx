@@ -31,11 +31,8 @@ interface Props {
 }
 
 const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, hideHeader }) => {
-    const { profile, isRole } = useAuth();
+    const { profile, isRole, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
-
-    const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
-    const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
 
     const [results, setResults] = useState<SurveyResult[]>([]);
     const [loading, setLoading] = useState(true);

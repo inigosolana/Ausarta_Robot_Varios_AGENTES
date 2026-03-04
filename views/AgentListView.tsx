@@ -18,11 +18,8 @@ const SkeletonCard = () => (
 );
 
 const AgentListView: React.FC = () => {
-    const { profile, isRole } = useAuth();
+    const { profile, isRole, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
-
-    const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
-    const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
 
     const [empresas, setEmpresas] = useState<Empresa[]>([]);
     const [agents, setAgents] = useState<(AgentConfig & { ai_config?: AIConfig })[]>([]);

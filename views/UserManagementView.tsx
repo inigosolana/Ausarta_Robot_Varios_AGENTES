@@ -24,11 +24,8 @@ const SkeletonRow = () => (
 );
 
 const UserManagementView: React.FC = () => {
-    const { profile: currentProfile, isRole } = useAuth();
+    const { profile: currentProfile, isRole, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
-
-    const isAusartaAdmin = currentProfile?.empresas?.nombre === 'Ausarta' && isRole('admin');
-    const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
 
     const [users, setUsers] = useState<(UserProfile & { permissions: UserPermission[], empresas?: Empresa | null })[]>([]);
     const [loading, setLoading] = useState(true);

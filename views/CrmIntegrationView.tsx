@@ -7,9 +7,8 @@ import { useAuth } from '../contexts/AuthContext';
 import type { Empresa } from '../types';
 
 const CrmIntegrationView: React.FC = () => {
-    const { profile, isRole } = useAuth();
+    const { profile, isRole, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
-    const isPlatformOwner = isRole('superadmin') || (profile?.empresas?.nombre === 'Ausarta' && isRole('admin'));
 
     const [empresas, setEmpresas] = useState<Empresa[]>([]);
     const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | null>(null);

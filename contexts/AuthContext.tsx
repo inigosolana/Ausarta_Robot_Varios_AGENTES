@@ -16,6 +16,7 @@ interface AuthContextType {
     isRole: (...roles: UserRole[]) => boolean;
     refreshProfile: () => Promise<void>;
     realProfile: UserProfile | null;
+    isPlatformOwner: boolean;
     setSpoofedRole: (role: UserRole | null) => void;
     setSpoofedEmpresa: (empresaId: number | null) => void;
 }
@@ -91,7 +92,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return;
         }
 
-        const canSpoof = realProfile.role === 'superadmin' || realProfile.email === 'admin@ausarta.net';
+        const isActuallyAusarta = realProfile.empresas?.nombre === 'Ausarta' || realProfile.email === 'admin@ausarta.net';
+        const canSpoof = (realProfile.role === 'superadmin' || realProfile.email === 'admin@ausarta.net') && isActuallyAusarta;
 
         if (canSpoof && (spoofedRole || spoofedEmpresa)) {
             // Need to fetch company data if spoofedEmpresa is set
@@ -198,11 +200,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return roles.includes(profile.role);
     };
 
+    // Centralised Platform Management Check
+    const isPlatformOwner = !!profile && profile.empresas?.nombre === 'Ausarta' && (profile.role === 'superadmin' || profile.role === 'admin');
+
     return (
         <AuthContext.Provider value={{
             user, session, profile, permissions, loading,
             signIn, signUp, signOut, hasPermission, isRole, refreshProfile,
-            realProfile, setSpoofedRole, setSpoofedEmpresa
+            realProfile, isPlatformOwner, setSpoofedRole, setSpoofedEmpresa
         }}>
             {children}
         </AuthContext.Provider>

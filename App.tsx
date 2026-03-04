@@ -56,10 +56,8 @@ const ViewLoader = () => (
 
 
 const App: React.FC = () => {
-  const { user, profile, loading, signOut, hasPermission, isRole, refreshProfile } = useAuth();
+  const { user, profile, realProfile, loading, signOut, hasPermission, isRole, refreshProfile, isPlatformOwner } = useAuth();
   const { t, i18n } = useTranslation();
-  const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
-  const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
   const [currentView, setCurrentView] = useState<ViewState | 'results' | 'admin' | 'crm' | 'profile'>('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -68,8 +66,8 @@ const App: React.FC = () => {
   const queryClient = useQueryClient();
   const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
-  const isRootUser = profile?.email === 'admin@ausarta.net';
-  const canSimulation = profile?.role === 'superadmin' || isRootUser;
+  const isRootUser = realProfile?.email === 'admin@ausarta.net';
+  const canSimulation = (realProfile?.role === 'superadmin' || isRootUser) && realProfile?.empresas?.nombre === 'Ausarta';
 
   // Auto-redirect if role change makes current view inaccessible
   useEffect(() => {
@@ -244,7 +242,7 @@ const App: React.FC = () => {
             <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>
               {t('Build', 'Construcción')}
             </div>
-            {isAusartaAdmin && hasPermission('empresas') && (
+            {isPlatformOwner && hasPermission('empresas') && (
               <SidebarItem
                 icon={<Building2 size={18} />}
                 label={t('Companies', 'Empresas')}

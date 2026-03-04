@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
 
 const UsageView: React.FC = () => {
-    const { profile, isRole } = useAuth();
+    const { profile, isRole, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
     const [integrations, setIntegrations] = useState<any[]>([]);
     const [usage, setUsage] = useState<any>(null);
@@ -39,8 +39,6 @@ const UsageView: React.FC = () => {
         try {
             setIsLoading(true);
             const params = new URLSearchParams();
-            const isAusartaAdmin = profile?.empresas?.nombre === 'Ausarta' && isRole('admin');
-            const isPlatformOwner = isRole('superadmin') || isAusartaAdmin;
 
             if (!isPlatformOwner && profile?.empresa_id) {
                 params.append('empresa_id', String(profile.empresa_id));
