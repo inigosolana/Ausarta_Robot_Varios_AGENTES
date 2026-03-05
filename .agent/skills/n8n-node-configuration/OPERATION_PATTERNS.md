@@ -186,7 +186,6 @@ Most common trigger - 813 searches!
 ```
 
 #### Webhook with Authentication
-
 **Header auth**:
 ```javascript
 {
