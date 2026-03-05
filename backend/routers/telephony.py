@@ -83,10 +83,10 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
          if (curr_data.get('status') or '') not in ('completed', 'rejected_opt_out'):
              update_data["status"] = 'incomplete'
 
-    print(f"📝 [API] Intentando actualizar encuesta {datos.id_encuesta} con: {update_data}")
+    logger.info(f"📝 [API] Intentando actualizar encuesta {datos.id_encuesta} con: {update_data}")
     try:
         supabase.table("encuestas").update(update_data).eq("id", datos.id_encuesta).execute()
-        print(f"✅ [API] Supabase actualizado para encuesta {datos.id_encuesta}")
+        logger.info(f"✅ [API] Supabase actualizado para encuesta {datos.id_encuesta}")
         
         if normalized_status in ('completed', 'rejected_opt_out', 'incomplete', 'failed', 'unreached'):
              lead_update = {"status": normalized_status}
@@ -128,7 +128,24 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
                      print(f"🚫 [API] Máximo de reintentos alcanzado ({new_retries}/{max_retries}) para lead de encuesta {datos.id_encuesta}")
                      # El status se queda como lo que vino (failed/unreached/incomplete)
              
-             supabase.table("campaign_leads").update(lead_update).eq("call_id", datos.id_encuesta).execute()
+             lead_result = supabase.table("campaign_leads").update(lead_update).eq("call_id", datos.id_encuesta).execute()
+             rows_updated = len(lead_result.data) if lead_result.data else 0
+             logger.info(f"📊 [API] Lead update por call_id={datos.id_encuesta}: {rows_updated} filas afectadas, lead_update={lead_update}")
+             
+             # Fallback: si no se encontró el lead por call_id, buscar por campaign_id + teléfono
+             if rows_updated == 0 and curr_data.get('telefono'):
+                 logger.warning(f"⚠️ [API] No se encontró lead con call_id={datos.id_encuesta}. Intentando fallback por teléfono...")
+                 try:
+                     enc_data = supabase.table("encuestas").select("campaign_id, telefono").eq("id", datos.id_encuesta).execute()
+                     if enc_data.data and enc_data.data[0].get('campaign_id'):
+                         camp_id = enc_data.data[0]['campaign_id']
+                         tel = enc_data.data[0].get('telefono', '')
+                         lead_update_fb = {**lead_update, "call_id": datos.id_encuesta}
+                         fb_result = supabase.table("campaign_leads").update(lead_update_fb).eq("campaign_id", camp_id).eq("phone_number", tel).execute()
+                         fb_rows = len(fb_result.data) if fb_result.data else 0
+                         logger.info(f"🔄 [API] Fallback lead update: campaign_id={camp_id}, tel={tel} → {fb_rows} filas")
+                 except Exception as fb_err:
+                     logger.error(f"❌ [API] Error en fallback de lead update: {fb_err}")
 
              if normalized_status in ('completed', 'failed', 'rejected_opt_out') and curr_data.get('empresa_id'):
                  result_data = {
@@ -144,7 +161,7 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
 
         return {"status": "ok", "updated": update_data}
     except Exception as e:
-        print(f"❌ Error DB al guardar: {e}")
+        logger.error(f"❌ [API] Error DB al guardar encuesta {datos.id_encuesta}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 async def trigger_crm_webhook(encuesta_id: int, status: str, result_data: dict, empresa_id: int, telefono: str):

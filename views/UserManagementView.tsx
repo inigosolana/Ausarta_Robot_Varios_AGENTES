@@ -155,12 +155,15 @@ const UserManagementView: React.FC = () => {
 
             if (!res.ok) {
                 const text = await res.text();
+                let errorMessage = t('Error creating user', 'Error al crear el usuario');
                 try {
                     const parsed = JSON.parse(text);
-                    throw new Error(parsed.message || parsed.error || text);
+                    errorMessage = parsed.message || parsed.error || text;
                 } catch {
-                    throw new Error(text || t('Error creating user', 'Error al crear el usuario'));
+                    errorMessage = text || errorMessage;
                 }
+                console.error('[UserManagement] Error response:', res.status, errorMessage);
+                throw new Error(errorMessage);
             }
 
             const responseData = await res.json();

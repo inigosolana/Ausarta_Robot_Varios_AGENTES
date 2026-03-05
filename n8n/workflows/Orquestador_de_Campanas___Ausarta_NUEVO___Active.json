@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-05T07:26:19.111Z",
+  "updatedAt": "2026-03-05T09:27:53.265Z",
   "createdAt": "2026-03-04T10:48:31.416Z",
   "id": "3cLVhxdaKFTer7Ht",
   "name": "Orquestador de Campañas - Ausarta (NUEVO)",
@@ -32,27 +32,14 @@
       "name": "FetchLead",
       "onError": "continueRegularOutput",
       "parameters": {
-        "authentication": "none",
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "apikey",
-              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmcnJ4ZWlidHJ3amFpcW1oeXR1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTQxMDg2MCwiZXhwIjoyMDg2OTg2ODYwfQ.hbjkzKxk1MnKn3otvrdp9yJpjUklYbT5sr_L1Gs6nXg"
-            }
-          ]
-        },
-        "method": "GET",
-        "sendBody": false,
-        "sendHeaders": true,
-        "url": "https://afrrxeibtrwjaiqmhytu.supabase.co/rest/v1/leads?select=*,campaigns!inner(*)&status=eq.pending&limit=1"
+        "url": "https://afrrxeibtrwjaiqmhytu.supabase.co/rest/v1/campaign_leads?select=*,campaigns!inner(*)&status=eq.pending&campaigns.status=eq.running&order=next_retry_at.asc.nullsfirst&limit=1"
       },
       "position": [
         350,
         300
       ],
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "credentials": {}
+      "typeVersion": 4.2
     },
     {
       "id": "check_empty",
@@ -87,6 +74,12 @@
       "typeVersion": 2.2
     },
     {
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "NeWFqQVXICbbvpHi",
+          "name": "Header Auth account"
+        }
+      },
       "id": "update_status",
       "name": "UpdateLeadCalling",
       "onError": "continueRegularOutput",
@@ -117,13 +110,7 @@
         200
       ],
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "NeWFqQVXICbbvpHi",
-          "name": "Header Auth account"
-        }
-      }
+      "typeVersion": 4.2
     },
     {
       "id": "post_1_new_act",
@@ -219,5 +206,276 @@
     "saveExecutionProgress": true,
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
+  },
+  "staticData": {
+    "node:ScheduleTrigger": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": null,
+  "pinData": null,
+  "versionId": "94e89e5f-a247-409a-b5de-01b944a6d6dd",
+  "activeVersionId": "94e89e5f-a247-409a-b5de-01b944a6d6dd",
+  "versionCounter": 49,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-03-04T10:48:31.420Z",
+      "createdAt": "2026-03-04T10:48:31.420Z",
+      "role": "workflow:owner",
+      "workflowId": "3cLVhxdaKFTer7Ht",
+      "projectId": "ijbwk55HPKJ5DPss",
+      "project": {
+        "updatedAt": "2025-12-11T08:54:51.702Z",
+        "createdAt": "2025-12-10T13:46:26.449Z",
+        "id": "ijbwk55HPKJ5DPss",
+        "name": "inigo solana <inigo.solana@ausarta.es>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "projectRelations": [
+          {
+            "updatedAt": "2025-12-10T13:46:26.452Z",
+            "createdAt": "2025-12-10T13:46:26.452Z",
+            "userId": "770335f9-a6c2-46ca-824f-d6bc6859540e",
+            "projectId": "ijbwk55HPKJ5DPss",
+            "user": {
+              "updatedAt": "2026-03-05T07:22:31.943Z",
+              "createdAt": "2025-12-10T13:46:26.442Z",
+              "id": "770335f9-a6c2-46ca-824f-d6bc6859540e",
+              "email": "inigo.solana@ausarta.es",
+              "firstName": "inigo",
+              "lastName": "solana",
+              "personalizationAnswers": {
+                "version": "v4",
+                "personalization_survey_submitted_at": "2025-12-11T08:55:07.101Z",
+                "personalization_survey_n8n_version": "1.123.4",
+                "companySize": "100-499",
+                "companyType": "saas",
+                "role": "business-owner",
+                "reportedSource": "google"
+              },
+              "settings": {
+                "easyAIWorkflowOnboarded": true,
+                "firstSuccessfulWorkflowId": "MkglONaefdeNTLrm",
+                "userActivated": true,
+                "userActivatedAt": 1772015350689,
+                "npsSurvey": {
+                  "waitingForResponse": true,
+                  "ignoredCount": 1,
+                  "lastShownAt": 1772695349488
+                }
+              },
+              "disabled": false,
+              "mfaEnabled": false,
+              "lastActiveAt": "2026-03-05",
+              "isPending": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-03-05T09:27:53.267Z",
+    "createdAt": "2026-03-05T09:27:53.267Z",
+    "versionId": "94e89e5f-a247-409a-b5de-01b944a6d6dd",
+    "workflowId": "3cLVhxdaKFTer7Ht",
+    "nodes": [
+      {
+        "id": "trig_1_new_act",
+        "name": "ScheduleTrigger",
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "interval": 5
+              }
+            ]
+          }
+        },
+        "position": [
+          100,
+          300
+        ],
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2
+      },
+      {
+        "id": "fetch_1_new_act",
+        "name": "FetchLead",
+        "onError": "continueRegularOutput",
+        "parameters": {
+          "url": "https://afrrxeibtrwjaiqmhytu.supabase.co/rest/v1/campaign_leads?select=*,campaigns!inner(*)&status=eq.pending&campaigns.status=eq.running&order=next_retry_at.asc.nullsfirst&limit=1"
+        },
+        "position": [
+          350,
+          300
+        ],
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2
+      },
+      {
+        "id": "check_empty",
+        "name": "CheckIfLeadExists",
+        "parameters": {
+          "conditions": {
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "cond1",
+                "leftValue": "={{ $json.id }}",
+                "operator": {
+                  "operation": "gt",
+                  "type": "number"
+                },
+                "rightValue": 0
+              }
+            ],
+            "options": {
+              "version": 2,
+              "leftValue": "",
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            }
+          }
+        },
+        "position": [
+          580,
+          300
+        ],
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2
+      },
+      {
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "NeWFqQVXICbbvpHi",
+            "name": "Header Auth account"
+          }
+        },
+        "id": "update_status",
+        "name": "UpdateLeadCalling",
+        "onError": "continueRegularOutput",
+        "parameters": {
+          "authentication": "predefinedCredentialType",
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Prefer",
+                "value": "return=minimal"
+              }
+            ]
+          },
+          "jsonBody": "={\n  \"status\": \"calling\"\n}",
+          "method": "PATCH",
+          "nodeCredentialType": "httpHeaderAuth",
+          "sendBody": true,
+          "sendHeaders": true,
+          "specifyBody": "json",
+          "url": "=https://afrrxeibtrwjaiqmhytu.supabase.co/rest/v1/campaign_leads?id=eq.{{ $('CheckIfLeadExists').item.json.id }}"
+        },
+        "position": [
+          810,
+          200
+        ],
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2
+      },
+      {
+        "id": "post_1_new_act",
+        "name": "PostCall",
+        "onError": "continueRegularOutput",
+        "parameters": {
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "jsonBody": "={\n  \"phoneNumber\": \"{{ $('CheckIfLeadExists').item.json.phone_number }}\",\n  \"customerName\": \"{{ $('CheckIfLeadExists').item.json.customer_name }}\",\n  \"campaignId\": \"{{ $('CheckIfLeadExists').item.json.campaign_id }}\",\n  \"agentId\": \"{{ $('CheckIfLeadExists').item.json.campaigns.agent_id }}\",\n  \"leadId\": \"{{ $('CheckIfLeadExists').item.json.id }}\"\n}",
+          "method": "POST",
+          "sendBody": true,
+          "sendHeaders": true,
+          "specifyBody": "json",
+          "url": "http://15.216.15.30:8003/api/calls/outbound"
+        },
+        "position": [
+          1060,
+          200
+        ],
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2
+      },
+      {
+        "id": "noop_1",
+        "name": "NoLeadFound",
+        "parameters": {},
+        "position": [
+          810,
+          400
+        ],
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1
+      }
+    ],
+    "connections": {
+      "CheckIfLeadExists": {
+        "main": [
+          [
+            {
+              "index": 0,
+              "node": "UpdateLeadCalling",
+              "type": "main"
+            },
+            {
+              "index": 0,
+              "node": "PostCall",
+              "type": "main"
+            }
+          ],
+          [
+            {
+              "index": 0,
+              "node": "NoLeadFound",
+              "type": "main"
+            }
+          ]
+        ]
+      },
+      "FetchLead": {
+        "main": [
+          [
+            {
+              "index": 0,
+              "node": "CheckIfLeadExists",
+              "type": "main"
+            }
+          ]
+        ]
+      },
+      "ScheduleTrigger": {
+        "main": [
+          [
+            {
+              "index": 0,
+              "node": "FetchLead",
+              "type": "main"
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "inigo solana",
+    "name": null,
+    "description": null
   }
 }
