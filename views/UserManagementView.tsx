@@ -136,53 +136,36 @@ const UserManagementView: React.FC = () => {
         setCreating(true);
         setInviteSuccess(false);
         try {
-            // Generate a random temporary password if no explicitly provided password
-            const generateRandomString = (length: number) => {
-                const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-                let retVal = "";
-                if (window.crypto && window.crypto.getRandomValues) {
-                    const values = new Uint32Array(length);
-                    window.crypto.getRandomValues(values);
-                    for (let i = 0; i < length; i++) {
-                        retVal += charset.charAt(values[i] % charset.length);
-                    }
-                } else {
-                    for (let i = 0; i < length; i++) {
-                        retVal += charset.charAt(Math.floor(Math.random() * charset.length));
-                    }
-                }
-                return retVal;
-            };
-
             const API_URL = import.meta.env.VITE_API_URL || '';
-            const tempPassword = newPassword || (generateRandomString(12) + '!Aa1');
+            const ADMIN_URL = `${API_URL}/api/admin/users`;
 
-            // Call Backend Proxy instead of n8n directly to avoid CORS issues
-            const PROXY_URL = `${API_URL}/api/n8n/invite`;
-
-            const res = await fetch(PROXY_URL, {
+            const res = await fetch(ADMIN_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     email: newEmail,
-                    password: tempPassword,
+                    password: newPassword || '',
                     full_name: newName,
                     role: newRole,
-                    empresa_id: finalEmpresaId || null
+                    empresa_id: finalEmpresaId || null,
+                    redirect_to: window.location.origin.includes('localhost') ? 'https://app.ausarta.net' : window.location.origin
                 })
             });
 
 
             if (!res.ok) {
-                const errorText = await res.text();
-                throw new Error(errorText || t('Error connecting to n8n', 'Error al conectar con n8n'));
+                const text = await res.text();
+                try {
+                    const parsed = JSON.parse(text);
+                    throw new Error(parsed.message || parsed.error || text);
+                } catch {
+                    throw new Error(text || t('Error creating user', 'Error al crear el usuario'));
+                }
             }
 
-            // The n8n workflow returns the Supabase response from the last node (or response node)
             const responseData = await res.json();
-            // n8n might return results differently depending on the node, but usually Supabase Auth returns { id: "..." }
-            // If the response node returns all data, we look for the ID.
-            const newUserId = responseData.id || responseData[0]?.id || (responseData.json ? responseData.json.id : null);
+            const newUserId = responseData.user_id;
+            const invited = Boolean(responseData.invited);
 
             // Actualizar estado local (con el tipo correcto que incluye permisos)
             const newUser: UserProfile & { permissions: UserPermission[], empresas?: Empresa | null } = {
@@ -202,7 +185,11 @@ const UserManagementView: React.FC = () => {
             setUsers(prev => [newUser, ...prev]);
             setInviteSuccess(true);
 
-            alert(`${t('User created correctly', 'Usuario creado correctamente')}${!newPassword ? `. ${t('Temporary password:', 'Contraseña temporal:')} ${tempPassword}` : ''}`);
+            if (invited) {
+                alert(t('Invitation email sent successfully!', '¡Email de invitación enviado correctamente!'));
+            } else {
+                alert(t('User created correctly', 'Usuario creado correctamente'));
+            }
 
             // Reset form and close
             setTimeout(() => {
