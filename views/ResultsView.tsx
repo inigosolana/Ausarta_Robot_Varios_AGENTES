@@ -19,6 +19,7 @@ interface SurveyResult {
     comentarios: string | null;
     transcription: string | null;
     llm_model: string | null;
+    seconds_used?: number | null;
     tipo_resultados?: string | null;
     datos_extra?: any;
 }
@@ -102,6 +103,69 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
 
     useEffect(() => {
         loadResults();
+
+        // 1. Canal para actualizaciones en la tabla 'encuestas' (Resultados detallados)
+        const filterStrEncuestas = campaignId
+            ? `campaign_id=eq.${campaignId}`
+            : (effectiveEmpresaId !== 'all' ? `empresa_id=eq.${effectiveEmpresaId}` : undefined);
+
+        const channelEncuestas = supabase
+            .channel('results-live-updates-encuestas')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'encuestas',
+                    filter: filterStrEncuestas
+                },
+                (payload) => {
+                    if (payload.eventType === 'INSERT') {
+                        const newRes = payload.new as SurveyResult;
+                        setResults(prev => {
+                            if (prev.some(r => r.id === newRes.id)) return prev;
+                            return [newRes, ...prev];
+                        });
+                    } else if (payload.eventType === 'UPDATE') {
+                        const updatedRes = payload.new as SurveyResult;
+                        setResults(prev => prev.map(r =>
+                            r.id === updatedRes.id ? { ...r, ...updatedRes } : r
+                        ));
+                    }
+                }
+            )
+            .subscribe();
+
+        // 2. Canal para actualizaciones en la tabla 'campaign_leads' (Progreso de la campaña)
+        // Esto es útil para ver cuando un lead cambia a 'calling' o 'failed' incluso antes de que haya encuesta
+        const channelLeads = supabase
+            .channel('leads-live-updates')
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'campaign_leads',
+                    filter: campaignId ? `campaign_id=eq.${campaignId}` : undefined
+                },
+                (payload) => {
+                    const updatedLead = payload.new as any;
+                    if (updatedLead.call_id) {
+                        // Si el lead ya tiene call_id, intentamos actualizar el resultado correspondiente
+                        setResults(prev => prev.map(r =>
+                            r.id === updatedLead.call_id
+                                ? { ...r, status: updatedLead.status, transcription: updatedLead.transcription || r.transcription }
+                                : r
+                        ));
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channelEncuestas);
+            supabase.removeChannel(channelLeads);
+        };
     }, [profile, effectiveEmpresaId, selectedAgentId, agentId, campaignId, dateRange]);
 
     const filteredResults = results.filter(r => {

@@ -21,6 +21,7 @@ interface Campaign {
   failed_leads?: number;
   pending_leads?: number;
   retries_count?: number;
+  interval_minutes?: number;
   is_question_based?: boolean;
   empresas?: { nombre: string };
 }
@@ -66,6 +67,24 @@ export function CampaignsView() {
   const [editTime, setEditTime] = useState("");
   const [activeTab, setActiveTab] = useState<'leads' | 'overview' | 'results'>('leads');
 
+  // Form State
+  const [name, setName] = useState('');
+  const [selectedAgent, setSelectedAgent] = useState('');
+  const [dataSource, setDataSource] = useState<'csv' | 'api' | 'manual'>('csv');
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [manualInput, setManualInput] = useState('');
+  const [scheduledTime, setScheduledTime] = useState('');
+  const [retryInterval, setRetryInterval] = useState<number>(60);
+  const [retryUnit, setRetryUnit] = useState<'minutes' | 'hours' | 'days'>('minutes');
+  const [retriesCount, setRetriesCount] = useState<number>(3);
+  const [editRetryInterval, setEditRetryInterval] = useState<number>(60);
+  const [editRetryUnit, setEditRetryUnit] = useState<'minutes' | 'hours' | 'days'>('minutes');
+  const [editRetriesCount, setEditRetriesCount] = useState<number>(3);
+  const [intervalMinutes, setIntervalMinutes] = useState<number>(2);
+  const [editIntervalMinutes, setEditIntervalMinutes] = useState<number>(2);
+
+  const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+
   const openEditModal = (camp: Campaign) => {
     setEditingCampaign(camp);
     setEditName(camp.name);
@@ -91,6 +110,7 @@ export function CampaignsView() {
       setEditRetryUnit('minutes');
     }
     setEditRetriesCount((camp as any).retries_count || 3);
+    setEditIntervalMinutes(camp.interval_minutes || 2);
   };
 
   const handleUpdateCampaign = async () => {
@@ -101,7 +121,8 @@ export function CampaignsView() {
         scheduled_time: editTime ? new Date(editTime).toISOString() : null,
         retry_interval: editRetryInterval,
         retry_unit: editRetryUnit,
-        retries_count: editRetriesCount
+        retries_count: editRetriesCount,
+        interval_minutes: editIntervalMinutes
       };
       const res = await fetch(`${API_URL}/api/campaigns/${editingCampaign.id}`, {
         method: 'PUT',
@@ -126,21 +147,7 @@ export function CampaignsView() {
     }
   };
 
-  // Form State
-  const [name, setName] = useState('');
-  const [selectedAgent, setSelectedAgent] = useState('');
-  const [dataSource, setDataSource] = useState<'csv' | 'api' | 'manual'>('csv');
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [manualInput, setManualInput] = useState('');
-  const [scheduledTime, setScheduledTime] = useState('');
-  const [retryInterval, setRetryInterval] = useState<number>(60);
-  const [retryUnit, setRetryUnit] = useState<'minutes' | 'hours' | 'days'>('minutes');
-  const [retriesCount, setRetriesCount] = useState<number>(3);
-  const [editRetryInterval, setEditRetryInterval] = useState<number>(60);
-  const [editRetryUnit, setEditRetryUnit] = useState<'minutes' | 'hours' | 'days'>('minutes');
-  const [editRetriesCount, setEditRetriesCount] = useState<number>(3);
 
-  const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
   // Helper to group campaigns
   const groupedCampaignsByCompany = campaigns.reduce((acc: Record<string, Campaign[]>, campaign) => {
@@ -157,6 +164,36 @@ export function CampaignsView() {
   useEffect(() => {
     loadCampaigns();
     loadEmpresas();
+
+    // Supabase Realtime for Campaigns
+    const channel = supabase
+      .channel('campaigns-realtime-updates')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'campaigns',
+          filter: profile?.empresa_id && !isPlatformOwner ? `empresa_id=eq.${profile.empresa_id}` : undefined
+        },
+        (payload) => {
+          if (payload.eventType === 'UPDATE') {
+            setCampaigns(prev => prev.map(c => c.id === payload.new.id ? { ...c, ...payload.new } : c));
+            if (selectedCampaign && selectedCampaign.id === payload.new.id) {
+              setSelectedCampaign(prev => prev ? { ...prev, ...payload.new } : null);
+            }
+          } else if (payload.eventType === 'INSERT') {
+            setCampaigns(prev => [payload.new as Campaign, ...prev]);
+          } else if (payload.eventType === 'DELETE') {
+            setCampaigns(prev => prev.filter(c => c.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [profile, isPlatformOwner]);
 
   useEffect(() => {
@@ -332,7 +369,8 @@ export function CampaignsView() {
           status: 'pending',
           retry_interval: retryInterval || 60,
           retry_unit: retryUnit,
-          retries_count: retriesCount
+          retries_count: retriesCount,
+          interval_minutes: intervalMinutes
         },
         leads
       };
@@ -390,17 +428,6 @@ export function CampaignsView() {
 
   const handleRetryLead = async (leadId: number) => {
     try {
-      // Usamos endpoint ad-hoc o simplemente forzamos el status a pending
-      // Como no hay endpoint específico de retry-single, reusamos la lógica de campañas o creamos uno.
-      // Opción rápida: Endpoint update lead. No existe. 
-      // Opción B: Crear endpoint en API.py para resetear 1 lead.
-      // Opción C (Temporal): Usar el de campaña global pero eso resetea todos los failed.
-      // Mejor: implemento una llamada directa a API para updatear el lead a pending.
-      // Pero no tengo endpoint exposed.
-      // SOLUCIÓN: Agrego endpoint rápido en api.py o asumo que el usuario usará el global.
-      // User asked: "que le de manualmente". Wait, I should add the endpoint to api.py first? 
-      // I'll assume I can add a small endpoint or use a SQL injection? No.
-      // Let's stick to displaying info first. I'll add the UI first.
       const res = await fetch(`${API_URL}/api/campaigns/leads/${leadId}/retry`, { method: 'POST' });
       if (res.ok) {
         // Optimistic update
@@ -413,6 +440,36 @@ export function CampaignsView() {
       }
     } catch (e) {
       alert(t("Error connecting to server", "Error al conectar con el servidor"));
+    }
+  };
+
+  const handleStartCampaign = async (campaignId: number) => {
+    try {
+      const res = await fetch(`${API_URL}/api/campaigns/${campaignId}/start`, { method: 'POST' });
+      if (res.ok) {
+        alert(t("Campaign started (Drip mode active)", "Campaña iniciada (Modo Goteo activo)"));
+        loadCampaigns();
+        if (selectedCampaign?.id === campaignId) loadCampaignDetails(selectedCampaign);
+      } else {
+        alert(t("Error starting campaign", "Error al iniciar campaña"));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleStopCampaign = async (campaignId: number) => {
+    try {
+      const res = await fetch(`${API_URL}/api/campaigns/${campaignId}/stop`, { method: 'POST' });
+      if (res.ok) {
+        alert(t("Campaign paused", "Campaña pausada"));
+        loadCampaigns();
+        if (selectedCampaign?.id === campaignId) loadCampaignDetails(selectedCampaign);
+      } else {
+        alert(t("Error pausing campaign", "Error al pausar campaña"));
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -484,6 +541,17 @@ export function CampaignsView() {
                 onChange={(e) => setEditRetriesCount(Number(e.target.value))}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t("Drip Interval (Minutes)", "Intervalo de Goteo (Minutos)")}</label>
+              <input
+                type="number"
+                min="1"
+                value={editIntervalMinutes}
+                onChange={(e) => setEditIntervalMinutes(Number(e.target.value))}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+              <p className="text-[10px] text-gray-400 mt-1">{t("Wait time between each call in the campaign.", "Tiempo de espera entre cada llamada de la campaña.")}</p>
             </div>
           </div>
           <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
@@ -563,6 +631,22 @@ export function CampaignsView() {
             >
               <Trash2 className="w-4 h-4" /> {t("Delete Campaign", "Eliminar Campaña")}
             </button>
+
+            {selectedCampaign.status === 'running' || selectedCampaign.status === 'active' ? (
+              <button
+                onClick={() => handleStopCampaign(selectedCampaign.id)}
+                className="px-4 py-1 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm flex items-center gap-2 font-bold shadow-sm"
+              >
+                <X className="w-4 h-4" /> {t("Stop Drip", "Pausar Goteo")}
+              </button>
+            ) : (
+              <button
+                onClick={() => handleStartCampaign(selectedCampaign.id)}
+                className="px-4 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm flex items-center gap-2 font-bold shadow-sm"
+              >
+                <Plus className="w-4 h-4" /> {t("Start Drip", "Iniciar Goteo")}
+              </button>
+            )}
           </div>
         </div>
 
@@ -940,6 +1024,18 @@ export function CampaignsView() {
                 onChange={(e) => setRetriesCount(Number(e.target.value))}
               />
               <p className="text-xs text-gray-500 mt-1">{t("Max number of automatic retries (0 to 10).", "Número máximo de reintentos automáticos (0 a 10).")}</p>
+            </div>
+
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Drip Interval (Minutes)", "Intervalo de Goteo (Minutos)")}</label>
+              <input
+                type="number"
+                min="1"
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none"
+                value={intervalMinutes}
+                onChange={(e) => setIntervalMinutes(Number(e.target.value))}
+              />
+              <p className="text-xs text-gray-500 mt-1">{t("Pace of the campaign: minutes to wait between each call.", "Ritmo de la campaña: minutos de espera entre cada llamada.")}</p>
             </div>
           </div>
         </div>

@@ -17,6 +17,7 @@ class CampaignCreate(BaseModel):
     leads_csv: Optional[str] = None # Contenido CSV en base64 o raw string
     retries_count: int = 3
     retry_interval: int = 60 # Minutos - Default 1 hora
+    interval_minutes: int = 2 # Espera entre leads (Campañas por Goteo)
 
 class CampaignLeadModel(BaseModel):
     phone_number: str
@@ -32,6 +33,7 @@ class CampaignModel(BaseModel):
     retries_count: int = 3
     retry_interval: int = 180
     retry_unit: str = "minutes"
+    interval_minutes: int = 2
 
 class LlmConfig(BaseModel):
     llm_provider: str
