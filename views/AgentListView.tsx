@@ -190,17 +190,35 @@ const AgentListView: React.FC = () => {
     };
 
     const handleDeleteAgent = async (id: number) => {
-        if (!confirm(t(
-            "Are you sure you want to delete this agent?",
-            "¿Estás seguro de que quieres eliminar este agente?"
-        ))) return;
+        const agent = agents.find(a => a.id === id);
+        if (!agent) return;
+
+        const confirmMsg = t(
+            `WARNING: You are about to delete agent "${agent.name}". This action will permanently remove: \n- All associated campaigns and leads\n- All call records and survey results\n- AI configuration\n\nARE YOU ABSOLUTELY SURE?`,
+            `ADVERTENCIA: Estás a punto de borrar al agente "${agent.name}". Esta acción eliminará permanentemente:\n- Todas las campañas y leads asociados\n- Todos los registros de llamadas y encuestas\n- Configuración de IA\n\n¿ESTÁS COMPLETAMENTE SEGURO?`
+        );
+
+        if (!confirm(confirmMsg)) return;
 
         try {
-            await supabase.from("ai_config").delete().eq("agent_id", id);
-            await supabase.from("agent_config").delete().eq("id", id);
+            setLoading(true);
+            const API_URL = import.meta.env.VITE_API_URL || '';
+            const res = await fetch(`${API_URL}/api/agents/${id}`, {
+                method: 'DELETE'
+            });
+            const result = await res.json();
+
+            if (!res.ok) {
+                throw new Error(result.error || "Error deleting agent");
+            }
+
             setAgents(prev => prev.filter(a => a.id !== id));
-        } catch (err) {
-            alert(t("Error deleting agent", "Error al eliminar el agente"));
+            alert(t("Agent and all related data deleted successfully", "El agente y todos sus datos relacionados han sido eliminados correctamente."));
+        } catch (err: any) {
+            console.error("Error deleting agent:", err);
+            alert(`${t("Error deleting agent", "Error al eliminar el agente")}: ${err.message || "Unknown error"}`);
+        } finally {
+            setLoading(false);
         }
     };
 

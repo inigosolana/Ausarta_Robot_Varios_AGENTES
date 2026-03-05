@@ -25,41 +25,54 @@ const AgentManagementView: React.FC = () => {
     const loadData = async () => {
         setLoading(true);
         try {
-            // Load empresas
-            let empQuery = supabase.from("empresas").select("*").order("nombre");
-            if (!isPlatformOwner && profile?.empresa_id) {
-                empQuery = empQuery.eq('id', profile.empresa_id);
-            }
-            const { data: empData, error: empError } = await empQuery;
-            if (empError) throw empError;
-            setEmpresas(empData || []);
+            const API_URL = import.meta.env.VITE_API_URL || '';
 
-            // Load agents
-            let query = supabase.from("agent_config").select("*, empresas(*)").order("created_at", { ascending: false });
-            // Cualquier usuario no-platformOwner solo ve agentes de su empresa
-            if (!isPlatformOwner && profile?.empresa_id) {
-                query = query.eq("empresa_id", profile.empresa_id);
+            // Load Empresas
+            const empRes = await fetch(`${API_URL}/api/empresas`);
+            const empData = await empRes.json();
+            if (Array.isArray(empData)) {
+                setEmpresas(empData);
             }
-            const { data: agentsData, error: agentsError } = await query;
-            if (agentsError) throw agentsError;
 
-            setAgents(agentsData || []);
-        } catch (err: any) {
+            // Load Agents
+            const res = await fetch(`${API_URL}/api/agents${selectedEmpresaId !== 'all' ? `?empresa_id=${selectedEmpresaId}` : ''}`);
+            const data = await res.json();
+
+            if (Array.isArray(data)) {
+                setAgents(data);
+            } else {
+                setAgents([]);
+            }
+        } catch (err) {
             console.error("Error loading data:", err);
-            // Optionally we could show a toast here, but for now we just log it.
         } finally {
             setLoading(false);
         }
     };
 
-    const handleDeleteAgent = async (id: number) => {
-        if (!confirm(t("Are you sure you want to delete this agent?", "¿Estás seguro de que quieres eliminar este agente?"))) return;
+    const [agentToDelete, setAgentToDelete] = useState<number | null>(null);
+
+    const executeDelete = async () => {
+        if (!agentToDelete) return;
         try {
-            await supabase.from("ai_config").delete().eq("agent_id", id);
-            await supabase.from("agent_config").delete().eq("id", id);
-            setAgents(prev => prev.filter(a => a.id !== id));
-        } catch (err) {
-            alert(t("Error deleting agent", "Error al eliminar el agente"));
+            setLoading(true);
+            const API_URL = import.meta.env.VITE_API_URL || '';
+            const res = await fetch(`${API_URL}/api/agents/${agentToDelete}`, {
+                method: 'DELETE'
+            });
+            const result = await res.json();
+
+            if (!res.ok) {
+                throw new Error(result.error || "Error deleting agent");
+            }
+
+            setAgents(prev => prev.filter(a => a.id !== agentToDelete));
+            setAgentToDelete(null);
+        } catch (err: any) {
+            console.error("Error deleting agent:", err);
+            alert(`${t("Error deleting agent", "Error al eliminar el agente")}: ${err.message || "Unknown error"}`);
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -102,7 +115,41 @@ const AgentManagementView: React.FC = () => {
     const canCreate = isSuperadmin || (isRole('admin') && profile?.empresa_id);
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 relative">
+            {/* Custom Delete Modal */}
+            {agentToDelete && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+                    <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 animate-in zoom-in-95 duration-300">
+                        <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mb-6 mx-auto">
+                            <Trash2 size={32} />
+                        </div>
+                        <h2 className="text-2xl font-bold text-gray-900 text-center mb-2">
+                            {t("Delete Agent?", "¿Eliminar Agente?")}
+                        </h2>
+                        <p className="text-gray-500 text-center mb-8 leading-relaxed">
+                            {t(
+                                "This will permanently delete the agent and ACCOMPANIED DATA: all associated campaigns, leads, call records, and configurations. This action cannot be undone.",
+                                "Esto eliminará permanentemente al agente y TODOS sus datos: campañas, leads, registros de llamadas y configuraciones asociadas. Esta acción no se puede deshacer."
+                            )}
+                        </p>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setAgentToDelete(null)}
+                                className="flex-1 px-6 py-3 border border-gray-200 text-gray-600 rounded-xl font-semibold hover:bg-gray-50 transition-all"
+                            >
+                                {t("Cancel", "Cancelar")}
+                            </button>
+                            <button
+                                onClick={executeDelete}
+                                className="flex-1 px-6 py-3 bg-red-500 text-white rounded-xl font-semibold hover:bg-red-600 shadow-lg shadow-red-500/30 transition-all active:scale-95"
+                            >
+                                {t("Delete Everything", "Borrar Todo")}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
@@ -179,7 +226,7 @@ const AgentManagementView: React.FC = () => {
                         <div
                             key={agent.id}
                             onClick={() => setEditingAgent(agent)}
-                            className="group bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-lg cursor-pointer overflow-hidden p-5 transition-all"
+                            className="group bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-lg cursor-pointer overflow-hidden p-5 transition-all text-left"
                         >
                             <div className="flex items-start justify-between">
                                 <div className="flex items-center gap-3">
@@ -192,7 +239,7 @@ const AgentManagementView: React.FC = () => {
                                     </div>
                                 </div>
                                 <button
-                                    onClick={(e) => { e.stopPropagation(); handleDeleteAgent(agent.id!); }}
+                                    onClick={(e) => { e.stopPropagation(); setAgentToDelete(agent.id!); }}
                                     className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition-all"
                                 >
                                     <Trash2 size={16} />

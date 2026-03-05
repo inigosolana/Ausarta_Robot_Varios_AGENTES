@@ -34,3 +34,12 @@ async def get_ui_cache(key: str, max_age_minutes: int = 5):
     except Exception as e:
         logger.error(f"Error reading cache {key}: {e}")
     return None
+
+async def clear_ui_cache(key: str):
+    """Borra una entrada de la cache"""
+    if not supabase: return
+    try:
+        supabase.table("ui_cache").delete().eq("key", key).execute()
+        logger.info(f"🗑️ Cache CLEARED for {key}")
+    except Exception as e:
+        logger.error(f"Error clearing cache {key}: {e}")

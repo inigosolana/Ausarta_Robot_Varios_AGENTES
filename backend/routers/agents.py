@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from typing import Optional
-from services.supabase_service import supabase, get_ui_cache
+from services.supabase_service import supabase, get_ui_cache, clear_ui_cache
 from models.schemas import VoiceAgentCreate, VoiceAgentUpdate
 from datetime import datetime
 import logging
@@ -42,6 +42,7 @@ async def get_prompts_alias():
 async def update_agent(agent_id: str, config: dict):
     if not supabase: return {"error": "No DB"}
     try:
+        # Agent Config
         db_config = {}
         if "name" in config: db_config["name"] = config["name"]
         if "instructions" in config: db_config["instructions"] = config["instructions"]
@@ -50,15 +51,36 @@ async def update_agent(agent_id: str, config: dict):
         if "description" in config: db_config["description"] = config["description"]
         if "useCase" in config or "use_case" in config: 
             db_config["use_case"] = config.get("useCase") or config.get("use_case")
-        if "voice_id" in config: db_config["voice_id"] = config["voice_id"]
-        if "llm_model" in config: db_config["llm_model"] = config["llm_model"]
         if "empresa_id" in config: db_config["empresa_id"] = config["empresa_id"]
         
         db_config["updated_at"] = datetime.utcnow().isoformat()
-        
         supabase.table("agent_config").update(db_config).eq("id", int(agent_id)).execute()
+
+        # AI Config associated
+        ai_config = {}
+        if "llm_provider" in config: ai_config["llm_provider"] = config["llm_provider"]
+        if "llm_model" in config: ai_config["llm_model"] = config["llm_model"]
+        if "tts_provider" in config: ai_config["tts_provider"] = config["tts_provider"]
+        if "tts_model" in config: ai_config["tts_model"] = config["tts_model"]
+        if "voice_id" in config or "tts_voice" in config: 
+            ai_config["tts_voice"] = config.get("voice_id") or config.get("tts_voice")
+        if "stt_provider" in config: ai_config["stt_provider"] = config["stt_provider"]
+        if "stt_model" in config: ai_config["stt_model"] = config["stt_model"]
+        if "language" in config: ai_config["language"] = config["language"]
+
+        if ai_config:
+            # Upsert logic
+            ai_config["agent_id"] = int(agent_id)
+            ai_config["updated_at"] = datetime.utcnow().isoformat()
+            
+            # Check if exists
+            existing = supabase.table("ai_config").select("id").eq("agent_id", int(agent_id)).execute()
+            if existing.data:
+                supabase.table("ai_config").update(ai_config).eq("agent_id", int(agent_id)).execute()
+            else:
+                supabase.table("ai_config").insert(ai_config).execute()
         
-        # Clasificación automática vía n8n (Agent Classifier)
+        # Classification Hook
         if "instructions" in config:
             async def call_webhook():
                 try:
@@ -69,11 +91,11 @@ async def update_agent(agent_id: str, config: dict):
                     payload = {"agent_id": agent_id, "instructions": config["instructions"]}
                     async with aiohttp.ClientSession() as sess:
                         await sess.post(url, json=payload)
-                except Exception as e:
-                    logger.error(f"Error calling classify webhook: {e}")
+                except: pass
             import asyncio
             asyncio.create_task(call_webhook())
-            
+        
+        await clear_ui_cache("agents_list")
         return {"status": "ok", "message": f"Agente {agent_id} actualizado"}
     except Exception as e:
         logger.error(f"Error updating agent: {e}")
@@ -81,7 +103,6 @@ async def update_agent(agent_id: str, config: dict):
 
 @router.post("/agents")
 async def create_agent(config: dict):
-    """Crear un nuevo agente dinámico"""
     if not supabase: return JSONResponse(status_code=500, content={"error": "No DB"})
     try:
         db_config = {
@@ -91,32 +112,42 @@ async def create_agent(config: dict):
             "greeting": config.get("greeting", "Buenas, ¿tiene un momento?"),
             "description": config.get("description", ""),
             "use_case": config.get("useCase") or config.get("use_case", ""),
-            "voice_id": config.get("voice_id", "cefcb124-080b-4655-b31f-932f3ee743de"),
-            "llm_model": config.get("llm_model", "llama-3.3-70b-versatile"),
             "empresa_id": config.get("empresa_id"),
         }
         
         res = supabase.table("agent_config").insert(db_config).execute()
         new_agent = res.data[0] if res.data else {}
-        new_id = str(new_agent.get('id', ''))
+        new_id = int(new_agent.get('id', 0))
         
-        # Clasificación automática vía n8n (Agent Classifier)
+        # Create AI Config
+        ai_config = {
+            "agent_id": new_id,
+            "llm_provider": config.get("llm_provider", "groq"),
+            "llm_model": config.get("llm_model", "llama-3.3-70b-versatile"),
+            "tts_provider": config.get("tts_provider", "cartesia"),
+            "tts_model": config.get("tts_model", "sonic-multilingual"),
+            "tts_voice": config.get("voice_id") or config.get("tts_voice", "cefcb124-080b-4655-b31f-932f3ee743de"),
+            "stt_provider": config.get("stt_provider", "deepgram"),
+            "stt_model": config.get("stt_model", "nova-2"),
+            "language": config.get("language", "es")
+        }
+        supabase.table("ai_config").insert(ai_config).execute()
+
+        # Classification Hook
         async def call_webhook():
             try:
                 import aiohttp
                 import os
                 n8n_base = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
                 url = f"{n8n_base}/classify-agent"
-                payload = {"agent_id": new_id, "instructions": db_config["instructions"]}
+                payload = {"agent_id": str(new_id), "instructions": db_config["instructions"]}
                 async with aiohttp.ClientSession() as sess:
                     await sess.post(url, json=payload)
-            except Exception as e:
-                logger.error(f"Error calling classify webhook: {e}")
-        
+            except: pass
         import asyncio
         asyncio.create_task(call_webhook())
 
-        new_agent['id'] = new_id
+        await clear_ui_cache("agents_list")
         return {"status": "ok", "agent": new_agent}
     except Exception as e:
         logger.error(f"Error creating agent: {e}")
@@ -124,11 +155,36 @@ async def create_agent(config: dict):
 
 @router.delete("/agents/{agent_id}")
 async def delete_agent(agent_id: str):
-    """Eliminar un agente"""
-    if not supabase: return JSONResponse(status_code=500, content={"error": "No DB"})
+    """Elimina un agente y ABSOLUTAMENTE TODO lo relacionado (Campañas, leads, encuestas, config)"""
+    if not supabase: return JSONResponse(status_code=500, content={"error": "No DB connection"})
+    
+    aid = int(agent_id)
     try:
-        supabase.table("agent_config").delete().eq("id", int(agent_id)).execute()
-        return {"status": "ok", "message": f"Agente {agent_id} eliminado"}
+        # 1. Buscar campañas del agente para borrar sus leads primero
+        camps_res = supabase.table("campaigns").select("id").eq("agent_id", aid).execute()
+        camp_ids = [c['id'] for c in (camps_res.data or [])]
+        
+        if camp_ids:
+            # Borrar leads de esas campañas
+            supabase.table("campaign_leads").delete().in_("campaign_id", camp_ids).execute()
+            # Borrar las campañas
+            supabase.table("campaigns").delete().in_("id", camp_ids).execute()
+        
+        # 2. Borrar encuestas (registros de llamadas)
+        supabase.table("encuestas").delete().eq("agent_id", aid).execute()
+        
+        # 3. Borrar configuración de IA
+        supabase.table("ai_config").delete().eq("agent_id", aid).execute()
+        
+        # 4. Borrar el agente
+        supabase.table("agent_config").delete().eq("id", aid).execute()
+        
+        # 5. Limpiar cache
+        await clear_ui_cache("agents_list")
+        
+        logger.info(f"🗑️ Agente {aid} y todos sus datos eliminados por solicitud del usuario.")
+        return {"status": "ok", "message": f"Agente {aid} y todos sus datos relacionados (campañas, leads, encuestas) han sido eliminados."}
+        
     except Exception as e:
-        logger.error(f"Error deleting agent: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.error(f"Error en borrado completo del agente {aid}: {e}")
+        return JSONResponse(status_code=500, content={"error": f"Error al realizar el borrado completo: {str(e)}"})
