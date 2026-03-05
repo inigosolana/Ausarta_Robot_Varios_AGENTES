@@ -83,17 +83,22 @@
       "name": "Supabase_Profile",
       "parameters": {
         "dataToSend": "autoMapInputData",
+        "filterType": "manual",
         "filters": {
           "conditions": [
             {
-              "column": "id",
-              "operator": "eq",
-              "value": "={{ $json.id }}"
+              "condition": "eq",
+              "keyName": "id",
+              "keyValue": "={{ .id }}"
             }
           ]
         },
+        "inputsToIgnore": "",
+        "matchType": "anyFilter",
         "operation": "update",
-        "tableId": "user_profiles"
+        "resource": "row",
+        "tableId": "user_profiles",
+        "useCustomSchema": false
       },
       "position": [
         720,
