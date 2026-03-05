@@ -359,7 +359,7 @@ async def process_campaign_drip(campaign_id: int, agent_id: int, interval_minute
             return
 
         n8n_base_url = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
-        n8n_url = f"{n8n_base_url}/classify-agent" # Usaremos la ruta del orquestador
+        n8n_url = os.getenv("N8N_WEBHOOK_URL_ORCHESTRATOR", f"{n8n_base_url}/campana-goteo-v1")
 
         async with httpx.AsyncClient() as client:
             for i, lead in enumerate(leads):
