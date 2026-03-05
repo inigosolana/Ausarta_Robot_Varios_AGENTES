@@ -82,8 +82,13 @@ class DynamicAgent(Agent):
     """Agente dinámico que carga sus instrucciones desde Supabase."""
     
     def __init__(self, room_name: str, agent_config: dict) -> None:
-        # Si estamos en el mismo contenedor, usamos 127.0.0.1 para evitar problemas de resolución de nombres
-        self.server_url = os.getenv("BRIDGE_SERVER_URL_INTERNAL", "http://127.0.0.1:8001")
+        # Base URL del backend/bridge. En despliegues multi-contenedor, 127.0.0.1 suele NO ser el backend.
+        # Priorizamos INTERNAL (misma red), luego BRIDGE_SERVER_URL (red docker / host), y por último loopback.
+        self.server_url = (
+            os.getenv("BRIDGE_SERVER_URL_INTERNAL")
+            or os.getenv("BRIDGE_SERVER_URL")
+            or "http://127.0.0.1:8001"
+        ).rstrip("/")
         self.data_saved = False
         self.room_name = room_name
         self.agent_config = agent_config
@@ -269,7 +274,11 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
 # ============================================================================
 async def fetch_agent_config(survey_id: str) -> dict:
     """Consulta la API local para obtener la configuración del agente asignado a esta encuesta."""
-    server_url = os.getenv("BRIDGE_SERVER_URL", "http://127.0.0.1:8001")
+    server_url = (
+        os.getenv("BRIDGE_SERVER_URL_INTERNAL")
+        or os.getenv("BRIDGE_SERVER_URL")
+        or "http://127.0.0.1:8001"
+    ).rstrip("/")
     url = f"{server_url}/api/agent_config_by_survey/{survey_id}"
     
     try:
@@ -431,8 +440,13 @@ async def entrypoint(ctx: JobContext):
             agent_instance_exists = 'agent_instance' in locals()
             data_saved = getattr(agent_instance, 'data_saved', False) if agent_instance_exists else False
             
-            # Forzamos el uso de 127.0.0.1 para llamadas internas al propio contenedor
-            internal_api_url = "http://127.0.0.1:8001"
+            # Guardados post-llamada deben ir al mismo backend accesible desde este worker
+            internal_api_url = (
+                getattr(agent_instance, "server_url", None)
+                or os.getenv("BRIDGE_SERVER_URL_INTERNAL")
+                or os.getenv("BRIDGE_SERVER_URL")
+                or "http://127.0.0.1:8001"
+            ).rstrip("/")
             
             raw_messages = []
             transcript = ""

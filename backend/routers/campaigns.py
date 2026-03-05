@@ -152,7 +152,7 @@ async def get_campaign_details(campaign_id: int):
         surveys_map = {}
         if call_ids:
             try:
-                cols = "id, status, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios"
+                cols = "id, status, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, transcription"
                 res_surveys = await loop.run_in_executor(executor, supabase.table("encuestas").select(cols).in_("id", call_ids).execute)
                 for s in res_surveys.data:
                     surveys_map[s['id']] = s
@@ -208,6 +208,34 @@ async def get_campaign_details(campaign_id: int):
             "avg_rapidez": round(sum_rap / count_rap, 1) if count_rap > 0 else 0,
             "avg_overall": round((sum_com + sum_ins + sum_rap) / (count_com + count_ins + count_rap), 1) if (count_com + count_ins + count_rap) > 0 else 0
         }
+
+        # Enriquecer campaña con contadores para que el frontend pueda pintar cards/progreso
+        try:
+            status_counts = {}
+            for l in leads:
+                s = (l.get("status") or "pending")
+                status_counts[s] = status_counts.get(s, 0) + 1
+
+            total_leads = len(leads)
+            pending = status_counts.get("pending", 0)
+            calling = status_counts.get("calling", 0)
+            completed = status_counts.get("completed", 0) + status_counts.get("completada", 0)
+            failed = status_counts.get("failed", 0) + status_counts.get("fallida", 0)
+            unreached = status_counts.get("unreached", 0) + status_counts.get("no_contesta", 0)
+            incomplete = status_counts.get("incomplete", 0) + status_counts.get("parcial", 0)
+            rejected = status_counts.get("rejected_opt_out", 0) + status_counts.get("rechazada", 0) + status_counts.get("rejected", 0)
+
+            called = max(0, total_leads - pending - calling)
+
+            campaign["total_leads"] = total_leads
+            campaign["called_leads"] = called
+            # En UI, "Failed" suele englobar fallidas + no contesta + incompletas (rechazadas se muestran aparte)
+            campaign["failed_leads"] = failed + unreached + incomplete
+            campaign["pending_leads"] = pending + calling
+            campaign["completed_leads"] = completed
+            campaign["rejected_leads"] = rejected
+        except Exception as e_counts:
+            logger.error(f"Error computing campaign counters: {e_counts}")
         
         return {
             "campaign": campaign,

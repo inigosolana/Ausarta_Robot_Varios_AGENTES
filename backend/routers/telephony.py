@@ -33,6 +33,26 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
     
     print(f"📥 [API] Recibiendo datos encuesta {datos.id_encuesta}: {datos.dict(exclude_none=True)}")
     
+    # Normalizar estados (aceptar legacy ES + EN) a un set canónico EN para campañas/UI
+    status_map = {
+        # EN (canonical)
+        "completed": "completed",
+        "failed": "failed",
+        "incomplete": "incomplete",
+        "unreached": "unreached",
+        "rejected_opt_out": "rejected_opt_out",
+        "rejected": "rejected_opt_out",
+        "calling": "calling",
+        "pending": "pending",
+        "called": "called",
+        # ES (legacy)
+        "completada": "completed",
+        "fallida": "failed",
+        "parcial": "incomplete",
+        "no_contesta": "unreached",
+        "rechazada": "rejected_opt_out",
+    }
+
     update_data = {}
     
     if datos.nota_comercial is not None: update_data["puntuacion_comercial"] = datos.nota_comercial
@@ -44,39 +64,39 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
     if datos.llm_model is not None: update_data["llm_model"] = datos.llm_model
     if datos.datos_extra is not None: update_data["datos_extra"] = datos.datos_extra
     
-    status_final = datos.status
+    normalized_status = status_map.get((datos.status or "").strip().lower()) if datos.status else None
     es_completada = False
     
-    if datos.status:
-        update_data["status"] = datos.status
-        if datos.status == 'completada':
+    if normalized_status:
+        update_data["status"] = normalized_status
+        if normalized_status == 'completed':
             es_completada = True
             update_data["completada"] = 1
             
     curr = supabase.table("encuestas").select("status, empresa_id, telefono").eq("id", datos.id_encuesta).execute()
     curr_data = curr.data[0] if curr.data else {}
 
-    if not update_data and not datos.status:
+    if not update_data and not normalized_status:
         return {"status": "ignored", "message": "No data to update"}
         
-    if not datos.status and curr_data:
-         if curr_data.get('status') not in ('completada', 'rechazada'):
-             update_data["status"] = 'parcial'
+    if not normalized_status and curr_data:
+         if (curr_data.get('status') or '') not in ('completed', 'rejected_opt_out'):
+             update_data["status"] = 'incomplete'
 
     print(f"📝 [API] Intentando actualizar encuesta {datos.id_encuesta} con: {update_data}")
     try:
         supabase.table("encuestas").update(update_data).eq("id", datos.id_encuesta).execute()
         print(f"✅ [API] Supabase actualizado para encuesta {datos.id_encuesta}")
         
-        if datos.status in ('completada', 'rechazada', 'parcial', 'fallida', 'no_contesta'):
-             lead_update = {"status": datos.status}
+        if normalized_status in ('completed', 'rejected_opt_out', 'incomplete', 'failed', 'unreached'):
+             lead_update = {"status": normalized_status}
              
              # Rechazada: marcar como no reintentar para excluir de campañas futuras
-             if datos.status == 'rechazada':
+             if normalized_status == 'rejected_opt_out':
                  lead_update["no_reintentar"] = True
              
              # Parcial, Fallida, No Contesta: programar reintento
-             if datos.status in ('parcial', 'fallida', 'no_contesta'):
+             if normalized_status in ('incomplete', 'failed', 'unreached'):
                  retry_seconds = 3600
                  max_retries = 3
                  current_retries = 0
@@ -106,11 +126,11 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
                      print(f"🔄 [API] Reintento programado ({new_retries}/{max_retries}) para lead de encuesta {datos.id_encuesta} a las {next_retry}")
                  else:
                      print(f"🚫 [API] Máximo de reintentos alcanzado ({new_retries}/{max_retries}) para lead de encuesta {datos.id_encuesta}")
-                     # El status se queda como lo que vino (fallida/no_contesta/etc)
+                     # El status se queda como lo que vino (failed/unreached/incomplete)
              
              supabase.table("campaign_leads").update(lead_update).eq("call_id", datos.id_encuesta).execute()
 
-             if datos.status in ('completada', 'fallida', 'rechazada') and curr_data.get('empresa_id'):
+             if normalized_status in ('completed', 'failed', 'rejected_opt_out') and curr_data.get('empresa_id'):
                  result_data = {
                      "nota_comercial": datos.nota_comercial,
                      "nota_instalador": datos.nota_instalador,
@@ -120,7 +140,7 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
                      "seconds_used": datos.seconds_used,
                      "llm_model": datos.llm_model
                  }
-                 background_tasks.add_task(trigger_crm_webhook, datos.id_encuesta, datos.status, result_data, curr_data['empresa_id'], curr_data.get('telefono', ''))
+                 background_tasks.add_task(trigger_crm_webhook, datos.id_encuesta, normalized_status, result_data, curr_data['empresa_id'], curr_data.get('telefono', ''))
 
         return {"status": "ok", "updated": update_data}
     except Exception as e:
@@ -136,7 +156,7 @@ async def trigger_crm_webhook(encuesta_id: int, status: str, result_data: dict, 
         url = cfg["crm_webhook_url"]
         
         payload = {
-            "event": "call_completed" if status == "completada" else ("call_rejected" if status == "rechazada" else "call_failed"),
+            "event": "call_completed" if status == "completed" else ("call_rejected" if status == "rejected_opt_out" else "call_failed"),
             "encuesta_id": encuesta_id,
             "status": status,
             "lead": {
