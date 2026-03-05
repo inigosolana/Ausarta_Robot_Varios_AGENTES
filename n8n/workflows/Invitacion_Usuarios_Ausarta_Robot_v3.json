@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-05T09:29:44.611Z",
+  "updatedAt": "2026-03-05T10:09:59.089Z",
   "createdAt": "2026-02-24T13:49:09.664Z",
   "id": "MkglONaefdeNTLrm",
   "name": "Invitacion_Usuarios_Ausarta_Robot_v3",
@@ -37,6 +37,10 @@
             {
               "name": "apikey",
               "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmcnJ4ZWlidHJ3amFpcW1oeXR1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTQxMDg2MCwiZXhwIjoyMDg2OTg2ODYwfQ.hbjkzKxk1MnKn3otvrdp9yJpjUklYbT5sr_L1Gs6nXg"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmcnJ4ZWlidHJ3amFpcW1oeXR1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTQxMDg2MCwiZXhwIjoyMDg2OTg2ODYwfQ.hbjkzKxk1MnKn3otvrdp9yJpjUklYbT5sr_L1Gs6nXg"
             }
           ]
         },
@@ -210,9 +214,9 @@
     "templateCredsSetupCompleted": true
   },
   "pinData": {},
-  "versionId": "72f667fe-5008-43ff-a4d5-938fdc2522b1",
-  "activeVersionId": "72f667fe-5008-43ff-a4d5-938fdc2522b1",
-  "versionCounter": 79,
+  "versionId": "7bb2709b-2bb9-42fd-bd33-2a5290caa610",
+  "activeVersionId": "7bb2709b-2bb9-42fd-bd33-2a5290caa610",
+  "versionCounter": 81,
   "triggerCount": 1,
   "shared": [
     {
@@ -274,9 +278,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-03-05T09:29:44.612Z",
-    "createdAt": "2026-03-05T09:29:44.612Z",
-    "versionId": "72f667fe-5008-43ff-a4d5-938fdc2522b1",
+    "updatedAt": "2026-03-05T10:09:59.090Z",
+    "createdAt": "2026-03-05T10:09:59.090Z",
+    "versionId": "7bb2709b-2bb9-42fd-bd33-2a5290caa610",
     "workflowId": "MkglONaefdeNTLrm",
     "nodes": [
       {
@@ -309,6 +313,10 @@
               {
                 "name": "apikey",
                 "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmcnJ4ZWlidHJ3amFpcW1oeXR1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTQxMDg2MCwiZXhwIjoyMDg2OTg2ODYwfQ.hbjkzKxk1MnKn3otvrdp9yJpjUklYbT5sr_L1Gs6nXg"
+              },
+              {
+                "name": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmcnJ4ZWlidHJ3amFpcW1oeXR1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTQxMDg2MCwiZXhwIjoyMDg2OTg2ODYwfQ.hbjkzKxk1MnKn3otvrdp9yJpjUklYbT5sr_L1Gs6nXg"
               }
             ]
           },
