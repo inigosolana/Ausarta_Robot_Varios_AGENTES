@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-04T18:16:00.000Z",
+  "updatedAt": "2026-03-05T07:29:22.167Z",
   "createdAt": "2026-02-24T13:49:09.664Z",
   "id": "MkglONaefdeNTLrm",
   "name": "Invitacion_Usuarios_Ausarta_Robot_v3",
@@ -18,8 +18,8 @@
       "id": "webhook-123456789",
       "name": "Webhook",
       "position": [
-        100,
-        200
+        112,
+        208
       ],
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
@@ -28,33 +28,35 @@
     },
     {
       "parameters": {
+        "authentication": "none",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmcnJ4ZWlidHJ3amFpcW1oeXR1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTQxMDg2MCwiZXhwIjoyMDg2OTg2ODYwfQ.hbjkzKxk1MnKn3otvrdp9yJpjUklYbT5sr_L1Gs6nXg"
+            }
+          ]
+        },
+        "jsonBody": "={\n  \"email\": \"{{ $('Webhook').item.json.body.email }}\",\n  \"password\": \"{{ $('Webhook').item.json.body.password || 'Robot2025!' }}\",\n  \"email_confirm\": true\n}",
         "method": "POST",
-        "url": "=https://afrrxeibtrwjaiqmhytu.supabase.co/auth/v1/admin/users",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpHeaderAuth",
         "sendBody": true,
+        "sendHeaders": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"email\": \"{{ $('Webhook').item.json.body.email }}\",\n  \"password\": \"{{ $('Webhook').item.json.body.password || 'Robot2025!' }}\",\n  \"email_confirm\": true\n}"
+        "url": "https://afrrxeibtrwjaiqmhytu.supabase.co/auth/v1/admin/users"
       },
       "id": "supabase-auth-123",
       "name": "Supabase_Auth",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        350,
-        200
+        352,
+        208
       ],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "v8Epggpt6LC5dFEf",
-          "name": "Supabase API Auto"
-        }
-      }
+      "credentials": {}
     },
     {
       "parameters": {
-        "tableId": "user_profiles",
-        "operation": "update",
+        "dataToSend": "autoMapInputData",
         "filters": {
           "conditions": [
             {
@@ -64,15 +66,16 @@
             }
           ]
         },
-        "dataToSend": "autoMapInputData"
+        "operation": "update",
+        "tableId": "user_profiles"
       },
       "id": "supabase-profile-123",
       "name": "Supabase_Profile",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
-        600,
-        200
+        608,
+        208
       ],
       "credentials": {
         "supabaseApi": {
@@ -83,16 +86,20 @@
     },
     {
       "parameters": {
-        "html": "=<div style=\"font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;\">\n    <div style=\"background-color: #004a99; padding: 20px; text-align: center;\">\n        <img src=\"http://15.216.15.30/ausarta.png\" alt=\"Ausarta\" style=\"height: 50px;\">\n    </div>\n    <div style=\"padding: 30px;\">\n        <h2 style=\"color: #004a99;\">¡Bienvenido a Ausarta Robot!</h2>\n        <p>Hola <strong>{{ $('Webhook').item.json.body.full_name }}</strong>,</p>\n        <p>Tu cuenta de acceso a la plataforma <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\n        <p>A continuación tienes tus credenciales de acceso temporales:</p>\n        <div style=\"background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd;\">\n            <p style=\"margin: 5px 0;\"><strong>Usuario:</strong> {{ $('Webhook').item.json.body.email }}</p>\n            <p style=\"margin: 5px 0;\"><strong>Contraseña temporal:</strong> {{ $('Webhook').item.json.body.password || 'Robot2025!' }}</p>\n        </div>\n        <p><strong>Pasos para comenzar:</strong></p>\n        <ol>\n            <li>Accede a la plataforma en <a href=\"http://15.216.15.30\" style=\"color: #004a99; font-weight: bold;\">15.216.15.30</a>.</li>\n            <li>Inicia sesión con las credenciales indicadas arriba.</li>\n            <li>Por seguridad, te recomendamos cambiar tu contraseña en el apartado de configuración una vez dentro.</li>\n        </ol>\n        <p style=\"font-size: 13px; color: #666;\">\n            Si tienes cualquier duda técnica, escribe a <a href=\"mailto:clientes@ausarta.es\" style=\"color: #004a99;\">clientes@ausarta.es</a>.\n        </p>\n    </div>\n</div>"
+        "fromEmail": "instalaciones@ausarta.es",
+        "html": "=<div style=\\\"font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;\\\">\\n    <div style=\\\"background-color: #004a99; padding: 20px; text-align: center;\\\">\\n        <img src=\\\"http://15.216.15.30/ausarta.png\\\" alt=\\\"Ausarta\\\" style=\\\"height: 50px;\\\">\\n    </div>\\n    <div style=\\\"padding: 30px;\\\">\\n        <h2 style=\\\"color: #004a99;\\\">¡Bienvenido a Ausarta Robot!</h2>\\n        <p>Hola <strong>{{ $('Webhook').item.json.body.full_name }}</strong>,</p>\\n        <p>Tu cuenta de acceso a la plataforma <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\\n        <p>A continuación tienes tus credenciales de acceso temporales:</p>\\n        <div style=\\\"background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd;\\\">\\n            <p style=\\\"margin: 5px 0;\\\"><strong>Usuario:</strong> {{ $('Webhook').item.json.body.email }}</p>\\n            <p style=\\\"margin: 5px 0;\\\"><strong>Contraseña temporal:</strong> {{ $('Webhook').item.json.body.password || 'Robot2025!' }}</p>\\n        </div>\\n        <p><strong>Pasos para comenzar:</strong></p>\\n        <ol>\\n            <li>Accede a la plataforma en <a href=\\\"http://15.216.15.30\\\" style=\\\"color: #004a99; font-weight: bold;\\\">15.216.15.30</a>.</li>\\n            <li>Inicia sesión con las credenciales indicadas arriba.</li>\\n            <li>Por seguridad, te recomendamos cambiar tu contraseña en el apartado de configuración una vez dentro.</li>\\n        </ol>\\n        <p style=\\\"font-size: 13px; color: #666;\\\">\\n            Si tienes cualquier duda técnica, escribe a <a href=\\\"mailto:clientes@ausarta.es\\\" style=\\\"color: #004a99;\\\">clientes@ausarta.es</a>.\\n        </p>\\n    </div>\\n</div>",
+        "subject": "¡Bienvenido a Ausarta Robot! - Tus credenciales de acceso",
+        "toEmail": "={{ $('Webhook').item.json.body.email }}"
       },
       "id": "email-123456789",
       "name": "Enviar_Email_Bienvenida",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        850,
-        200
+        864,
+        208
       ],
+      "webhookId": "4bfc5867-139e-4ca2-a773-3eafbc6a284a",
       "credentials": {
         "smtp": {
           "id": "D1gBpu0AEp8AueAF",
@@ -102,16 +109,19 @@
     },
     {
       "parameters": {
-        "respondWith": "text",
-        "options": {}
+        "options": {
+          "responseCode": 200
+        },
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"user_id\": \"{{ $('Supabase_Auth').item.json.id }}\",\n  \"message\": \"Usuario invitado y perfil creado.\"\n}"
       },
       "id": "respond-node-123",
       "name": "Respond_to_Frontend",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        1100,
-        200
+        1152,
+        208
       ]
     }
   ],
@@ -175,11 +185,5 @@
     "templateCredsSetupCompleted": true
   },
   "pinData": {},
-  "versionId": "a613de38-fe73-42d4-b609-6c895e0294c0",
-  "activeVersionId": "a613de38-fe73-42d4-b609-6c895e0294c0",
-  "versionCounter": 66,
-  "triggerCount": 1,
-  "shared": [],
-  "tags": [],
-  "activeVersion": null
+  "versionId": "b0bd5633-5a20-422f-8dd8-c48bd8ac9f22"
 }

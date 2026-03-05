@@ -1,8 +1,8 @@
 {
-  "updatedAt": "2026-03-04T18:18:00.000Z",
+  "updatedAt": "2026-03-05T07:26:24.103Z",
   "createdAt": "2026-02-27T11:29:32.564Z",
   "id": "c1GO5ZJVQEkxgaLE",
-  "name": "Orquestador de Campañas - Ausarta Voice AI (Force Chat)",
+  "name": "Orquestador de Campañas - Force Chat [DEPRECATED]",
   "description": null,
   "active": true,
   "isArchived": false,
@@ -11,11 +11,19 @@
       "id": "fetch_lead_1",
       "name": "FetchOnePendingLead",
       "parameters": {
+        "authentication": "none",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmcnJ4ZWlidHJ3amFpcW1oeXR1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTQxMDg2MCwiZXhwIjoyMDg2OTg2ODYwfQ.hbjkzKxk1MnKn3otvrdp9yJpjUklYbT5sr_L1Gs6nXg"
+            }
+          ]
+        },
         "method": "GET",
-        "url": "=https://afrrxeibtrwjaiqmhytu.supabase.co/rest/v1/leads?select=*,campaigns!inner(*)&status=eq.pending&limit=1",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpHeaderAuth",
-        "sendHeaders": true
+        "sendBody": false,
+        "sendHeaders": true,
+        "url": "https://afrrxeibtrwjaiqmhytu.supabase.co/rest/v1/leads?select=*,campaigns!inner(*)&status=eq.pending&limit=1"
       },
       "position": [
         350,
@@ -23,12 +31,7 @@
       ],
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "v8Epggpt6LC5dFEf",
-          "name": "Supabase API Auto"
-        }
-      }
+      "credentials": {}
     },
     {
       "id": "http_1",
@@ -45,8 +48,7 @@
         300
       ],
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "continueOnFail": true
+      "typeVersion": 4.1
     },
     {
       "id": "chat_1",
@@ -92,19 +94,5 @@
     "saveExecutionProgress": true,
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
-  },
-  "staticData": {
-    "node:TriggerEveryMinute": {
-      "recurrenceRules": []
-    }
-  },
-  "meta": null,
-  "pinData": null,
-  "versionId": "c25e6440-f4c0-4db1-b828-fef4ab89a006",
-  "activeVersionId": "c25e6440-f4c0-4db1-b828-fef4ab89a006",
-  "versionCounter": 51,
-  "triggerCount": 1,
-  "shared": [],
-  "tags": [],
-  "activeVersion": null
+  }
 }

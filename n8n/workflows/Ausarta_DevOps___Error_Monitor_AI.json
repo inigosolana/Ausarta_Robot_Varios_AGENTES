@@ -1,32 +1,24 @@
 {
-  "updatedAt": "2026-03-04T18:15:00.000Z",
+  "updatedAt": "2026-03-05T07:35:36.954Z",
   "createdAt": "2026-03-04T13:08:50.471Z",
   "id": "FbXAQlUVAxAwDxOm",
   "name": "Ausarta DevOps - Error Monitor (AI)",
   "description": null,
-  "active": false,
+  "active": true,
   "isArchived": false,
   "nodes": [
     {
+      "parameters": {},
       "id": "error_trig_1",
       "name": "Error Trigger",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
       "position": [
-        100,
-        300
-      ],
-      "parameters": {}
+        112,
+        304
+      ]
     },
     {
-      "id": "groq_node_1",
-      "name": "Analyze Error with AI",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "position": [
-        350,
-        300
-      ],
       "parameters": {
         "method": "POST",
         "url": "https://api.groq.com/openai/v1/chat/completions",
@@ -34,9 +26,17 @@
         "nodeCredentialType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Eres el experto DevOps de Ausarta. Analiza el error de n8n proporcionado.\\n\\nCONTEXTO DEL ERROR:\\n- Mensaje: {{ $json.execution.error.message }}\\n- Nodo: {{ $json.execution.lastNodeExecuted }}\\n- Workflow: {{ $json.execution.workflow.name }}\\n- URL Ejecución: {{ $env.WEBHOOK_URL }}execution/{{ $json.execution.id }}\\n\\nGenera un resumen de UNA SOLA FRASE en español sobre qué ha fallado y cómo arreglarlo.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Workflow: {{ $('Error Trigger').item.json.workflow.name }}\\nError Data: {{ JSON.stringify($('Error Trigger').item.json.execution.error) }}\"\n    }\n  ]\n}"
+        "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Eres el experto DevOps de Ausarta. Analiza el error de n8n proporcionado.\\n\\nCONTEXTO DEL ERROR:\\n- Mensaje: {{ $('Error Trigger').item.json.execution.error.message }}\\n- Nodo: {{ $('Error Trigger').item.json.execution.lastNodeExecuted }}\\n- Workflow: {{ $('Error Trigger').item.json.workflow.name }}\\n- URL Ejecución: {{ $env.WEBHOOK_URL }}execution/{{ $('Error Trigger').item.json.execution.id }}\\n\\nGenera un resumen de UNA SOLA FRASE en español sobre qué ha fallado y cómo arreglarlo.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Workflow: {{ $('Error Trigger').item.json.workflow.name }}\\nError Data: {{ JSON.stringify($('Error Trigger').item.json.execution.error) }}\"\n    }\n  ]\n}",
+        "options": {}
       },
-      "continueOnFail": true,
+      "id": "groq_node_1",
+      "name": "Analyze Error with AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        352,
+        304
+      ],
       "credentials": {
         "httpHeaderAuth": {
           "id": "vM3WkPytJ6M2G1fS",
@@ -45,44 +45,44 @@
       }
     },
     {
-      "id": "backend_notif_1",
-      "name": "Notify Backend",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "position": [
-        600,
-        300
-      ],
       "parameters": {
         "method": "POST",
         "url": "http://15.216.15.30:8003/api/alerts",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"title\": \"🚨 Error en Workflow: {{ $('Error Trigger').item.json.workflow.name }}\",\n  \"message\": \"{{ $('Analyze Error with AI').item.json.choices[0].message.content }}\",\n  \"severity\": \"error\"\n}"
-      }
+        "jsonBody": "={\n  \"title\": \"🚨 Error en Workflow: {{ $('Error Trigger').item.json.workflow.name }}\",\n  \"message\": \"{{ $('Analyze Error with AI').item.json.choices[0].message.content }}\",\n  \"severity\": \"error\"\n}",
+        "options": {}
+      },
+      "id": "backend_notif_1",
+      "name": "Notify Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        608,
+        304
+      ]
     },
     {
+      "parameters": {
+        "chatId": "8581473738",
+        "text": "=🚨 *Error en Workflow n8n*\n\n*Workflow:* {{ $('Error Trigger').item.json.workflow.name }}\n*Nodo:* {{ $('Error Trigger').item.json.execution.lastNodeExecuted }}\n*Diagnóstico (Groq)*: {{ $('Analyze Error with AI').item.json.choices[0].message.content }}\n\n[Ver ejecución]({{ $env.WEBHOOK_URL }}execution/{{ $('Error Trigger').item.json.execution.id }})",
+        "additionalFields": {
+          "parse_mode": "MarkdownV2"
+        }
+      },
       "id": "telegram_1",
       "name": "Telegram_Notif",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1,
       "position": [
-        850,
-        300
+        864,
+        304
       ],
-      "parameters": {
-        "resource": "message",
-        "operation": "sendMessage",
-        "chatId": "8581473738",
-        "text": "=🚨 *Error en Workflow n8n*\\n\\n*Workflow:* {{ $('Error Trigger').item.json.workflow.name }}\\n*Nodo:* {{ $('Error Trigger').item.json.execution.lastNodeExecuted }}\\n*Diagnóstico (Groq)*: {{ $('Analyze Error with AI').item.json.choices[0].message.content }}\\n\\n[Ver ejecución]({{ $env.WEBHOOK_URL }}execution/{{ $('Error Trigger').item.json.execution.id }})",
-        "additionalFields": {
-          "parse_mode": "Markdown"
-        }
-      },
+      "webhookId": "1bc8105a-50ff-45d1-85d5-b38526b556ed",
       "credentials": {
         "telegramApi": {
-          "id": "tG8HkLpM9N1V2R4Z",
-          "name": "Telegram Bot"
+          "id": "hk74GCy1Aozl7yuR",
+          "name": "Telegram account 4"
         }
       }
     }
@@ -126,15 +126,5 @@
     "executionOrder": "v1",
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
-  },
-  "staticData": null,
-  "meta": null,
-  "pinData": null,
-  "versionId": "4948f0c7-b4e2-4214-9d12-9109f1500ddc",
-  "activeVersionId": null,
-  "versionCounter": 7,
-  "triggerCount": 0,
-  "shared": [],
-  "tags": [],
-  "activeVersion": null
+  }
 }

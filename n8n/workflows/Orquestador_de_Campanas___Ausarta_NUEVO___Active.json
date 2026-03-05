@@ -1,8 +1,8 @@
 {
-  "updatedAt": "2026-03-04T18:17:00.000Z",
+  "updatedAt": "2026-03-05T07:26:19.111Z",
   "createdAt": "2026-03-04T10:48:31.416Z",
   "id": "3cLVhxdaKFTer7Ht",
-  "name": "Orquestador de Campañas - Ausarta (NUEVO) - Active",
+  "name": "Orquestador de Campañas - Ausarta (NUEVO)",
   "description": null,
   "active": true,
   "isArchived": false,
@@ -15,10 +15,9 @@
           "interval": [
             {
               "field": "minutes",
-              "minutesInterval": 5
+              "interval": 5
             }
-          ],
-          "timezone": "Europe/Madrid"
+          ]
         }
       },
       "position": [
@@ -26,57 +25,175 @@
         300
       ],
       "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.1
+      "typeVersion": 1.2
     },
     {
       "id": "fetch_1_new_act",
       "name": "FetchLead",
+      "onError": "continueRegularOutput",
       "parameters": {
+        "authentication": "none",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmcnJ4ZWlidHJ3amFpcW1oeXR1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTQxMDg2MCwiZXhwIjoyMDg2OTg2ODYwfQ.hbjkzKxk1MnKn3otvrdp9yJpjUklYbT5sr_L1Gs6nXg"
+            }
+          ]
+        },
         "method": "GET",
-        "url": "=https://afrrxeibtrwjaiqmhytu.supabase.co/rest/v1/leads?select=*,campaigns!inner(*)&status=eq.pending&limit=1",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpHeaderAuth",
-        "sendHeaders": true
+        "sendBody": false,
+        "sendHeaders": true,
+        "url": "https://afrrxeibtrwjaiqmhytu.supabase.co/rest/v1/leads?select=*,campaigns!inner(*)&status=eq.pending&limit=1"
       },
       "position": [
         350,
         300
       ],
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
+      "typeVersion": 4.2,
+      "credentials": {}
+    },
+    {
+      "id": "check_empty",
+      "name": "CheckIfLeadExists",
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.id }}",
+              "operator": {
+                "operation": "gt",
+                "type": "number"
+              },
+              "rightValue": 0
+            }
+          ],
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          }
+        }
+      },
+      "position": [
+        580,
+        300
+      ],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2
+    },
+    {
+      "id": "update_status",
+      "name": "UpdateLeadCalling",
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "jsonBody": "={\n  \"status\": \"calling\"\n}",
+        "method": "PATCH",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "=https://afrrxeibtrwjaiqmhytu.supabase.co/rest/v1/campaign_leads?id=eq.{{ $('CheckIfLeadExists').item.json.id }}"
+      },
+      "position": [
+        810,
+        200
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "credentials": {
         "httpHeaderAuth": {
-          "id": "v8Epggpt6LC5dFEf",
-          "name": "Supabase API Auto"
+          "id": "NeWFqQVXICbbvpHi",
+          "name": "Header Auth account"
         }
       }
     },
     {
       "id": "post_1_new_act",
       "name": "PostCall",
+      "onError": "continueRegularOutput",
       "parameters": {
-        "jsonBody": "={\n  \"phoneNumber\": \"{{ $('FetchLead').item.json.phone_number }}\",\n  \"customerName\": \"{{ $('FetchLead').item.json.customer_name }}\",\n  \"campaignId\": \"{{ $('FetchLead').item.json.campaign_id }}\",\n  \"agentId\": \"{{ $('FetchLead').item.json.campaigns.agent_id }}\",\n  \"leadId\": \"{{ $('FetchLead').item.json.id }}\"\n}",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={\n  \"phoneNumber\": \"{{ $('CheckIfLeadExists').item.json.phone_number }}\",\n  \"customerName\": \"{{ $('CheckIfLeadExists').item.json.customer_name }}\",\n  \"campaignId\": \"{{ $('CheckIfLeadExists').item.json.campaign_id }}\",\n  \"agentId\": \"{{ $('CheckIfLeadExists').item.json.campaigns.agent_id }}\",\n  \"leadId\": \"{{ $('CheckIfLeadExists').item.json.id }}\"\n}",
         "method": "POST",
         "sendBody": true,
+        "sendHeaders": true,
         "specifyBody": "json",
         "url": "http://15.216.15.30:8003/api/calls/outbound"
       },
       "position": [
-        600,
-        300
+        1060,
+        200
       ],
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "continueOnFail": true
+      "typeVersion": 4.2
+    },
+    {
+      "id": "noop_1",
+      "name": "NoLeadFound",
+      "parameters": {},
+      "position": [
+        810,
+        400
+      ],
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1
     }
   ],
   "connections": {
+    "CheckIfLeadExists": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "UpdateLeadCalling",
+            "type": "main"
+          },
+          {
+            "index": 0,
+            "node": "PostCall",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "NoLeadFound",
+            "type": "main"
+          }
+        ]
+      ]
+    },
     "FetchLead": {
       "main": [
         [
           {
             "index": 0,
-            "node": "PostCall",
+            "node": "CheckIfLeadExists",
             "type": "main"
           }
         ]
@@ -102,19 +219,5 @@
     "saveExecutionProgress": true,
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
-  },
-  "staticData": {
-    "node:ScheduleTrigger": {
-      "recurrenceRules": []
-    }
-  },
-  "meta": null,
-  "pinData": null,
-  "versionId": "b157a7d1-83df-4845-baf6-a6f3b452e2e3",
-  "activeVersionId": "b157a7d1-83df-4845-baf6-a6f3b452e2e3",
-  "versionCounter": 28,
-  "triggerCount": 1,
-  "shared": [],
-  "tags": [],
-  "activeVersion": null
+  }
 }
