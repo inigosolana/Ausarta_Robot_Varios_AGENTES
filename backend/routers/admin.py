@@ -29,7 +29,12 @@ async def create_auth_user(payload: dict):
     logger.info(f"📨 [admin] Creando usuario: email={email}, role={role}, empresa_id={empresa_id}")
 
     # Paso 1: Delegamos la creación del usuario a n8n (auth + perfil + email de bienvenida)
-    base_url = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
+    base_url = os.getenv("N8N_WEBHOOK_BASE_URL")
+    if not base_url:
+        base_url = "https://n8n.ausarta.net/webhook"
+    
+    # Nos aseguramos de quitar la barra final si existe
+    base_url = base_url.rstrip("/")
     webhook_url = f"{base_url}/d0952789-a4a1-4eae-b0db-494356a9e3fa"
 
     n8n_payload = {
