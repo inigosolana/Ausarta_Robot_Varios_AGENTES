@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-05T10:09:59.089Z",
+  "updatedAt": "2026-03-05T10:33:35.121Z",
   "createdAt": "2026-02-24T13:49:09.664Z",
   "id": "MkglONaefdeNTLrm",
   "name": "Invitacion_Usuarios_Ausarta_Robot_v3",
@@ -62,7 +62,7 @@
       "id": "map-profile-data",
       "name": "MapProfileData",
       "parameters": {
-        "jsCode": "const authResponse = $input.item.json;\nconst webhookBody = $('Webhook').first().json.body;\n\nreturn [{\n  json: {\n    id: authResponse.id,\n    email: webhookBody.email,\n    full_name: webhookBody.full_name,\n    role: webhookBody.role || 'user',\n    empresa_id: webhookBody.empresa_id || null,\n    is_active: true\n  }\n}];",
+        "jsCode": "const authResponse = $input.item.json;\nconst webhookBody = $('Webhook').first().json.body;\n\nreturn {\n  json: {\n    id: authResponse.id,\n    email: webhookBody.email,\n    full_name: webhookBody.full_name,\n    role: webhookBody.role || 'user',\n    empresa_id: webhookBody.empresa_id || null,\n    is_active: true\n  }\n};",
         "mode": "runOnceForEachItem"
       },
       "position": [
@@ -89,7 +89,7 @@
             {
               "condition": "eq",
               "keyName": "id",
-              "keyValue": "={{ .id }}"
+              "keyValue": "={{ $json.id }}"
             }
           ]
         },
@@ -117,10 +117,7 @@
       "id": "email-123456789",
       "name": "Enviar_Email_Bienvenida",
       "parameters": {
-        "fromEmail": "instalaciones@ausarta.es",
-        "html": "=<div style=\"font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;\">\\n    <div style=\"background-color: #004a99; padding: 20px; text-align: center;\">\\n        <img src=\"http://15.216.15.30/ausarta.png\" alt=\"Ausarta\" style=\"height: 50px;\">\\n    </div>\\n    <div style=\"padding: 30px;\">\\n        <h2 style=\"color: #004a99;\">Bienvenido a Ausarta Robot!</h2>\\n        <p>Hola <strong>{{ $('Webhook').item.json.body.full_name }}</strong>,</p>\\n        <p>Tu cuenta de acceso a la plataforma <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\\n        <p>A continuacion tienes tus credenciales de acceso temporales:</p>\\n        <div style=\"background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd;\">\\n            <p style=\"margin: 5px 0;\"><strong>Usuario:</strong> {{ $('Webhook').item.json.body.email }}</p>\\n            <p style=\"margin: 5px 0;\"><strong>Contrasena temporal:</strong> {{ $('Webhook').item.json.body.password || 'Robot2025!' }}</p>\\n        </div>\\n        <p><strong>Pasos para comenzar:</strong></p>\\n        <ol>\\n            <li>Accede a la plataforma en <a href=\"http://15.216.15.30\" style=\"color: #004a99; font-weight: bold;\">15.216.15.30</a>.</li>\\n            <li>Inicia sesion con las credenciales indicadas arriba.</li>\\n            <li>Por seguridad, te recomendamos cambiar tu contrasena en el apartado de configuracion una vez dentro.</li>\\n        </ol>\\n        <p style=\"font-size: 13px; color: #666;\">\\n            Si tienes cualquier duda tecnica, escribe a <a href=\"mailto:clientes@ausarta.es\" style=\"color: #004a99;\">clientes@ausarta.es</a>.\\n        </p>\\n    </div>\\n</div>",
-        "subject": "Bienvenido a Ausarta Robot! - Tus credenciales de acceso",
-        "toEmail": "={{ $('Webhook').item.json.body.email }}"
+        "html": "=<div style=\"font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;\">\n    <div style=\"background-color: #004a99; padding: 20px; text-align: center;\">\n        <img src=\"http://15.216.15.30/ausarta.png\" alt=\"Ausarta\" style=\"height: 50px;\">\n    </div>\n    <div style=\"padding: 30px;\">\n        <h2 style=\"color: #004a99;\">Bienvenido a Ausarta Robot!</h2>\n        <p>Hola <strong>{{ $('Webhook').item.json.body.full_name }}</strong>,</p>\n        <p>Tu cuenta de acceso a la plataforma <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\n        <p>A continuacion tienes tus credenciales de acceso temporales:</p>\n        <div style=\"background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd;\">\n            <p style=\"margin: 5px 0;\"><strong>Usuario:</strong> {{ $('Webhook').item.json.body.email }}</p>\n            <p style=\"margin: 5px 0;\"><strong>Contrašeña temporal:</strong> {{ $('Webhook').item.json.body.password || 'Robot2025!' }}</p>\n        </div>\n        <p><strong>Pasos para comenzar:</strong></p>\n        <ol>\n            <li>Accede a la plataforma en <a href=\"http://15.216.15.30\" style=\"color: #004a99; font-weight: bold;\">15.216.15.30</a>.</li>\n            <li>Inicia sesion con las credenciales indicadas arriba.</li>\n            <li>Por seguridad, te recomendamos cambiar tu contrasena en el apartado de configuracion una vez dentro.</li>\n        </ol>\n        <p style=\"font-size: 13px; color: #666;\">\n            Si tienes cualquier duda tecnica, escribe a <a href=\"mailto:clientes@ausarta.es\" style=\"color: #004a99;\">clientes@ausarta.es</a>.\n        </p>\n    </div>\n</div>"
       },
       "position": [
         940,
@@ -219,9 +216,9 @@
     "templateCredsSetupCompleted": true
   },
   "pinData": {},
-  "versionId": "7bb2709b-2bb9-42fd-bd33-2a5290caa610",
-  "activeVersionId": "7bb2709b-2bb9-42fd-bd33-2a5290caa610",
-  "versionCounter": 81,
+  "versionId": "1aedcc9a-e442-48cb-aa19-d1a2fbf24d3b",
+  "activeVersionId": "1aedcc9a-e442-48cb-aa19-d1a2fbf24d3b",
+  "versionCounter": 87,
   "triggerCount": 1,
   "shared": [
     {
@@ -283,9 +280,9 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-03-05T10:09:59.090Z",
-    "createdAt": "2026-03-05T10:09:59.090Z",
-    "versionId": "7bb2709b-2bb9-42fd-bd33-2a5290caa610",
+    "updatedAt": "2026-03-05T10:33:35.122Z",
+    "createdAt": "2026-03-05T10:33:35.122Z",
+    "versionId": "1aedcc9a-e442-48cb-aa19-d1a2fbf24d3b",
     "workflowId": "MkglONaefdeNTLrm",
     "nodes": [
       {
@@ -343,7 +340,7 @@
         "id": "map-profile-data",
         "name": "MapProfileData",
         "parameters": {
-          "jsCode": "const authResponse = $input.item.json;\nconst webhookBody = $('Webhook').first().json.body;\n\nreturn [{\n  json: {\n    id: authResponse.id,\n    email: webhookBody.email,\n    full_name: webhookBody.full_name,\n    role: webhookBody.role || 'user',\n    empresa_id: webhookBody.empresa_id || null,\n    is_active: true\n  }\n}];",
+          "jsCode": "const authResponse = $input.item.json;\nconst webhookBody = $('Webhook').first().json.body;\n\nreturn {\n  json: {\n    id: authResponse.id,\n    email: webhookBody.email,\n    full_name: webhookBody.full_name,\n    role: webhookBody.role || 'user',\n    empresa_id: webhookBody.empresa_id || null,\n    is_active: true\n  }\n};",
           "mode": "runOnceForEachItem"
         },
         "position": [
@@ -364,17 +361,22 @@
         "name": "Supabase_Profile",
         "parameters": {
           "dataToSend": "autoMapInputData",
+          "filterType": "manual",
           "filters": {
             "conditions": [
               {
-                "column": "id",
-                "operator": "eq",
-                "value": "={{ $json.id }}"
+                "condition": "eq",
+                "keyName": "id",
+                "keyValue": "={{ $json.id }}"
               }
             ]
           },
+          "inputsToIgnore": "",
+          "matchType": "anyFilter",
           "operation": "update",
-          "tableId": "user_profiles"
+          "resource": "row",
+          "tableId": "user_profiles",
+          "useCustomSchema": false
         },
         "position": [
           720,
@@ -393,10 +395,7 @@
         "id": "email-123456789",
         "name": "Enviar_Email_Bienvenida",
         "parameters": {
-          "fromEmail": "instalaciones@ausarta.es",
-          "html": "=<div style=\"font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;\">\\n    <div style=\"background-color: #004a99; padding: 20px; text-align: center;\">\\n        <img src=\"http://15.216.15.30/ausarta.png\" alt=\"Ausarta\" style=\"height: 50px;\">\\n    </div>\\n    <div style=\"padding: 30px;\">\\n        <h2 style=\"color: #004a99;\">Bienvenido a Ausarta Robot!</h2>\\n        <p>Hola <strong>{{ $('Webhook').item.json.body.full_name }}</strong>,</p>\\n        <p>Tu cuenta de acceso a la plataforma <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\\n        <p>A continuacion tienes tus credenciales de acceso temporales:</p>\\n        <div style=\"background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd;\">\\n            <p style=\"margin: 5px 0;\"><strong>Usuario:</strong> {{ $('Webhook').item.json.body.email }}</p>\\n            <p style=\"margin: 5px 0;\"><strong>Contrasena temporal:</strong> {{ $('Webhook').item.json.body.password || 'Robot2025!' }}</p>\\n        </div>\\n        <p><strong>Pasos para comenzar:</strong></p>\\n        <ol>\\n            <li>Accede a la plataforma en <a href=\"http://15.216.15.30\" style=\"color: #004a99; font-weight: bold;\">15.216.15.30</a>.</li>\\n            <li>Inicia sesion con las credenciales indicadas arriba.</li>\\n            <li>Por seguridad, te recomendamos cambiar tu contrasena en el apartado de configuracion una vez dentro.</li>\\n        </ol>\\n        <p style=\"font-size: 13px; color: #666;\">\\n            Si tienes cualquier duda tecnica, escribe a <a href=\"mailto:clientes@ausarta.es\" style=\"color: #004a99;\">clientes@ausarta.es</a>.\\n        </p>\\n    </div>\\n</div>",
-          "subject": "Bienvenido a Ausarta Robot! - Tus credenciales de acceso",
-          "toEmail": "={{ $('Webhook').item.json.body.email }}"
+          "html": "=<div style=\"font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;\">\n    <div style=\"background-color: #004a99; padding: 20px; text-align: center;\">\n        <img src=\"http://15.216.15.30/ausarta.png\" alt=\"Ausarta\" style=\"height: 50px;\">\n    </div>\n    <div style=\"padding: 30px;\">\n        <h2 style=\"color: #004a99;\">Bienvenido a Ausarta Robot!</h2>\n        <p>Hola <strong>{{ $('Webhook').item.json.body.full_name }}</strong>,</p>\n        <p>Tu cuenta de acceso a la plataforma <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\n        <p>A continuacion tienes tus credenciales de acceso temporales:</p>\n        <div style=\"background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd;\">\n            <p style=\"margin: 5px 0;\"><strong>Usuario:</strong> {{ $('Webhook').item.json.body.email }}</p>\n            <p style=\"margin: 5px 0;\"><strong>Contrašeña temporal:</strong> {{ $('Webhook').item.json.body.password || 'Robot2025!' }}</p>\n        </div>\n        <p><strong>Pasos para comenzar:</strong></p>\n        <ol>\n            <li>Accede a la plataforma en <a href=\"http://15.216.15.30\" style=\"color: #004a99; font-weight: bold;\">15.216.15.30</a>.</li>\n            <li>Inicia sesion con las credenciales indicadas arriba.</li>\n            <li>Por seguridad, te recomendamos cambiar tu contrasena en el apartado de configuracion una vez dentro.</li>\n        </ol>\n        <p style=\"font-size: 13px; color: #666;\">\n            Si tienes cualquier duda tecnica, escribe a <a href=\"mailto:clientes@ausarta.es\" style=\"color: #004a99;\">clientes@ausarta.es</a>.\n        </p>\n    </div>\n</div>"
         },
         "position": [
           940,
