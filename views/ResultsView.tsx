@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Download, Search, RefreshCw, FileText, Target, ThumbsDown, Clock, Calendar } from 'lucide-react';
+import { Download, Search, RefreshCw, FileText, Target, ThumbsDown, Clock, Calendar, Bot, User, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -522,9 +522,13 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                 viewingTranscript && (
                     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
                         <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
-                            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                            <div className={`px-6 py-4 border-b flex justify-between items-center ${viewingTranscript.datos_extra?.interes?.toLowerCase() === 'alto' ? 'bg-green-50 border-green-100' : viewingTranscript.datos_extra?.interes?.toLowerCase() === 'bajo' ? 'bg-red-50 border-red-100' : 'bg-gray-50/50 border-gray-100'}`}>
                                 <div>
-                                    <h3 className="text-lg font-bold text-gray-900">{t("Transcription", "Transcripción")} #{viewingTranscript.id}</h3>
+                                    <div className="flex items-center gap-3">
+                                        <h3 className="text-lg font-bold text-gray-900">{t("Transcription", "Transcripción")} #{viewingTranscript.id}</h3>
+                                        {viewingTranscript.datos_extra?.interes?.toLowerCase() === 'alto' && <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold shadow-sm">🔥 Interés Alto</span>}
+                                        {viewingTranscript.datos_extra?.interes?.toLowerCase() === 'bajo' && <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold shadow-sm">Interés Bajo</span>}
+                                    </div>
                                     <p className="text-xs text-gray-500">{viewingTranscript.telefono} • {new Date(viewingTranscript.fecha).toLocaleString()}</p>
                                 </div>
                                 <button
@@ -535,22 +539,89 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                 </button>
                             </div>
 
-                            <div className="p-6 overflow-y-auto space-y-4 bg-gray-50/20">
+                            {/* Resumen Inteligente */}
+                            <div className="px-6 py-4 border-b border-gray-100 bg-indigo-50/30">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Sparkles size={18} className="text-indigo-600" />
+                                    <h4 className="font-bold text-indigo-900 text-sm">{t('Resumen de la IA')}</h4>
+                                </div>
+                                {(!viewingTranscript.datos_extra || Object.keys(viewingTranscript.datos_extra).length === 0) ? (
+                                    <p className="text-sm text-gray-500 italic">{t('El análisis detallado no está disponible para esta llamada.')}</p>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {viewingTranscript.tipo_resultados === 'CUALIFICACION_LEAD' && (
+                                            <div className="flex flex-col gap-2">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs font-semibold text-gray-600">{t('Estado:')}</span>
+                                                    {viewingTranscript.datos_extra.lead_cualificado ? (
+                                                        <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-md font-bold flex items-center gap-1"><Target size={12} /> Sí, Cualificado</span>
+                                                    ) : (
+                                                        <span className="bg-red-100 text-red-700 text-xs px-2 py-1 rounded-md font-bold flex items-center gap-1"><ThumbsDown size={12} /> No Cualificado</span>
+                                                    )}
+                                                </div>
+                                                {viewingTranscript.datos_extra.motivo_rechazo && (
+                                                    <p className="text-sm text-gray-700 bg-white p-2 rounded-lg border border-gray-100">
+                                                        <span className="font-semibold text-xs text-gray-500 block mb-1">{t('Motivo:')}</span>
+                                                        {viewingTranscript.datos_extra.motivo_rechazo}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        )}
+                                        {viewingTranscript.tipo_resultados === 'AGENDAMIENTO_CITA' && viewingTranscript.datos_extra.fecha_cita && (
+                                            <div className="bg-white border border-purple-100 p-3 rounded-lg flex items-center gap-3">
+                                                <div className="bg-purple-100 p-2 rounded-full"><Calendar size={16} className="text-purple-700" /></div>
+                                                <div>
+                                                    <p className="text-xs font-semibold text-gray-500">{t('Fecha de Cita')}</p>
+                                                    <p className="font-bold text-purple-900 text-sm">{viewingTranscript.datos_extra.fecha_cita}</p>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {Array.isArray(viewingTranscript.datos_extra.puntos_clave) && viewingTranscript.datos_extra.puntos_clave.length > 0 && (
+                                            <div>
+                                                <span className="text-xs font-semibold text-gray-600 mb-1 block">{t('Puntos Clave:')}</span>
+                                                <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
+                                                    {viewingTranscript.datos_extra.puntos_clave.map((pt: string, idx: number) => (
+                                                        <li key={idx}>{pt}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                        {viewingTranscript.tipo_resultados !== 'CUALIFICACION_LEAD' && viewingTranscript.tipo_resultados !== 'AGENDAMIENTO_CITA' && !viewingTranscript.datos_extra.puntos_clave && (
+                                            <div className="text-sm text-gray-700 bg-white p-3 rounded-lg border border-gray-100">
+                                                <pre className="text-xs font-mono whitespace-pre-wrap overflow-hidden">{JSON.stringify(viewingTranscript.datos_extra, null, 2)}</pre>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="p-6 overflow-y-auto space-y-6 bg-gray-50/20">
                                 {viewingTranscript.transcription ? (
                                     viewingTranscript.transcription.split('\n').filter(l => l.trim()).map((line, i) => {
                                         const isAgente = line.startsWith('Agente:');
+                                        const messageTime = new Date(new Date(viewingTranscript.fecha).getTime() + (i * 15000));
+                                        const timeStr = messageTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
                                         return (
-                                            <div key={i} className={`flex ${isAgente ? 'justify-start' : 'justify-end'}`}>
-                                                <div className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm shadow-sm border ${isAgente
-                                                    ? 'bg-blue-600 text-white border-blue-700 rounded-tl-none'
-                                                    : 'bg-white text-gray-800 border-gray-100 rounded-tr-none'
-                                                    }`}>
-                                                    <p className="font-semibold text-[10px] uppercase tracking-wider mb-1 opacity-70">
-                                                        {isAgente ? t('Ausarta Robot') : t('Cliente', 'Customer')}
-                                                    </p>
-                                                    <p className="leading-relaxed">
-                                                        {line.replace(/^(Agente|Cliente): /, '')}
-                                                    </p>
+                                            <div key={i} className={`flex gap-3 ${isAgente ? 'justify-start' : 'justify-end flex-row-reverse'}`}>
+                                                <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-sm ${isAgente ? 'bg-[#004a99] text-white' : 'bg-gray-200 text-gray-600'}`}>
+                                                    {isAgente ? <Bot size={16} /> : <User size={16} />}
+                                                </div>
+                                                <div className={`max-w-[75%] flex flex-col ${isAgente ? 'items-start' : 'items-end'}`}>
+                                                    <div className="flex items-baseline gap-2 mb-1">
+                                                        <span className="font-semibold text-xs text-gray-700">
+                                                            {isAgente ? t('Ausarta Robot') : t('Cliente', 'Customer')}
+                                                        </span>
+                                                        <span className="text-[10px] text-gray-400">{timeStr}</span>
+                                                    </div>
+                                                    <div className={`rounded-2xl px-4 py-2.5 text-sm shadow-sm ${isAgente
+                                                        ? 'bg-[#004a99] text-white rounded-tl-sm'
+                                                        : 'bg-white border border-gray-100 text-gray-800 rounded-tr-sm'
+                                                        }`}>
+                                                        <p className="leading-relaxed">
+                                                            {line.replace(/^(Agente|Cliente):\s*/i, '')}
+                                                        </p>
+                                                    </div>
                                                 </div>
                                             </div>
                                         );
