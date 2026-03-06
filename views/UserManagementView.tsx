@@ -475,20 +475,30 @@ const UserManagementView: React.FC = () => {
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                                                 {ALL_MODULES.map((mod) => {
                                                     const perm = user.permissions.find(p => p.module === mod.key);
-                                                    const isEnabled = perm?.enabled ?? false;
 
-                                                    // For admins, non-premium modules are always enabled visually
-                                                    const visuallyEnabled = (user.role !== 'user' && mod.key !== 'premium_voice') || isEnabled;
+                                                    // Permission logic:
+                                                    // For regular client admins, some modules are 'implicit' by role.
+                                                    // But for Ausarta Admins/Superadmins, we want explicitly toggleable control.
+                                                    // If isPlatformOwner, we show the ACTUAL database state for everyone.
+                                                    const permEnabled = perm?.enabled ?? false;
+
+                                                    // If current user is platform owner, they see/toggle the REAL permission
+                                                    // If not, we follow the legacy visual logic (admins see everything by default)
+                                                    const visuallyEnabled = (isPlatformOwner)
+                                                        ? permEnabled
+                                                        : ((user.role !== 'user' && mod.key !== 'premium_voice') || permEnabled);
+
+                                                    const isToggleDisabled = !canManageUser(user);
 
                                                     return (
                                                         <button
                                                             key={mod.key}
-                                                            onClick={() => canManageUser(user) && handleTogglePermission(user.id, mod.key, isEnabled)}
-                                                            disabled={!canManageUser(user) || (user.role !== 'user' && mod.key !== 'premium_voice')}
+                                                            onClick={() => !isToggleDisabled && handleTogglePermission(user.id, mod.key, permEnabled)}
+                                                            disabled={isToggleDisabled}
                                                             className={`flex items-center gap-2 p-3 rounded-lg text-sm font-medium transition-all border ${visuallyEnabled
                                                                 ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100'
                                                                 : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'
-                                                                } ${(!canManageUser(user) || (user.role !== 'user' && mod.key !== 'premium_voice')) ? 'opacity-50 cursor-default' : 'cursor-pointer'}`}
+                                                                } ${isToggleDisabled ? 'opacity-50 cursor-default' : 'cursor-pointer'}`}
                                                         >
                                                             {visuallyEnabled ? <ToggleRight size={16} className="text-green-500" /> : <ToggleLeft size={16} />}
                                                             {mod.label}
