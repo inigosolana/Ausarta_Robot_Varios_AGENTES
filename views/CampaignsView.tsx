@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Plus, Upload, Clock, AlertCircle, History, Trash2, X, Edit2, Building2
+  Plus, Upload, Clock, AlertCircle, History, Trash2, X, Edit2, Building2, FileText
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
@@ -29,7 +29,9 @@ interface Campaign {
 interface Lead {
   id: number;
   phone_number: string;
+  customer_name?: string;
   status: string; // pending, called, failed
+  call_id?: number;
   updated_at?: string;
   puntuacion_comercial?: number;
   puntuacion_instalador?: number;
@@ -37,6 +39,7 @@ interface Lead {
   comentarios?: string;
   transcription_preview?: string;
   retries_attempted?: number;
+  encuesta?: { transcription?: string | null };
 }
 
 interface Agent {
@@ -66,6 +69,9 @@ export function CampaignsView() {
   const [editName, setEditName] = useState("");
   const [editTime, setEditTime] = useState("");
   const [activeTab, setActiveTab] = useState<'leads' | 'overview' | 'results'>('leads');
+  // Modal de transcripción para la tabla de leads de campaña
+  const [viewingTranscriptLead, setViewingTranscriptLead] = useState<Lead | null>(null);
+
 
   // Form State
   const [name, setName] = useState('');
@@ -789,15 +795,25 @@ export function CampaignsView() {
                             </span>
                           )}
 
-                          {/* Transcription Preview (Collapsible better, but inline for now) */}
-                          {lead.transcription_preview && (
-                            <details className="mt-1">
-                              <summary className="text-xs text-blue-500 cursor-pointer hover:underline">{t("View Transcription", "Ver Transcripción")}</summary>
-                              <p className="text-xs text-gray-500 mt-1 p-2 bg-gray-50 rounded whitespace-pre-wrap max-h-32 overflow-y-auto">
-                                {lead.transcription_preview}
-                              </p>
-                            </details>
-                          )}
+                          {/* Botón de transcripción: mostrar si el lead tiene transcripción (en cualquier formato de campo) */}
+                          {(() => {
+                            const transcriptionText = lead.transcription_preview || lead.encuesta?.transcription;
+                            const TERMINAL = ['completed', 'failed', 'unreached', 'incomplete', 'rejected_opt_out'];
+                            if (!TERMINAL.includes(lead.status)) return null;
+                            return (
+                              <button
+                                onClick={() => setViewingTranscriptLead({ ...lead, transcription_preview: transcriptionText || undefined })}
+                                className={`mt-1 inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors ${transcriptionText
+                                  ? 'text-blue-600 hover:bg-blue-50 border border-blue-100'
+                                  : 'text-gray-400 hover:bg-gray-50 border border-gray-100'
+                                  }`}
+                                title={transcriptionText ? t('View transcript', 'Ver transcripción') : t('No transcript available', 'Sin transcripción disponible')}
+                              >
+                                <FileText size={12} />
+                                {t('Transcript', 'Transcripción')}
+                              </button>
+                            );
+                          })()}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-500">
                           {lead.updated_at ? new Date(lead.updated_at).toLocaleString() : '-'}
@@ -834,10 +850,81 @@ export function CampaignsView() {
             </div>
           </>
         )}
+        {/* Modal de Transcripción de Lead */}
+        {viewingTranscriptLead && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <FileText size={18} className="text-blue-600" />
+                    {t('Transcription', 'Transcripción')}
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {viewingTranscriptLead.customer_name
+                      ? `${viewingTranscriptLead.customer_name} · `
+                      : ''}
+                    {viewingTranscriptLead.phone_number}
+                    {viewingTranscriptLead.updated_at
+                      ? ` · ${new Date(viewingTranscriptLead.updated_at).toLocaleString()}`
+                      : ''}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setViewingTranscriptLead(null)}
+                  className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-900 bg-white border border-gray-200 rounded-full hover:shadow-sm transition-all"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto space-y-4 bg-gray-50/20 flex-1">
+                {viewingTranscriptLead.transcription_preview ? (
+                  viewingTranscriptLead.transcription_preview.split('\n').filter(l => l.trim()).map((line, i) => {
+                    const isAgente = line.startsWith('Agente:');
+                    return (
+                      <div key={i} className={`flex ${isAgente ? 'justify-start' : 'justify-end'}`}>
+                        <div className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm shadow-sm border ${isAgente
+                            ? 'bg-blue-600 text-white border-blue-700 rounded-tl-none'
+                            : 'bg-white text-gray-800 border-gray-100 rounded-tr-none'
+                          }`}>
+                          <p className="font-semibold text-[10px] uppercase tracking-wider mb-1 opacity-70">
+                            {isAgente ? t('Ausarta Robot', 'Ausarta Robot') : t('Customer', 'Cliente')}
+                          </p>
+                          <p className="leading-relaxed">
+                            {line.replace(/^(Agente|Cliente): /, '')}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="text-center py-12">
+                    <div className="bg-gray-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <FileText className="text-gray-400" />
+                    </div>
+                    <p className="text-gray-500 font-medium">{t('No transcription available', 'No hay transcripción disponible')}</p>
+                    <p className="text-xs text-gray-400 mt-1">{t('The call may have been too short or no speech was detected.', 'La llamada pudo ser muy corta o no se detectó voz.')}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex justify-end">
+                <button
+                  onClick={() => setViewingTranscriptLead(null)}
+                  className="px-6 py-2 bg-gray-900 text-white text-sm font-semibold rounded-xl hover:bg-black transition-all shadow-lg"
+                >
+                  {t('Close', 'Cerrar')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {renderEditModal()}
       </div>
     );
   }
+
 
   // --- Main Campaign List View ---
 
