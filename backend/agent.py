@@ -368,6 +368,12 @@ async def entrypoint(ctx: JobContext):
         except:
             pass
 
+    # 3. Validación de Identidad Temprana Crítica
+    if not str(survey_id).isdigit() or str(survey_id) == "0":
+        logger.error(f"🚨🚨🚨 [{job_id}] Identidad inválida o corrupta: survey_id='{survey_id}'. Abortando worker.")
+        ctx.reject()
+        return
+
     # --- PASO 1.5: Validar Sello Multi-Tenant ANTES de conectar ---
     try:
         # Obtenemos config y validamos que la sala es del mismo tenant que el config
@@ -507,162 +513,167 @@ async def entrypoint(ctx: JobContext):
             agent_instance_exists = 'agent_instance' in locals()
             data_saved = getattr(agent_instance, 'data_saved', False) if agent_instance_exists else False
             
-            # Guardados post-llamada deben ir al mismo backend accesible desde este worker
-            internal_api_url = (
-                getattr(agent_instance, "server_url", None)
-                or os.getenv("BRIDGE_SERVER_URL_INTERNAL")
-                or os.getenv("BRIDGE_SERVER_URL")
-                or "http://127.0.0.1:8001"
-            ).rstrip("/")
-            
-            raw_messages = []
-            transcript = ""
             try:
-                if 'session' in locals():
-                    # Intentamos obtener la historia de la sesión o del asistente (varía según versión de livekit-agents)
-                    chat_ctx = getattr(session, 'chat_ctx', getattr(session, 'chat_context', None))
-                    if chat_ctx:
-                        for m in chat_ctx.messages:
-                            if m.content and m.role in ("user", "assistant"):
-                                raw_messages.append({"role": m.role, "content": m.content})
-                                role_label = "Cliente" if m.role == "user" else "Agente"
-                                transcript += f"{role_label}: {m.content}\n"
-                    
-                    # Enviar a n8n
-                    if agent_instance_exists:
-                        try:
-                            await asyncio.wait_for(
-                                agent_instance.notify_n8n_transcription(survey_id, raw_messages),
-                                timeout=5
-                            )
-                        except Exception as n8n_err:
-                            logger.error(f"Error enviando transcripción a n8n: {n8n_err}")
-            except Exception as ex:
-                logger.error(f"Error procesando historia: {ex}")
-                
-            # SIEMPRE guardar transcripción y datos finales en Supabase
-            url_guardar = f"{internal_api_url}/guardar-encuesta"
+                # Guardados post-llamada deben ir al mismo backend accesible desde este worker
+                internal_api_url = (
+                    getattr(agent_instance, "server_url", None)
+                    or os.getenv("BRIDGE_SERVER_URL_INTERNAL")
+                    or os.getenv("BRIDGE_SERVER_URL")
+                    or "http://127.0.0.1:8001"
+                ).rstrip("/")
             
-            # Analytics post-llamada: Clasificar disposición + extraer datos
-            agent_type = agent_config.get("agent_type", "ENCUESTA_NUMERICA")
-            datos_extra = None
-            call_disposition = None  # El LLM determinará: completada, parcial, rechazada, no_contesta
-            
-            if transcript:
-                logger.info(f"🧠 Clasificando disposición de llamada y extrayendo datos para encuesta {survey_id} (Tipo: {agent_type})")
+                raw_messages = []
+                transcript = ""
                 try:
-                    # Prompt de clasificación de disposición universal
-                    disposition_prompt = (
-                        "Eres un analista experto en llamadas telefónicas comerciales. "
-                        "Analiza la transcripción y responde ÚNICAMENTE con JSON válido con estos campos:\n\n"
-                        "1. 'disposicion': OBLIGATORIO. Clasifica la llamada en exactamente UNO de estos valores:\n"
-                        "   - 'completada': El cliente respondió a todas o casi todas las preguntas/objetivos de la llamada.\n"
-                        "   - 'parcial': El cliente contestó la llamada y respondió a ALGUNAS preguntas, pero colgó o se interrumpió antes de terminar.\n"
-                        "   - 'rechazada': El cliente contestó pero rechazó participar (dijo 'no me interesa', 'no tengo tiempo', 'quitadme de la lista', etc.).\n"
-                        "   - 'no_contesta': La llamada fue contestada por un buzón de voz, contestador automático, o no hubo interacción humana real.\n\n"
-                    )
+                    if 'session' in locals():
+                        # Intentamos obtener la historia de la sesión o del asistente (varía según versión de livekit-agents)
+                        chat_ctx = getattr(session, 'chat_ctx', getattr(session, 'chat_context', None))
+                        if chat_ctx:
+                            for m in chat_ctx.messages:
+                                content = (m.content or "").strip()
+                                # Filtrar mensajes vacíos o ruidos cortos
+                                if content and len(content) > 1 and m.role in ("user", "assistant"):
+                                    raw_messages.append({"role": m.role, "content": content})
+                                    role_label = "Cliente" if m.role == "user" else "Agente"
+                                    transcript += f"{role_label}: {content}\n"
                     
-                    # Prompt especifico por tipo de agente para datos_extra
-                    if agent_type == "CUALIFICACION_LEAD":
-                        disposition_prompt += (
-                            "2. 'lead_cualificado' (booleano): ¿El lead cumple los criterios de cualificación?\n"
-                            "3. 'interes' (string: 'alto', 'medio', 'bajo'): Nivel de interés detectado.\n"
-                            "4. 'motivo_rechazo' (string o null): Razón por la que no cualifica o rechaza.\n"
-                        )
-                    elif agent_type == "AGENDAMIENTO_CITA":
-                        disposition_prompt += (
-                            "2. 'cita_agendada' (booleano): ¿Se agendó una cita?\n"
-                            "3. 'fecha_cita' (string formato libre o null): Fecha/hora acordada.\n"
-                            "4. 'disponibilidad' (string o null): Resumen de cuándo está disponible.\n"
-                        )
-                    elif agent_type != "ENCUESTA_NUMERICA":
-                        disposition_prompt += (
-                            "2. 'puntos_clave' (array de strings): Los 3 puntos más importantes de la conversación.\n"
-                        )
-                    else:
-                        # Para encuesta numérica no necesitamos datos extra del LLM
-                        disposition_prompt += "No incluyas campos adicionales para encuesta numérica.\n"
-                    
-                    groq_api_key = os.getenv("GROQ_API_KEY")
-                    if groq_api_key:
-                        async with aiohttp.ClientSession() as llm_sess:
-                            headers = {
-                                "Authorization": f"Bearer {groq_api_key}",
-                                "Content-Type": "application/json"
-                            }
-                            payload_llm = {
-                                "model": "llama-3.3-70b-versatile",
-                                "messages": [
-                                    {"role": "system", "content": disposition_prompt},
-                                    {"role": "user", "content": f"Transcripción:\n{transcript}"}
-                                ],
-                                "response_format": {"type": "json_object"},
-                                "temperature": 0.1
-                            }
-                            async with llm_sess.post("https://api.groq.com/openai/v1/chat/completions", json=payload_llm, headers=headers, timeout=20) as llm_resp:
-                                if llm_resp.status == 200:
-                                    llm_data = await llm_resp.json()
-                                    json_str = llm_data["choices"][0]["message"]["content"]
-                                    parsed = json.loads(json_str)
-                                    
-                                    # Extraer disposición del JSON
-                                    call_disposition = parsed.pop("disposicion", None)
-                                    valid_dispositions = ("completada", "parcial", "rechazada", "no_contesta")
-                                    if call_disposition not in valid_dispositions:
-                                        call_disposition = "completada" if data_saved else "parcial"
-                                    
-                                    # El resto del JSON son datos_extra
-                                    if parsed:
-                                        datos_extra = parsed
-                                    
-                                    logger.info(f"✅ Disposición: {call_disposition} | datos_extra: {datos_extra}")
-                                else:
-                                    logger.error(f"Error HTTP del LLM al clasificar: {llm_resp.status}")
-                except Exception as e:
-                    logger.error(f"Error clasificando disposición con LLM: {e}")
-            else:
-                # Sin transcripción = no hubo interacción (buzón, timeout, SIP error)
-                call_disposition = "no_contesta"
-                logger.info(f"📵 Sin transcripción para encuesta {survey_id} → disposición: no_contesta")
-
-            # Determinar status final
-            if not call_disposition:
-                call_disposition = "completada" if data_saved else "parcial"
+                        # Enviar a n8n
+                        if agent_instance_exists:
+                            try:
+                                await asyncio.wait_for(
+                                    agent_instance.notify_n8n_transcription(survey_id, raw_messages),
+                                    timeout=5
+                                )
+                            except Exception as n8n_err:
+                                logger.error(f"Error enviando transcripción a n8n: {n8n_err}")
+                except Exception as ex:
+                    logger.error(f"Error procesando historia: {ex}")
+                
+                # SIEMPRE guardar transcripción y datos finales en Supabase
+                url_guardar = f"{internal_api_url}/guardar-encuesta"
             
-            try:
-                if data_saved:
-                    # El LLM ya guardó notas numéricas, pero guardamos transcripción + disposición + datos_extra
-                    logger.info(f"📝 Guardando transcripción/disposición/datos_extra para encuesta {survey_id} (datos numéricos ya guardados por tool)")
-                    transcript_payload = {
-                        "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
-                        "transcription": transcript,
-                        "status": call_disposition,
-                        "datos_extra": datos_extra
-                    }
+                # Analytics post-llamada: Clasificar disposición + extraer datos
+                agent_type = agent_config.get("agent_type", "ENCUESTA_NUMERICA")
+                datos_extra = None
+                call_disposition = None  # El LLM determinará: completada, parcial, rechazada, no_contesta
+            
+                if transcript:
+                    logger.info(f"🧠 Clasificando disposición de llamada y extrayendo datos para encuesta {survey_id} (Tipo: {agent_type})")
                     try:
-                        async with aiohttp.ClientSession() as sess:
-                            async with sess.post(url_guardar, json=transcript_payload, timeout=10) as resp:
-                                logger.info(f"✅ Extras guardados: HTTP {resp.status}")
-                    except Exception as save_err:
-                        logger.error(f"Error guardando extras: {save_err}")
+                        # Prompt de clasificación de disposición universal
+                        disposition_prompt = (
+                            "Eres un analista experto en llamadas telefónicas comerciales. "
+                            "Analiza la transcripción y responde ÚNICAMENTE con JSON válido con estos campos:\n\n"
+                            "1. 'disposicion': OBLIGATORIO. Clasifica la llamada en exactamente UNO de estos valores:\n"
+                            "   - 'completada': El cliente respondió a todas o casi todas las preguntas/objetivos de la llamada.\n"
+                            "   - 'parcial': El cliente contestó la llamada y respondió a ALGUNAS preguntas, pero colgó o se interrumpió antes de terminar.\n"
+                            "   - 'rechazada': El cliente contestó pero rechazó participar (dijo 'no me interesa', 'no tengo tiempo', 'quitadme de la lista', etc.).\n"
+                            "   - 'no_contesta': La llamada fue contestada por un buzón de voz, contestador automático, o no hubo interacción humana real.\n\n"
+                        )
+                    
+                        # Prompt especifico por tipo de agente para datos_extra
+                        if agent_type == "CUALIFICACION_LEAD":
+                            disposition_prompt += (
+                                "2. 'lead_cualificado' (booleano): ¿El lead cumple los criterios de cualificación?\n"
+                                "3. 'interes' (string: 'alto', 'medio', 'bajo'): Nivel de interés detectado.\n"
+                                "4. 'motivo_rechazo' (string o null): Razón por la que no cualifica o rechaza.\n"
+                            )
+                        elif agent_type == "AGENDAMIENTO_CITA":
+                            disposition_prompt += (
+                                "2. 'cita_agendada' (booleano): ¿Se agendó una cita?\n"
+                                "3. 'fecha_cita' (string formato libre o null): Fecha/hora acordada.\n"
+                                "4. 'disponibilidad' (string o null): Resumen de cuándo está disponible.\n"
+                            )
+                        elif agent_type != "ENCUESTA_NUMERICA":
+                            disposition_prompt += (
+                                "2. 'puntos_clave' (array de strings): Los 3 puntos más importantes de la conversación.\n"
+                            )
+                        else:
+                            # Para encuesta numérica no necesitamos datos extra del LLM
+                            disposition_prompt += "No incluyas campos adicionales para encuesta numérica.\n"
+                    
+                        groq_api_key = os.getenv("GROQ_API_KEY")
+                        if groq_api_key:
+                            async with aiohttp.ClientSession() as llm_sess:
+                                headers = {
+                                    "Authorization": f"Bearer {groq_api_key}",
+                                    "Content-Type": "application/json"
+                                }
+                                payload_llm = {
+                                    "model": "llama-3.3-70b-versatile",
+                                    "messages": [
+                                        {"role": "system", "content": disposition_prompt},
+                                        {"role": "user", "content": f"Transcripción:\n{transcript}"}
+                                    ],
+                                    "response_format": {"type": "json_object"},
+                                    "temperature": 0.1
+                                }
+                                async with llm_sess.post("https://api.groq.com/openai/v1/chat/completions", json=payload_llm, headers=headers, timeout=20) as llm_resp:
+                                    if llm_resp.status == 200:
+                                        llm_data = await llm_resp.json()
+                                        json_str = llm_data["choices"][0]["message"]["content"]
+                                        parsed = json.loads(json_str)
+                                    
+                                        # Extraer disposición del JSON
+                                        call_disposition = parsed.pop("disposicion", None)
+                                        valid_dispositions = ("completada", "parcial", "rechazada", "no_contesta")
+                                        if call_disposition not in valid_dispositions:
+                                            call_disposition = "completada" if data_saved else "parcial"
+                                    
+                                        # El resto del JSON son datos_extra
+                                        if parsed:
+                                            datos_extra = parsed
+                                    
+                                        logger.info(f"✅ Disposición: {call_disposition} | datos_extra: {datos_extra}")
+                                    else:
+                                        logger.error(f"Error HTTP del LLM al clasificar: {llm_resp.status}")
+                    except Exception as e:
+                        logger.error(f"Error clasificando disposición con LLM: {e}")
                 else:
-                    # No se guardaron datos numéricos → fallback completo con disposición del LLM
-                    logger.warning(f"⚠️ La sesión terminó sin guardar datos explícitos por tool (Survey ID: {survey_id}) → Disposición: {call_disposition}")
-                    fallback_payload = {
-                        "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
-                        "transcription": transcript,
-                        "status": call_disposition,
-                        "comentarios": "Llamada finalizada sin interacción" if call_disposition == "no_contesta" else f"Llamada {call_disposition} via post-call",
-                        "datos_extra": datos_extra
-                    }
-                    try:
-                        async with aiohttp.ClientSession() as sess:
-                            async with sess.post(url_guardar, json=fallback_payload, timeout=10) as resp:
-                                logger.info(f"✅ Fallback guardado (disposición: {call_disposition}): HTTP {resp.status}")
-                    except Exception as save_err:
-                        logger.error(f"Error en guardado final de fallback: {save_err}")
-            except Exception as ex:
-                 logger.error(f"❌ Error salvando datos finales: {ex}")
+                    # Sin transcripción = no hubo interacción (buzón, timeout, SIP error)
+                    call_disposition = "no_contesta"
+                    logger.info(f"📵 Sin transcripción para encuesta {survey_id} → disposición: no_contesta")
+
+                # Determinar status final
+                if not call_disposition:
+                    call_disposition = "completada" if data_saved else "parcial"
+            
+                try:
+                    if data_saved:
+                        # El LLM ya guardó notas numéricas, pero guardamos transcripción + disposición + datos_extra
+                        logger.info(f"📝 Guardando transcripción/disposición/datos_extra para encuesta {survey_id} (datos numéricos ya guardados por tool)")
+                        transcript_payload = {
+                            "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
+                            "transcription": transcript,
+                            "status": call_disposition,
+                            "datos_extra": datos_extra
+                        }
+                        try:
+                            async with aiohttp.ClientSession() as sess:
+                                async with sess.post(url_guardar, json=transcript_payload, timeout=10) as resp:
+                                    logger.info(f"✅ Extras guardados: HTTP {resp.status}")
+                        except Exception as save_err:
+                            logger.error(f"Error guardando extras: {save_err}")
+                    else:
+                        # No se guardaron datos numéricos → fallback completo con disposición del LLM
+                        logger.warning(f"⚠️ La sesión terminó sin guardar datos explícitos por tool (Survey ID: {survey_id}) → Disposición: {call_disposition}")
+                        fallback_payload = {
+                            "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
+                            "transcription": transcript,
+                            "status": call_disposition,
+                            "comentarios": "Llamada finalizada sin interacción" if call_disposition == "no_contesta" else f"Llamada {call_disposition} via post-call",
+                            "datos_extra": datos_extra
+                        }
+                        try:
+                            async with aiohttp.ClientSession() as sess:
+                                async with sess.post(url_guardar, json=fallback_payload, timeout=10) as resp:
+                                    logger.info(f"✅ Fallback guardado (disposición: {call_disposition}): HTTP {resp.status}")
+                        except Exception as save_err:
+                            logger.error(f"Error en guardado final de fallback: {save_err}")
+                except Exception as ex:
+                     logger.error(f"❌ Error salvando datos finales: {ex}")
+            except Exception as fatal_post:
+                logger.error(f"🚨 [{job_id}] EXCEPCIÓN FATAL NO CAPTURADA en post-procesamiento (finally): {fatal_post}")
         else:
             logger.info(f"--- 🏁 FIN DE SESIÓN DUPLICADA (Job: {job_id}) - Saliendo sin reportar datos ---")
 
