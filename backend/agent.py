@@ -272,7 +272,7 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
 # ============================================================================
 # FUNCIÓN PARA OBTENER LA CONFIGURACIÓN DEL AGENTE DESDE LA API
 # ============================================================================
-async def fetch_agent_config(survey_id: str) -> dict:
+async def fetch_agent_config(survey_id: str, expected_empresa_id: str = "0") -> dict:
     """Consulta la API local para obtener la configuración del agente asignado a esta encuesta."""
     server_url = (
         os.getenv("BRIDGE_SERVER_URL_INTERNAL")
@@ -286,6 +286,12 @@ async def fetch_agent_config(survey_id: str) -> dict:
             async with session.get(url, timeout=5) as resp:
                 if resp.status == 200:
                     config = await resp.json()
+                    
+                    # SELLO DE SEGURIDAD MULTI-TENANT
+                    config_empresa_id = str(config.get("empresa_id", "0"))
+                    if expected_empresa_id and expected_empresa_id != "0" and config_empresa_id != "0" and expected_empresa_id != config_empresa_id:
+                        raise Exception(f"Violación de seguridad Multi-Tenant: El ID de la empresa no coincide. Metadata: {expected_empresa_id}, Config: {config_empresa_id}")
+                        
                     logger.info(f"📋 Config de agente obtenida para survey {survey_id}: nombre='{config.get('name')}', modelo='{config.get('llm_model')}'")
                     return config
                 else:
@@ -332,15 +338,48 @@ async def entrypoint(ctx: JobContext):
             logger.error(f"⚠️ ERROR DEL AGENTE (Job {job_id}): {error}")
             asyncio.create_task(notify_n8n_alert("Error en Agente LiveKit", {"job_id": job_id, "error": msg}))
 
-    # --- PASO 1: Extraer survey_id ---
+    # --- PASO 1: Extraer survey_id y empresa_id (Sello Multi-Tenant) ---
     survey_id = "0"
+    empresa_id = "0"
+    
+    # 1. Intentar obtener de metadatos inyectados vía dispatch
+    metadata_str = getattr(ctx.job, 'metadata', '')
+    if metadata_str:
+        try:
+            import json
+            meta_data = json.loads(metadata_str)
+            survey_id = str(meta_data.get("survey_id", "0"))
+            empresa_id = str(meta_data.get("empresa_id", "0"))
+            logger.info(f"🔑 [{job_id}] Metadatos parseados: empresa={empresa_id}, survey={survey_id}")
+        except Exception as e:
+            logger.warning(f"⚠️ [{job_id}] No se pudo parsear metadata JSON: {e}")
+            
+    # 2. Fallback: intentar extraer del room_name
+    if survey_id == "0":
+        try:
+            parts = room_name.split('_')
+            survey_id = parts[-1] if parts else "0"
+            if not survey_id.isdigit() and len(parts) >= 2:
+                survey_id = parts[-2]
+                
+            if empresa_id == "0" and len(parts) >= 2 and parts[0] == "empresa":
+                empresa_id = parts[1]
+            logger.info(f"🔑 [{job_id}] Metadatos extraídos de room_name: empresa={empresa_id}, survey={survey_id}")
+        except:
+            pass
+
+    # --- PASO 1.5: Validar Sello Multi-Tenant ANTES de conectar ---
     try:
-        parts = room_name.split('_')
-        survey_id = parts[-1] if parts else "0"
-        if not survey_id.isdigit() and len(parts) >= 2:
-            survey_id = parts[-2]
-    except:
-        survey_id = "0"
+        # Obtenemos config y validamos que la sala es del mismo tenant que el config
+        agent_config = await fetch_agent_config(survey_id, expected_empresa_id=empresa_id)
+    except Exception as e:
+        if "Violación de seguridad" in str(e):
+            logger.error(f"🚨🚨🚨 [{job_id}] {e} - RECHAZANDO JOB.")
+            ctx.reject() # Intercepta el job y evita que el agente entre a la sala equívoca
+            return
+        else:
+            logger.warning(f"⚠️ [{job_id}] Error cargando config previa: {e}")
+            agent_config = {}
 
     # --- PASO 2: Conectar a la sala ---
     is_duplicate = False
@@ -357,11 +396,8 @@ async def entrypoint(ctx: JobContext):
 
         logger.info(f"✅ [{job_id}] Conectado a sala {room_name}. Participantes: {len(ctx.room.remote_participants)}")
 
-        # --- PASO 3: Cargar config ---
-        vad_task = asyncio.to_thread(silero.VAD.load, min_silence_duration=0.5)
-        config_task = fetch_agent_config(survey_id)
-        
-        vad_model, agent_config = await asyncio.gather(vad_task, config_task)
+        # --- PASO 3: Cargar configuración VAD ---
+        vad_model = await asyncio.to_thread(silero.VAD.load, min_silence_duration=0.5)
         logger.info(f"✅ [{job_id}] VAD y configuración cargados.")
 
         # --- PASO 4: Crear el asistente ---

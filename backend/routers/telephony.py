@@ -335,12 +335,18 @@ async def make_outbound_call(request: dict):
             _processing_rooms.discard(room_name)
             raise sip_err
 
-        # Despachar agente explícitamente
+        # Despachar agente explícitamente con Sello Multi-Tenant
         try:
+            import json
+            metadata_str = json.dumps({
+                "empresa_id": int(empresa_id),
+                "survey_id": int(encuesta_id)
+            })
             await lkapi.agent_dispatch.create_dispatch(
                 api.CreateAgentDispatchRequest(
                     room_name=room_name,
                     agent_name=agent_name_dispatch,
+                    metadata=metadata_str
                 )
             )
             logger.info(f"✅ Agente {agent_name_dispatch} despachado a sala {room_name}")

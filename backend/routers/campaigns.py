@@ -239,21 +239,31 @@ async def get_result_transcription(result_id: int):
 async def get_agent_config_by_survey(survey_id: int):
     if not supabase: return JSONResponse(status_code=500, content={"error": "Supabase not connected"})
     try:
-        res_survey = supabase.table("encuestas").select("agent_id, nombre_cliente").eq("id", survey_id).execute()
+        res_survey = supabase.table("encuestas").select("agent_id, nombre_cliente, empresa_id").eq("id", survey_id).execute()
         if not res_survey.data:
             return JSONResponse(status_code=404, content={"error": "Survey not found"})
 
         agent_id = res_survey.data[0].get("agent_id")
         nombre_cliente = res_survey.data[0].get("nombre_cliente")
+        empresa_id = res_survey.data[0].get("empresa_id")
 
         if not agent_id:
-            return {"name": "Bot", "greeting": "Buenas, le llamo...", "instructions": "Eres un asistente.", "voice_id": "cefcb124-080b-4655-b31f-932f3ee743de", "llm_model": "llama-3.3-70b-versatile"}
+            return {
+                "name": "Bot", 
+                "greeting": "Buenas, le llamo...", 
+                "instructions": "Eres un asistente.", 
+                "voice_id": "cefcb124-080b-4655-b31f-932f3ee743de", 
+                "llm_model": "llama-3.3-70b-versatile",
+                "empresa_id": empresa_id
+            }
 
         res_agent = supabase.table("agent_config").select("*").eq("id", agent_id).execute()
         if not res_agent.data:
             return JSONResponse(status_code=404, content={"error": "Agent not found"})
 
         agent_data = res_agent.data[0]
+        agent_empresa_id = agent_data.get("empresa_id")
+        
         res_ai = supabase.table("ai_config").select("*").eq("agent_id", agent_id).execute()
         ai_data = res_ai.data[0] if res_ai.data else {}
 
@@ -268,6 +278,8 @@ async def get_agent_config_by_survey(survey_id: int):
             "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
             "language": ai_data.get("language") or "es",
             "stt_provider": ai_data.get("stt_provider") or "deepgram",
+            "agent_type": agent_data.get("agent_type") or "ENCUESTA_NUMERICA",
+            "empresa_id": empresa_id or agent_empresa_id
         }
     except Exception as e:
         logger.error(f"Error agent config by survey: {e}")
@@ -409,12 +421,19 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
             )
             return
 
-        # 4. Dispatch explícito del agente
+        # 4. Dispatch explícito del agente con Sello Multi-Tenant
         try:
+            import json
+            metadata_str = json.dumps({
+                "empresa_id": int(empresa_id),
+                "survey_id": int(encuesta_id),
+                "campaign_id": int(campaign_id)
+            })
             await lkapi.agent_dispatch.create_dispatch(
                 lk_api.CreateAgentDispatchRequest(
                     room_name=room_name,
                     agent_name=agent_name_dispatch,
+                    metadata=metadata_str
                 )
             )
             logger.info(f"🚀 [Drip] Agente '{agent_name_dispatch}' despachado a {room_name}")
