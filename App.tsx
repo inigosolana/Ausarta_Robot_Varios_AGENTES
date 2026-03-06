@@ -69,7 +69,8 @@ const App: React.FC = () => {
   const isRootUser = realProfile?.email === 'admin@ausarta.net' ||
     realProfile?.email === 'inigo2.solana@ausarta.net' ||
     realProfile?.email === 'inigosolana@gmail.com';
-  const canSimulation = (realProfile?.role === 'superadmin' || isRootUser) && (realProfile?.empresas?.nombre === 'Ausarta' || isRootUser);
+  const isAusartaAdmin = realProfile?.empresas?.nombre === 'Ausarta' && realProfile?.role === 'admin';
+  const canSimulation = (realProfile?.role === 'superadmin' || isRootUser || isAusartaAdmin) && (realProfile?.empresas?.nombre === 'Ausarta' || isRootUser);
 
   // Auto-redirect if role change makes current view inaccessible
   useEffect(() => {
@@ -388,7 +389,19 @@ const App: React.FC = () => {
                   value={profile?.empresa_id || ''}
                   onChange={(e) => {
                     const val = e.target.value === '' ? null : Number(e.target.value);
+                    const isReturningToSelf = val === realProfile?.empresa_id || val === null;
+
                     setSpoofedEmpresa(val === realProfile?.empresa_id ? null : val);
+
+                    // Smart Role Switching:
+                    // If moving to another company, default to 'user' role
+                    // If returning to own company (Ausarta), restore original role
+                    if (!isReturningToSelf && realProfile?.role === 'admin') {
+                      setSpoofedRole('user');
+                    } else if (isReturningToSelf) {
+                      setSpoofedRole(null);
+                    }
+
                     toast.success(t('Viewing company context'));
                   }}
                   className="w-full text-[10px] py-1 px-1 border border-indigo-100 dark:border-indigo-800 dark:bg-gray-800 rounded outline-none focus:ring-1 focus:ring-indigo-500 font-medium"
