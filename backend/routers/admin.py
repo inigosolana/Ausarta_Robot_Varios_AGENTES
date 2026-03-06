@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from supabase import create_client
-from services.supabase_service import supabase
+from services.supabase_service import supabase, clear_ui_cache
 import os
 import aiohttp
 import logging
@@ -119,6 +119,9 @@ async def create_auth_user(payload: dict):
         # No bloquear la respuesta: el usuario se creó, los permisos se pueden arreglar después
         logger.error(f"⚠️ [admin] Error creando permisos (no fatal): {perm_err}")
 
+    # Paso 3: Limpiar cache de lista de usuarios
+    await clear_ui_cache("users_list")
+
     should_invite = str(password or "").strip() == ""
     return {"status": "ok", "user_id": user_id, "invited": should_invite}
 
@@ -174,10 +177,21 @@ async def delete_auth_user(user_id: str):
 
     try:
         admin_client = create_client(os.getenv("SUPABASE_URL"), service_role_key)
-        admin_client.auth.admin.delete_user(user_id)
         
+        # 1. Intentar borrar de Auth
+        try:
+            admin_client.auth.admin.delete_user(user_id)
+            logger.info(f"🔑 Auth user {user_id} deleted successfully")
+        except Exception as auth_err:
+            # Si el usuario no existe en Auth, logueamos pero seguimos para limpiar la DB
+            logger.warning(f"⚠️ User {user_id} not found in Auth or error: {auth_err}")
+
+        # 2. Borrar de la base de datos (independientemente de Auth)
         supabase.table("user_permissions").delete().eq("user_id", user_id).execute()
         supabase.table("user_profiles").delete().eq("id", user_id).execute()
+        
+        # 3. Limpiar cache
+        await clear_ui_cache("users_list")
         
         logger.info(f"🗑️ Usuario {user_id} eliminado completamente del sistema")
         return {"status": "ok", "message": f"Usuario {user_id} eliminado correctamente"}

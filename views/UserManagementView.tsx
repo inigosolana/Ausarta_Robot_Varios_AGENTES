@@ -49,8 +49,9 @@ const UserManagementView: React.FC = () => {
     const loadUsersAndEmpresas = async () => {
         setLoading(true);
         try {
+            const API_URL = import.meta.env.VITE_API_URL || '';
             // 1. Load empresas using API (Cache-friendly)
-            const empRes = await fetch(`${process.env.REACT_APP_API_URL || ''}/api/empresas`);
+            const empRes = await fetch(`${API_URL}/api/empresas`);
             const empData = await empRes.json();
 
             if (Array.isArray(empData)) {
@@ -62,7 +63,7 @@ const UserManagementView: React.FC = () => {
             }
 
             // 2. Load user profiles using API (Cache-friendly)
-            const userRes = await fetch(`${process.env.REACT_APP_API_URL || ''}/api/users`);
+            const userRes = await fetch(`${API_URL}/api/users`);
             const usersData = await userRes.json();
 
             if (Array.isArray(usersData)) {
