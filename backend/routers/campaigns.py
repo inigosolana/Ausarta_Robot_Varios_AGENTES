@@ -162,7 +162,7 @@ async def get_campaign_details(campaign_id: int):
         surveys_map = {}
         if call_ids:
             try:
-                cols = "id, status, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, transcription"
+                cols = "id, status, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, transcription, datos_extra, tipo_resultados, fecha, llm_model"
                 res_surveys = await asyncio.to_thread(
                     lambda: supabase.table("encuestas").select(cols).in_("id", call_ids).execute()
                 )

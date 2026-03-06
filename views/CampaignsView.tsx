@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Plus, Upload, Clock, AlertCircle, History, Trash2, X, Edit2, Building2, FileText
+  Plus, Upload, Clock, AlertCircle, History, Trash2, X, Edit2, Building2, FileText, Target, ThumbsDown, Calendar
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
-import type { Empresa } from '../types';
+import { Empresa, SurveyResult } from '../types';
 import DashboardView from './DashboardView';
 import ResultsView from './ResultsView';
+import { CallResultModal } from '../components/CallResultModal';
 
 interface Campaign {
   id: number;
@@ -39,7 +40,8 @@ interface Lead {
   comentarios?: string;
   transcription_preview?: string;
   retries_attempted?: number;
-  encuesta?: { transcription?: string | null };
+  tipo_resultados?: string;
+  encuesta?: SurveyResult;
 }
 
 interface Agent {
@@ -70,7 +72,15 @@ export function CampaignsView() {
   const [editTime, setEditTime] = useState("");
   const [activeTab, setActiveTab] = useState<'leads' | 'overview' | 'results'>('leads');
   // Modal de transcripción para la tabla de leads de campaña
-  const [viewingTranscriptLead, setViewingTranscriptLead] = useState<Lead | null>(null);
+  const [viewingTranscriptLead, setViewingTranscriptLead] = useState<SurveyResult | null>(null);
+
+  function getScoreColor(score: number | null): string {
+    if (score === null) return 'bg-gray-50 text-gray-400 border border-gray-100';
+    if (score >= 9) return 'bg-green-100 text-green-700 border border-green-200';
+    if (score >= 7) return 'bg-blue-100 text-blue-700 border border-blue-200';
+    if (score >= 5) return 'bg-yellow-100 text-yellow-700 border border-yellow-200';
+    return 'bg-red-100 text-red-700 border border-red-200';
+  }
 
 
   // Form State
@@ -763,53 +773,70 @@ export function CampaignsView() {
                           </div>
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600">
-                          {selectedCampaign?.is_question_based ? (
-                            lead.comentarios ? (
-                              <div className="space-y-1">
-                                <div className="font-semibold text-gray-800 text-xs uppercase mb-1">{t("Recorded Responses", "Respuestas Registradas")}:</div>
-                                <p className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-2 rounded border border-gray-100">{lead.comentarios}</p>
-                              </div>
-                            ) : (
-                              <span className="text-gray-400 italic">
-                                {lead.status === 'unreached' ? t('No answer', 'No contestó') :
-                                  lead.status === 'rejected_opt_out' ? t('Customer refused to answer', 'Cliente rechazó responder') :
-                                    lead.status === 'pending' ? t('Waiting...', 'Esperando...') : t('No responses yet', 'Sin respuestas todavía')}
-                              </span>
-                            )
-                          ) : (lead.puntuacion_comercial != null || lead.puntuacion_instalador != null || lead.puntuacion_rapidez != null) ? (
-                            <div className="space-y-1">
-                              <div className="flex gap-2">
-                                <span className="font-bold text-gray-900">C:</span>{lead.puntuacion_comercial ?? '-'}
-                                <span className="font-bold text-gray-900">I:</span>{lead.puntuacion_instalador ?? '-'}
-                                <span className="font-bold text-gray-900">R:</span>{lead.puntuacion_rapidez ?? '-'}
-                              </div>
-                              {lead.comentarios && (
-                                <p className="text-xs italic text-gray-500 border-l-2 border-gray-200 pl-2">"{lead.comentarios}"</p>
+                          {/* Columnas de Resultados Profesionales */}
+                          {lead.status === 'completed' ? (
+                            <div className="flex flex-col gap-2">
+                              {lead.encuesta?.tipo_resultados === 'CUALIFICACION_LEAD' ? (
+                                <div className="flex items-center gap-1.5">
+                                  {lead.encuesta.datos_extra?.lead_cualificado ? (
+                                    <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 border border-green-200 shadow-sm">
+                                      <Target size={12} /> {t('QUALIFIED', 'CUALIFICADO')}
+                                    </span>
+                                  ) : (
+                                    <span className="bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 border border-red-200 shadow-sm">
+                                      <ThumbsDown size={12} /> {t('DISCARDED', 'DESCARTADO')}
+                                    </span>
+                                  )}
+                                  {lead.encuesta.datos_extra?.interes?.toLowerCase() === 'alto' && (
+                                    <span className="animate-pulse text-sm" title="Alta Intensidad">🔥</span>
+                                  )}
+                                </div>
+                              ) : lead.encuesta?.tipo_resultados === 'AGENDAMIENTO_CITA' ? (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="bg-purple-100 text-purple-700 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 border border-purple-200 shadow-sm">
+                                    <Calendar size={12} /> {lead.encuesta.datos_extra?.fecha_cita ? t('APPOINTMENT', 'CITA') : t('INTERESTED', 'INTERÉS')}
+                                  </span>
+                                </div>
+                              ) : (
+                                <div className="flex gap-1.5">
+                                  {['puntuacion_comercial', 'puntuacion_instalador', 'puntuacion_rapidez'].map((key) => {
+                                    const score = (lead.encuesta as any)?.[key];
+                                    return (
+                                      <div key={key} className={`w-7 h-7 flex items-center justify-center rounded-lg text-xs font-bold shadow-sm transition-transform hover:scale-110 ${getScoreColor(score)}`}>
+                                        {score ?? '-'}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {lead.comentarios && lead.comentarios !== "Sin comentarios" && (
+                                <p className="text-[10px] italic text-gray-500 bg-gray-50/50 p-1.5 rounded border border-gray-100 line-clamp-2 max-w-[200px]">
+                                  "{lead.comentarios}"
+                                </p>
                               )}
                             </div>
                           ) : (
-                            <span className="text-gray-400 italic">
+                            <span className="text-gray-400 italic text-xs">
                               {lead.status === 'unreached' ? t('No answer', 'No contestó') :
-                                lead.status === 'rejected_opt_out' ? t('Customer rejected the survey', 'Cliente rechazó la encuesta') :
-                                  lead.status === 'pending' ? t('Waiting...', 'Esperando...') : t('No data yet', 'Sin datos todavía')}
+                                lead.status === 'rejected_opt_out' ? t('Rejected', 'Rechazada') :
+                                  lead.status === 'pending' ? t('Waiting...', 'Esperando...') : t('No data', 'Sin datos')}
                             </span>
                           )}
 
-                          {/* Botón de transcripción: mostrar si el lead tiene transcripción (en cualquier formato de campo) */}
+                          {/* Botón de transcripción modal reutilizable */}
                           {(() => {
-                            const transcriptionText = lead.transcription_preview || lead.encuesta?.transcription;
+                            const enc = lead.encuesta;
                             const TERMINAL = ['completed', 'failed', 'unreached', 'incomplete', 'rejected_opt_out'];
-                            if (!TERMINAL.includes(lead.status)) return null;
+                            if (!TERMINAL.includes(lead.status) || !enc) return null;
                             return (
                               <button
-                                onClick={() => setViewingTranscriptLead({ ...lead, transcription_preview: transcriptionText || undefined })}
-                                className={`mt-1 inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors ${transcriptionText
-                                  ? 'text-blue-600 hover:bg-blue-50 border border-blue-100'
-                                  : 'text-gray-400 hover:bg-gray-50 border border-gray-100'
-                                  }`}
-                                title={transcriptionText ? t('View transcript', 'Ver transcripción') : t('No transcript available', 'Sin transcripción disponible')}
+                                onClick={() => setViewingTranscriptLead(enc)}
+                                className={`mt-2 inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-md font-semibold transition-all shadow-sm
+                                          ${enc.transcription
+                                    ? 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 hover:shadow'
+                                    : 'bg-gray-50 text-gray-400 border border-gray-100 opacity-60'}`}
                               >
-                                <FileText size={12} />
+                                <FileText size={10} />
                                 {t('Transcript', 'Transcripción')}
                               </button>
                             );
@@ -851,75 +878,10 @@ export function CampaignsView() {
           </>
         )}
         {/* Modal de Transcripción de Lead */}
-        {viewingTranscriptLead && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <FileText size={18} className="text-blue-600" />
-                    {t('Transcription', 'Transcripción')}
-                  </h3>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {viewingTranscriptLead.customer_name
-                      ? `${viewingTranscriptLead.customer_name} · `
-                      : ''}
-                    {viewingTranscriptLead.phone_number}
-                    {viewingTranscriptLead.updated_at
-                      ? ` · ${new Date(viewingTranscriptLead.updated_at).toLocaleString()}`
-                      : ''}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setViewingTranscriptLead(null)}
-                  className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-900 bg-white border border-gray-200 rounded-full hover:shadow-sm transition-all"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-
-              <div className="p-6 overflow-y-auto space-y-4 bg-gray-50/20 flex-1">
-                {viewingTranscriptLead.transcription_preview ? (
-                  viewingTranscriptLead.transcription_preview.split('\n').filter(l => l.trim()).map((line, i) => {
-                    const isAgente = line.startsWith('Agente:');
-                    return (
-                      <div key={i} className={`flex ${isAgente ? 'justify-start' : 'justify-end'}`}>
-                        <div className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm shadow-sm border ${isAgente
-                            ? 'bg-blue-600 text-white border-blue-700 rounded-tl-none'
-                            : 'bg-white text-gray-800 border-gray-100 rounded-tr-none'
-                          }`}>
-                          <p className="font-semibold text-[10px] uppercase tracking-wider mb-1 opacity-70">
-                            {isAgente ? t('Ausarta Robot', 'Ausarta Robot') : t('Customer', 'Cliente')}
-                          </p>
-                          <p className="leading-relaxed">
-                            {line.replace(/^(Agente|Cliente): /, '')}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="text-center py-12">
-                    <div className="bg-gray-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
-                      <FileText className="text-gray-400" />
-                    </div>
-                    <p className="text-gray-500 font-medium">{t('No transcription available', 'No hay transcripción disponible')}</p>
-                    <p className="text-xs text-gray-400 mt-1">{t('The call may have been too short or no speech was detected.', 'La llamada pudo ser muy corta o no se detectó voz.')}</p>
-                  </div>
-                )}
-              </div>
-
-              <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex justify-end">
-                <button
-                  onClick={() => setViewingTranscriptLead(null)}
-                  className="px-6 py-2 bg-gray-900 text-white text-sm font-semibold rounded-xl hover:bg-black transition-all shadow-lg"
-                >
-                  {t('Close', 'Cerrar')}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <CallResultModal
+          result={viewingTranscriptLead}
+          onClose={() => setViewingTranscriptLead(null)}
+        />
         {renderEditModal()}
       </div>
     );

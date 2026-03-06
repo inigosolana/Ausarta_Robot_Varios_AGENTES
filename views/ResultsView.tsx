@@ -5,24 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { AnalyticsDashboard } from '../components/AnalyticsDashboard';
 import { DateRangePicker, getDatesFromRange, DateRange } from '../components/DateRangePicker';
-
-interface SurveyResult {
-    id: number;
-    telefono: string;
-    campaign_name?: string;
-    fecha: string;
-    completada: number;
-    status: string | null;
-    puntuacion_comercial: number | null;
-    puntuacion_instalador: number | null;
-    puntuacion_rapidez: number | null;
-    comentarios: string | null;
-    transcription: string | null;
-    llm_model: string | null;
-    seconds_used?: number | null;
-    tipo_resultados?: string | null;
-    datos_extra?: any;
-}
+import { CallResultModal } from '../components/CallResultModal';
+import { SurveyResult } from '../types';
 
 interface Props {
     empresaId?: number;
@@ -518,138 +502,11 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
             </div>
 
             {/* Transcript Modal */}
-            {
-                viewingTranscript && (
-                    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-                        <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
-                            <div className={`px-6 py-4 border-b flex justify-between items-center ${viewingTranscript.datos_extra?.interes?.toLowerCase() === 'alto' ? 'bg-green-50 border-green-100' : viewingTranscript.datos_extra?.interes?.toLowerCase() === 'bajo' ? 'bg-red-50 border-red-100' : 'bg-gray-50/50 border-gray-100'}`}>
-                                <div>
-                                    <div className="flex items-center gap-3">
-                                        <h3 className="text-lg font-bold text-gray-900">{t("Transcription", "Transcripción")} #{viewingTranscript.id}</h3>
-                                        {viewingTranscript.datos_extra?.interes?.toLowerCase() === 'alto' && <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold shadow-sm">🔥 Interés Alto</span>}
-                                        {viewingTranscript.datos_extra?.interes?.toLowerCase() === 'bajo' && <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold shadow-sm">Interés Bajo</span>}
-                                    </div>
-                                    <p className="text-xs text-gray-500">{viewingTranscript.telefono} • {new Date(viewingTranscript.fecha).toLocaleString()}</p>
-                                </div>
-                                <button
-                                    onClick={() => setViewingTranscript(null)}
-                                    className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-900 bg-white border border-gray-200 rounded-full hover:shadow-sm transition-all"
-                                >
-                                    ✕
-                                </button>
-                            </div>
-
-                            {/* Resumen Inteligente */}
-                            <div className="px-6 py-4 border-b border-gray-100 bg-indigo-50/30">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <Sparkles size={18} className="text-indigo-600" />
-                                    <h4 className="font-bold text-indigo-900 text-sm">{t('Resumen de la IA')}</h4>
-                                </div>
-                                {(!viewingTranscript.datos_extra || Object.keys(viewingTranscript.datos_extra).length === 0) ? (
-                                    <p className="text-sm text-gray-500 italic">{t('El análisis detallado no está disponible para esta llamada.')}</p>
-                                ) : (
-                                    <div className="space-y-3">
-                                        {viewingTranscript.tipo_resultados === 'CUALIFICACION_LEAD' && (
-                                            <div className="flex flex-col gap-2">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-xs font-semibold text-gray-600">{t('Estado:')}</span>
-                                                    {viewingTranscript.datos_extra.lead_cualificado ? (
-                                                        <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-md font-bold flex items-center gap-1"><Target size={12} /> Sí, Cualificado</span>
-                                                    ) : (
-                                                        <span className="bg-red-100 text-red-700 text-xs px-2 py-1 rounded-md font-bold flex items-center gap-1"><ThumbsDown size={12} /> No Cualificado</span>
-                                                    )}
-                                                </div>
-                                                {viewingTranscript.datos_extra.motivo_rechazo && (
-                                                    <p className="text-sm text-gray-700 bg-white p-2 rounded-lg border border-gray-100">
-                                                        <span className="font-semibold text-xs text-gray-500 block mb-1">{t('Motivo:')}</span>
-                                                        {viewingTranscript.datos_extra.motivo_rechazo}
-                                                    </p>
-                                                )}
-                                            </div>
-                                        )}
-                                        {viewingTranscript.tipo_resultados === 'AGENDAMIENTO_CITA' && viewingTranscript.datos_extra.fecha_cita && (
-                                            <div className="bg-white border border-purple-100 p-3 rounded-lg flex items-center gap-3">
-                                                <div className="bg-purple-100 p-2 rounded-full"><Calendar size={16} className="text-purple-700" /></div>
-                                                <div>
-                                                    <p className="text-xs font-semibold text-gray-500">{t('Fecha de Cita')}</p>
-                                                    <p className="font-bold text-purple-900 text-sm">{viewingTranscript.datos_extra.fecha_cita}</p>
-                                                </div>
-                                            </div>
-                                        )}
-                                        {Array.isArray(viewingTranscript.datos_extra.puntos_clave) && viewingTranscript.datos_extra.puntos_clave.length > 0 && (
-                                            <div>
-                                                <span className="text-xs font-semibold text-gray-600 mb-1 block">{t('Puntos Clave:')}</span>
-                                                <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
-                                                    {viewingTranscript.datos_extra.puntos_clave.map((pt: string, idx: number) => (
-                                                        <li key={idx}>{pt}</li>
-                                                    ))}
-                                                </ul>
-                                            </div>
-                                        )}
-                                        {viewingTranscript.tipo_resultados !== 'CUALIFICACION_LEAD' && viewingTranscript.tipo_resultados !== 'AGENDAMIENTO_CITA' && !viewingTranscript.datos_extra.puntos_clave && (
-                                            <div className="text-sm text-gray-700 bg-white p-3 rounded-lg border border-gray-100">
-                                                <pre className="text-xs font-mono whitespace-pre-wrap overflow-hidden">{JSON.stringify(viewingTranscript.datos_extra, null, 2)}</pre>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="p-6 overflow-y-auto space-y-6 bg-gray-50/20">
-                                {viewingTranscript.transcription ? (
-                                    viewingTranscript.transcription.split('\n').filter(l => l.trim()).map((line, i) => {
-                                        const isAgente = line.startsWith('Agente:');
-                                        const messageTime = new Date(new Date(viewingTranscript.fecha).getTime() + (i * 15000));
-                                        const timeStr = messageTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-                                        return (
-                                            <div key={i} className={`flex gap-3 ${isAgente ? 'justify-start' : 'justify-end flex-row-reverse'}`}>
-                                                <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-sm ${isAgente ? 'bg-[#004a99] text-white' : 'bg-gray-200 text-gray-600'}`}>
-                                                    {isAgente ? <Bot size={16} /> : <User size={16} />}
-                                                </div>
-                                                <div className={`max-w-[75%] flex flex-col ${isAgente ? 'items-start' : 'items-end'}`}>
-                                                    <div className="flex items-baseline gap-2 mb-1">
-                                                        <span className="font-semibold text-xs text-gray-700">
-                                                            {isAgente ? t('Ausarta Robot') : t('Cliente', 'Customer')}
-                                                        </span>
-                                                        <span className="text-[10px] text-gray-400">{timeStr}</span>
-                                                    </div>
-                                                    <div className={`rounded-2xl px-4 py-2.5 text-sm shadow-sm ${isAgente
-                                                        ? 'bg-[#004a99] text-white rounded-tl-sm'
-                                                        : 'bg-white border border-gray-100 text-gray-800 rounded-tr-sm'
-                                                        }`}>
-                                                        <p className="leading-relaxed">
-                                                            {line.replace(/^(Agente|Cliente):\s*/i, '')}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })
-                                ) : (
-                                    <div className="text-center py-12">
-                                        <div className="bg-gray-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
-                                            <FileText className="text-gray-400" />
-                                        </div>
-                                        <p className="text-gray-500 font-medium">{t("No transcription available", "No hay transcripción disponible")}</p>
-                                        <p className="text-xs text-gray-400">{t("The call might have been too short or no speech detected.", "La llamada pudo ser muy corta o no se detectó voz.")}</p>
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex justify-end">
-                                <button
-                                    onClick={() => setViewingTranscript(null)}
-                                    className="px-6 py-2 bg-gray-900 text-white text-sm font-semibold rounded-xl hover:bg-black transition-all shadow-lg"
-                                >
-                                    {t("Close View", "Cerrar Vista")}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )
-            }
-        </div >
+            <CallResultModal
+                result={viewingTranscript}
+                onClose={() => setViewingTranscript(null)}
+            />
+        </div>
     );
 };
 

@@ -133,3 +133,22 @@ export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'ai_prompt_generator', label: 'Generador de Agentes AI (Extra)' },
   { key: 'premium_voice', label: 'Voz Ausarta (Acceso Premium)' },
 ];
+
+export interface SurveyResult {
+  id: number;
+  telefono: string;
+  campaign_name?: string;
+  fecha: string;
+  completada: number;
+  status: string | null;
+  puntuacion_comercial: number | null;
+  puntuacion_instalador: number | null;
+  puntuacion_rapidez: number | null;
+  comentarios: string | null;
+  transcription: string | null;
+  llm_model: string | null;
+  seconds_used?: number | null;
+  tipo_resultados?: string | null;
+  datos_extra?: any;
+  customer_name?: string | null;
+}
