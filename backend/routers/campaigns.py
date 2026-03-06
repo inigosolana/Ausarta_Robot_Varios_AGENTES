@@ -1,18 +1,48 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Body
+"""
+Motor de Campañas Asíncrono y Multitenant.
+
+Arquitectura:
+- Un único scheduler loop corre como background task en el arranque de la app.
+- Por cada campaña activa, el scheduler despacha las llamadas en paralelo
+  usando asyncio.gather(), respetando un semáforo por empresa para no saturar
+  los canales SIP de un solo cliente.
+- El estado de las llamadas ya NO se obtiene por polling. Se actualiza cuando
+  el webhook de LiveKit notifica que la sala se cerró (/api/livekit/webhook).
+"""
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 from typing import Optional, List
 from services.supabase_service import supabase
+from services.livekit_service import lkapi
+from livekit import api as lk_api
 from pydantic import BaseModel
-from models.schemas import CampaignModel, CampaignLeadModel, EncuestaData
-from datetime import datetime, timezone
+from models.schemas import CampaignModel, CampaignLeadModel
+from datetime import datetime, timezone, timedelta
 import asyncio
-import httpx
 import os
 import logging
 
 logger = logging.getLogger("api-backend")
 
 router = APIRouter(prefix="/api", tags=["campaigns"])
+
+# ──────────────────────────────────────────────
+# CONTROL DE CONCURRENCIA MULTITENANT
+# Semáforos por empresa: máximo N llamadas simultáneas por cliente.
+# ──────────────────────────────────────────────
+MAX_CONCURRENT_CALLS_PER_COMPANY = int(os.getenv("MAX_CONCURRENT_CALLS_PER_COMPANY", "3"))
+_company_semaphores: dict[int, asyncio.Semaphore] = {}
+
+def _get_company_semaphore(empresa_id: int) -> asyncio.Semaphore:
+    """Devuelve (y crea si no existe) el semáforo de concurrencia para una empresa."""
+    if empresa_id not in _company_semaphores:
+        _company_semaphores[empresa_id] = asyncio.Semaphore(MAX_CONCURRENT_CALLS_PER_COMPANY)
+    return _company_semaphores[empresa_id]
+
+
+# ──────────────────────────────────────────────
+# CRUD básico de campañas
+# ──────────────────────────────────────────────
 
 @router.delete("/campaigns/{campaign_id}")
 async def delete_campaign(campaign_id: int):
@@ -29,20 +59,15 @@ async def delete_campaign(campaign_id: int):
 @router.post("/campaigns")
 async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel]):
     if not supabase: return {"error": "No DB"}
-    
     try:
         status_final = campaign.status
-        if not campaign.scheduled_time and status_final == 'pending':
-            status_final = 'running'
+        if not campaign.scheduled_time and status_final == "pending":
+            status_final = "running"
 
-        # Multiply by unit
         interval_raw = campaign.retry_interval
-        if campaign.retry_unit == 'minutes':
-            interval_raw *= 60
-        elif campaign.retry_unit == 'hours':
-            interval_raw *= 3600
-        elif campaign.retry_unit == 'days':
-            interval_raw *= 86400
+        if campaign.retry_unit == "minutes":  interval_raw *= 60
+        elif campaign.retry_unit == "hours":  interval_raw *= 3600
+        elif campaign.retry_unit == "days":   interval_raw *= 86400
 
         camp_data = {
             "name": campaign.name,
@@ -57,23 +82,20 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         res_camp = supabase.table("campaigns").insert(camp_data).execute()
-        campaign_id = res_camp.data[0]['id']
-        
-        leads_data = []
-        for lead in leads:
-            leads_data.append({
-                "campaign_id": campaign_id,
-                "phone_number": lead.phone_number,
-                "customer_name": lead.customer_name,
-                "status": "pending",
-                "retries_attempted": 0
-            })
-        
+        campaign_id = res_camp.data[0]["id"]
+
+        leads_data = [{
+            "campaign_id": campaign_id,
+            "phone_number": lead.phone_number,
+            "customer_name": lead.customer_name,
+            "status": "pending",
+            "retries_attempted": 0
+        } for lead in leads]
+
         if leads_data:
             supabase.table("campaign_leads").insert(leads_data).execute()
-             
+
         return {"id": campaign_id, "message": f"Campaña creada con {len(leads_data)} leads"}
-        
     except Exception as e:
         logger.error(f"Error creando campaña: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -85,38 +107,23 @@ async def update_campaign(campaign_id: int, payload: dict):
         if "retry_interval" in payload and "retry_unit" in payload:
             raw = payload["retry_interval"]
             unit = payload["retry_unit"]
-            if unit == 'minutes': raw *= 60
-            elif unit == 'hours': raw *= 3600
-            elif unit == 'days': raw *= 86400
+            if unit == "minutes":  raw *= 60
+            elif unit == "hours":  raw *= 3600
+            elif unit == "days":   raw *= 86400
             payload["retry_interval"] = raw
-
         supabase.table("campaigns").update(payload).eq("id", campaign_id).execute()
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Error updating campaign {campaign_id}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-@router.get("/results/{result_id}/transcription")
-async def get_result_transcription(result_id: int):
-    if not supabase: return {"error": "Database not connected"}
-    try:
-        res = supabase.table("encuestas").select("transcription").eq("id", result_id).limit(1).execute()
-        if res.data and len(res.data) > 0:
-            return {"transcription": res.data[0].get("transcription")}
-        return {"transcription": None}
-    except Exception as e:
-        logger.error(f"Error fetching transcription: {e}")
-        return {"error": str(e)}
-
 @router.get("/campaigns")
 async def list_campaigns(empresa_id: Optional[int] = None):
     if not supabase: return []
     try:
-        # Join with empresas to get the company name
         query = supabase.table("campaigns").select("*, empresas:empresa_id(nombre)")
         if empresa_id:
             query = query.eq("empresa_id", empresa_id)
-            
         res = query.order("created_at", desc=True).limit(100).execute()
         return res.data
     except Exception as e:
@@ -127,18 +134,17 @@ async def list_campaigns(empresa_id: Optional[int] = None):
 async def get_campaign_details(campaign_id: int):
     if not supabase: return {"error": "No DB"}
     try:
-        # Usamos asyncio.to_thread para no bloquear el loop con llamadas síncronas de supabase-py
         res_camp, res_leads = await asyncio.gather(
             asyncio.to_thread(lambda: supabase.table("campaigns").select("*").eq("id", campaign_id).execute()),
             asyncio.to_thread(lambda: supabase.table("campaign_leads").select("*").eq("campaign_id", campaign_id).execute())
         )
-        
         if not res_camp.data:
             return JSONResponse(status_code=404, content={"error": "Campaign not found"})
-        
+
         campaign = res_camp.data[0]
         leads = res_leads.data
-        
+
+        # Detectar si el agente es de tipo pregunta-abierta
         is_question_based = False
         try:
             agent_res = supabase.table("agent_config").select("instructions").eq("id", campaign["agent_id"]).execute()
@@ -147,108 +153,85 @@ async def get_campaign_details(campaign_id: int):
                 if "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower:
                     is_question_based = True
         except: pass
-            
         campaign["is_question_based"] = is_question_based
-        
-        call_ids = [l['call_id'] for l in leads if l.get('call_id')]
+
+        # Cargar surveys relacionadas
+        call_ids = [l["call_id"] for l in leads if l.get("call_id")]
         surveys_map = {}
         if call_ids:
             try:
                 cols = "id, status, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, transcription"
-                res_surveys = await asyncio.to_thread(lambda: supabase.table("encuestas").select(cols).in_("id", call_ids).execute())
-                for s in res_surveys.data:
-                    surveys_map[s['id']] = s
+                res_surveys = await asyncio.to_thread(
+                    lambda: supabase.table("encuestas").select(cols).in_("id", call_ids).execute()
+                )
+                surveys_map = {s["id"]: s for s in res_surveys.data}
             except Exception as e:
                 logger.error(f"Error fetching surveys for campaign: {e}")
 
-        stats = {
-            "total": len(leads), "pending": 0, "calling": 0, "called": 0,
-            "completada": 0, "parcial": 0, "rechazada": 0, "fallida": 0, "no_contesta": 0,
-            # Legacy compatibility
-            "completed": 0, "failed": 0, "incomplete": 0
-        }
-        
-        sum_com = 0; count_com = 0
-        sum_ins = 0; count_ins = 0
-        sum_rap = 0; count_rap = 0
-        
+        # Agregar datos de encuesta a cada lead y calcular métricas
+        sum_com = sum_ins = sum_rap = 0
+        count_com = count_ins = count_rap = 0
+        status_counts: dict[str, int] = {}
         enriched_leads = []
-        for l in leads:
-            status = l['status']
-            if status in stats:
-                stats[status] += 1
-            else:
-                stats["pending"] += 1
-            
-            call_id = l.get("call_id")
-            survey = surveys_map.get(call_id)
-            
-            l["encuesta"] = survey
-            
-            if survey:
-                l['puntuacion_comercial'] = survey.get('puntuacion_comercial')
-                l['puntuacion_instalador'] = survey.get('puntuacion_instalador')
-                l['puntuacion_rapidez'] = survey.get('puntuacion_rapidez')
-                l['comentarios'] = survey.get('comentarios')
-                l['transcription_preview'] = survey.get('transcription')
 
-                if survey.get('puntuacion_comercial') is not None:
-                    sum_com += survey['puntuacion_comercial']
-                    count_com += 1
-                if survey.get('puntuacion_instalador') is not None:
-                    sum_ins += survey['puntuacion_instalador']
-                    count_ins += 1
-                if survey.get('puntuacion_rapidez') is not None:
-                    sum_rap += survey['puntuacion_rapidez']
-                    count_rap += 1
-            
+        for l in leads:
+            s = (l.get("status") or "pending")
+            status_counts[s] = status_counts.get(s, 0) + 1
+
+            survey = surveys_map.get(l.get("call_id"))
+            l["encuesta"] = survey
+            if survey:
+                l["puntuacion_comercial"] = survey.get("puntuacion_comercial")
+                l["puntuacion_instalador"] = survey.get("puntuacion_instalador")
+                l["puntuacion_rapidez"] = survey.get("puntuacion_rapidez")
+                l["comentarios"] = survey.get("comentarios")
+                l["transcription_preview"] = survey.get("transcription")
+                if survey.get("puntuacion_comercial") is not None:
+                    sum_com += survey["puntuacion_comercial"]; count_com += 1
+                if survey.get("puntuacion_instalador") is not None:
+                    sum_ins += survey["puntuacion_instalador"]; count_ins += 1
+                if survey.get("puntuacion_rapidez") is not None:
+                    sum_rap += survey["puntuacion_rapidez"]; count_rap += 1
             enriched_leads.append(l)
 
+        total_leads = len(leads)
+        pending    = status_counts.get("pending", 0)
+        calling    = status_counts.get("calling", 0)
+        completed  = status_counts.get("completed", 0) + status_counts.get("completada", 0)
+        failed     = status_counts.get("failed", 0) + status_counts.get("fallida", 0)
+        unreached  = status_counts.get("unreached", 0) + status_counts.get("no_contesta", 0)
+        incomplete = status_counts.get("incomplete", 0) + status_counts.get("parcial", 0)
+        rejected   = status_counts.get("rejected_opt_out", 0) + status_counts.get("rechazada", 0) + status_counts.get("rejected", 0)
+
+        campaign["total_leads"]     = total_leads
+        campaign["called_leads"]    = max(0, total_leads - pending - calling)
+        campaign["failed_leads"]    = failed + unreached + incomplete
+        campaign["pending_leads"]   = pending + calling
+        campaign["completed_leads"] = completed
+        campaign["rejected_leads"]  = rejected
+
         metrics = {
-            "avg_comercial": round(sum_com / count_com, 1) if count_com > 0 else 0,
-            "avg_instalador": round(sum_ins / count_ins, 1) if count_ins > 0 else 0,
-            "avg_rapidez": round(sum_rap / count_rap, 1) if count_rap > 0 else 0,
-            "avg_overall": round((sum_com + sum_ins + sum_rap) / (count_com + count_ins + count_rap), 1) if (count_com + count_ins + count_rap) > 0 else 0
+            "avg_comercial": round(sum_com / count_com, 1) if count_com else 0,
+            "avg_instalador": round(sum_ins / count_ins, 1) if count_ins else 0,
+            "avg_rapidez": round(sum_rap / count_rap, 1) if count_rap else 0,
+            "avg_overall": round(
+                (sum_com + sum_ins + sum_rap) / (count_com + count_ins + count_rap), 1
+            ) if (count_com + count_ins + count_rap) else 0,
         }
 
-        # Enriquecer campaña con contadores para que el frontend pueda pintar cards/progreso
-        try:
-            status_counts = {}
-            for l in leads:
-                s = (l.get("status") or "pending")
-                status_counts[s] = status_counts.get(s, 0) + 1
-
-            total_leads = len(leads)
-            pending = status_counts.get("pending", 0)
-            calling = status_counts.get("calling", 0)
-            completed = status_counts.get("completed", 0) + status_counts.get("completada", 0)
-            failed = status_counts.get("failed", 0) + status_counts.get("fallida", 0)
-            unreached = status_counts.get("unreached", 0) + status_counts.get("no_contesta", 0)
-            incomplete = status_counts.get("incomplete", 0) + status_counts.get("parcial", 0)
-            rejected = status_counts.get("rejected_opt_out", 0) + status_counts.get("rechazada", 0) + status_counts.get("rejected", 0)
-
-            called = max(0, total_leads - pending - calling)
-
-            campaign["total_leads"] = total_leads
-            campaign["called_leads"] = called
-            # En UI, "Failed" suele englobar fallidas + no contesta + incompletas (rechazadas se muestran aparte)
-            campaign["failed_leads"] = failed + unreached + incomplete
-            campaign["pending_leads"] = pending + calling
-            campaign["completed_leads"] = completed
-            campaign["rejected_leads"] = rejected
-        except Exception as e_counts:
-            logger.error(f"Error computing campaign counters: {e_counts}")
-        
-        return {
-            "campaign": campaign,
-            "stats": stats,
-            "metrics": metrics,
-            "leads": enriched_leads
-        }
-        
+        return {"campaign": campaign, "metrics": metrics, "leads": enriched_leads}
     except Exception as e:
         logger.error(f"Error getting campaign details {campaign_id}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.get("/results/{result_id}/transcription")
+async def get_result_transcription(result_id: int):
+    if not supabase: return {"error": "Database not connected"}
+    try:
+        res = supabase.table("encuestas").select("transcription").eq("id", result_id).limit(1).execute()
+        return {"transcription": res.data[0].get("transcription") if res.data else None}
+    except Exception as e:
+        return {"error": str(e)}
 
 @router.get("/agent_config_by_survey/{survey_id}")
 async def get_agent_config_by_survey(survey_id: int):
@@ -257,41 +240,33 @@ async def get_agent_config_by_survey(survey_id: int):
         res_survey = supabase.table("encuestas").select("agent_id, nombre_cliente").eq("id", survey_id).execute()
         if not res_survey.data:
             return JSONResponse(status_code=404, content={"error": "Survey not found"})
-            
+
         agent_id = res_survey.data[0].get("agent_id")
         nombre_cliente = res_survey.data[0].get("nombre_cliente")
-        
+
         if not agent_id:
-            return {"name": "Bot", "greeting": "Buenas, le llamo...", "instructions": "Eres un asistente...", "voice_id": "cefcb124-080b-4655-b31f-932f3ee743de", "llm_model": "llama-3.3-70b-versatile"}
-            
+            return {"name": "Bot", "greeting": "Buenas, le llamo...", "instructions": "Eres un asistente.", "voice_id": "cefcb124-080b-4655-b31f-932f3ee743de", "llm_model": "llama-3.3-70b-versatile"}
+
         res_agent = supabase.table("agent_config").select("*").eq("id", agent_id).execute()
         if not res_agent.data:
             return JSONResponse(status_code=404, content={"error": "Agent not found"})
-            
+
         agent_data = res_agent.data[0]
-        
         res_ai = supabase.table("ai_config").select("*").eq("agent_id", agent_id).execute()
         ai_data = res_ai.data[0] if res_ai.data else {}
 
-        # res_lead = supabase.table("campaign_leads").select("comentarios").eq("call_id", survey_id).execute()
-        contexto_adicional = ""
-        # if res_lead.data and res_lead.data[0].get("comentarios"):
-        #     contexto_adicional = f"\nDATOS CRM DEL CLIENTE: {res_lead.data[0].get('comentarios')}"
-
-        greeting_processed = agent_data.get("greeting", "Buenas, ¿tiene un momento?").replace("{nombre}", nombre_cliente or "Cliente")
-        instructions_base = agent_data.get("instructions", "Eres un asistente")
+        greeting = agent_data.get("greeting", "Buenas, ¿tiene un momento?").replace("{nombre}", nombre_cliente or "Cliente")
 
         return {
             "name": agent_data.get("name", "Bot"),
-            "greeting": greeting_processed,
-            "instructions": f"{instructions_base}{contexto_adicional}",
+            "greeting": greeting,
+            "instructions": agent_data.get("instructions", "Eres un asistente"),
             "critical_rules": agent_data.get("critical_rules", ""),
             "voice_id": ai_data.get("tts_voice") or "cefcb124-080b-4655-b31f-932f3ee743de",
             "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
             "language": ai_data.get("language") or "es",
-            "stt_provider": ai_data.get("stt_provider") or "deepgram"
+            "stt_provider": ai_data.get("stt_provider") or "deepgram",
         }
-            
     except Exception as e:
         logger.error(f"Error agent config by survey: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -300,153 +275,35 @@ async def get_agent_config_by_survey(survey_id: int):
 async def retry_campaign(campaign_id: int):
     if not supabase: return {"error": "No DB"}
     try:
-        # Reintentar todos los leads fallidos (failed, unreached, incomplete)
-        statuses_to_retry = ['failed', 'unreached', 'incomplete']
         res = supabase.table("campaign_leads").update({
-            "status": "pending",
-            "retries_attempted": 0,
-            "error_msg": None,
-            "next_retry_at": None
-        }).eq("campaign_id", campaign_id).in_("status", statuses_to_retry).execute()
-        
-        # También reactivar la campaña
-        supabase.table("campaigns").update({"status": "running"}).eq("id", campaign_id).execute()
-        
+            "status": "pending", "retries_attempted": 0,
+            "error_msg": None, "next_retry_at": None
+        }).eq("campaign_id", campaign_id).in_("status", ["failed", "unreached", "incomplete"]).execute()
+        supabase.table("campaigns").update({"status": "active"}).eq("id", campaign_id).execute()
         return {"status": "success", "retried_count": len(res.data)}
     except Exception as e:
         logger.error(f"Error retrying campaign {campaign_id}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
+
 @router.post("/campaigns/leads/{lead_id}/retry")
 async def retry_lead(lead_id: int):
     if not supabase: return {"error": "No DB"}
     try:
         res = supabase.table("campaign_leads").update({
-            "status": "pending",
-            "retries_attempted": 0,
-            "error_msg": None,
-            "next_retry_at": None
+            "status": "pending", "retries_attempted": 0,
+            "error_msg": None, "next_retry_at": None
         }).eq("id", lead_id).execute()
-        
         if res.data:
             camp_id = res.data[0].get("campaign_id")
             if camp_id:
-                # Si reintentamos un lead, aseguramos que la campaña no esté en error
-                supabase.table("campaigns").update({"status": "running"}).eq("id", camp_id).execute()
-        
+                supabase.table("campaigns").update({"status": "active"}).eq("id", camp_id).execute()
         return {"status": "success"}
     except Exception as e:
         logger.error(f"Error retrying lead {lead_id}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# --- NUEVA LÓGICA DE DRIP CAMPAIGN (GOTEO) ---
-
-async def process_campaign_drip(campaign_id: int, agent_id: int, interval_minutes: int):
-    """Procesa una campaña enviando leads uno a uno con una espera entre ellos."""
-    logger.info(f"🚀 [Drip] Iniciando procesado de campaña {campaign_id} (intervalo: {interval_minutes}min)")
-    
-    try:
-        # 1. Obtener leads pendientes
-        res = await asyncio.to_thread(lambda: supabase.table("campaign_leads")
-            .select("*")
-            .eq("campaign_id", campaign_id)
-            .eq("status", "pending")
-            .execute())
-        
-        leads = res.data
-        if not leads:
-            logger.info(f"🏁 [Drip] No hay leads pendientes para la campaña {campaign_id}. Finalizando.")
-            await asyncio.to_thread(lambda: supabase.table("campaigns").update({"status": "completed"}).eq("id", campaign_id).execute())
-            return
-
-        n8n_base_url = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
-        n8n_url = os.getenv("N8N_WEBHOOK_URL_ORCHESTRATOR", f"{n8n_base_url}/campana-goteo-v1")
-
-        async with httpx.AsyncClient() as client:
-            for i, lead in enumerate(leads):
-                # 2. Verificar estado de la campaña antes de cada lead
-                camp_res = await asyncio.to_thread(lambda: supabase.table("campaigns").select("status").eq("id", campaign_id).execute())
-                if not camp_res.data or camp_res.data[0]['status'] != 'active':
-                    logger.info(f"⏸️ [Drip] Campaña {campaign_id} pausada o detenida. Saliendo del bucle.")
-                    break
-
-                lead_id = lead['id']
-                phone = lead['phone_number']
-                logger.info(f"📞 [Drip] Procesando lead {lead_id} ({phone}) - {i+1}/{len(leads)}")
-
-                # 3. Marcar lead como en progreso
-                await asyncio.to_thread(lambda: supabase.table("campaign_leads").update({
-                    "status": "calling",
-                    "last_call_at": datetime.now(timezone.utc).isoformat()
-                }).eq("id", lead_id).execute())
-
-                # 4. Enviar a n8n
-                payload = {
-                    "phoneNumber": phone,
-                    "leadId": lead_id,
-                    "agentId": agent_id,
-                    "campaignId": campaign_id,
-                    "customerName": lead.get("customer_name", "Cliente")
-                }
-
-                try:
-                    resp = await client.post(n8n_url, json=payload, timeout=10)
-                    logger.info(f"📡 [Drip] n8n respondió {resp.status_code} para lead {lead_id}")
-                except Exception as e:
-                    logger.error(f"❌ [Drip] Error llamando a n8n para lead {lead_id}: {e}")
-                    # En caso de error de red, podríamos marcarlo como fallido o dejarlo pendiente
-                
-                # 5. Esperar el intervalo (excepto en el último lead del bucle)
-                if i < len(leads) - 1:
-                    logger.info(f"⏳ [Drip] Esperando {interval_minutes} minutos para el siguiente lead...")
-                    await asyncio.sleep(interval_minutes * 60)
-
-        # Verificar si todos se procesaron para marcar campaña como completada
-        final_check = await asyncio.to_thread(lambda: supabase.table("campaign_leads")
-            .select("id")
-            .eq("campaign_id", campaign_id)
-            .eq("status", "pending")
-            .execute())
-        
-        if not final_check.data:
-            await asyncio.to_thread(lambda: supabase.table("campaigns").update({"status": "completed"}).eq("id", campaign_id).execute())
-            logger.info(f"✅ [Drip] Campaña {campaign_id} terminada con éxito.")
-
-    except Exception as e:
-        logger.error(f"❌ [Drip] Error crítico procesando campaña {campaign_id}: {e}")
-        await asyncio.to_thread(lambda: supabase.table("campaigns").update({"status": "failed"}).eq("id", campaign_id).execute())
-
-@router.post("/campaigns/{campaign_id}/start")
-async def start_campaign(campaign_id: int, background_tasks: BackgroundTasks):
-    """Inicia la ejecución de la campaña."""
-    if not supabase: return {"error": "No DB"}
-    
-    try:
-        # Obtener datos de la campaña
-        res = supabase.table("campaigns").select("*").eq("id", campaign_id).execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Campaña no encontrada")
-        
-        campaign = res.data[0]
-        
-        # Cambiar estado a activo
-        supabase.table("campaigns").update({"status": "active"}).eq("id", campaign_id).execute()
-        
-        # Lanzar tarea en segundo plano
-        background_tasks.add_task(
-            process_campaign_drip, 
-            campaign_id, 
-            campaign['agent_id'], 
-            campaign.get('interval_minutes', 2)
-        )
-        
-        return {"status": "ok", "message": "Campaña iniciada por goteo"}
-    except Exception as e:
-        logger.error(f"Error al iniciar campaña: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
 @router.post("/campaigns/{campaign_id}/stop")
 async def stop_campaign(campaign_id: int):
-    """Detiene o pausa la campaña."""
     if not supabase: return {"error": "No DB"}
     try:
         supabase.table("campaigns").update({"status": "paused"}).eq("id", campaign_id).execute()
@@ -454,7 +311,231 @@ async def stop_campaign(campaign_id: int):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# --- WEBHOOK DE RETORNO PARA RESULTADOS ---
+
+# ──────────────────────────────────────────────
+# MOTOR ASÍNCRONO DE CAMPAÑAS
+# ──────────────────────────────────────────────
+
+async def _dispatch_single_lead(lead: dict, campaign: dict) -> None:
+    """
+    Lanza una llamada SIP para un único lead y registra la encuesta en BD.
+    Esta función se ejecuta concurrentemente vía asyncio.gather() respetando
+    el semáforo de la empresa.
+
+    El estado post-llamada se actualiza vía webhook de LiveKit, NO aquí.
+    """
+    lead_id = lead["id"]
+    phone = lead["phone_number"]
+    empresa_id = campaign.get("empresa_id") or 0
+    agent_name_dispatch = os.getenv("AGENT_NAME_DISPATCH", "default_agent")
+    sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
+
+    sem = _get_company_semaphore(empresa_id)
+    async with sem:
+        logger.info(f"📞 [Motor] Lanzando lead {lead_id} ({phone}) para campaña {campaign['id']}")
+
+        # 1. Crear encuesta en BD y vincular al lead
+        encuesta_id = None
+        try:
+            enc_res = await asyncio.to_thread(
+                lambda: supabase.table("encuestas").insert({
+                    "telefono": phone,
+                    "nombre_cliente": lead.get("customer_name", "Cliente"),
+                    "fecha": datetime.now(timezone.utc).isoformat(),
+                    "status": "initiated",
+                    "completada": 0,
+                    "agent_id": campaign.get("agent_id"),
+                    "empresa_id": campaign.get("empresa_id"),
+                    "campaign_id": campaign["id"],
+                    "campaign_name": campaign.get("name"),
+                }).execute()
+            )
+            encuesta_id = enc_res.data[0]["id"]
+
+            await asyncio.to_thread(
+                lambda: supabase.table("campaign_leads").update({
+                    "call_id": encuesta_id,
+                    "status": "calling",
+                    "last_call_at": datetime.now(timezone.utc).isoformat(),
+                }).eq("id", lead_id).execute()
+            )
+        except Exception as e:
+            logger.error(f"❌ [Motor] Error creando encuesta para lead {lead_id}: {e}")
+            await asyncio.to_thread(
+                lambda: supabase.table("campaign_leads").update({
+                    "status": "failed", "error_msg": str(e)
+                }).eq("id", lead_id).execute()
+            )
+            return
+
+        room_name = f"{agent_name_dispatch}_encuesta_{encuesta_id}"
+
+        # 2. Crear sala y lanzar SIP
+        try:
+            await lkapi.room.create_room(lk_api.CreateRoomRequest(name=room_name))
+        except Exception as room_err:
+            logger.warning(f"⚠️ [Motor] Aviso al crear sala {room_name}: {room_err}")
+
+        try:
+            await lkapi.sip.create_sip_participant(lk_api.CreateSIPParticipantRequest(
+                sip_trunk_id=sip_trunk_id,
+                sip_call_to=phone,
+                room_name=room_name,
+                participant_identity=f"user_{phone}_{encuesta_id}",
+                participant_name="Cliente",
+            ))
+            logger.info(f"☎️ [Motor] SIP iniciado: {phone} → sala {room_name}")
+        except Exception as sip_err:
+            logger.error(f"❌ [Motor] Error SIP para lead {lead_id}: {sip_err}")
+            await asyncio.to_thread(
+                lambda: supabase.table("campaign_leads").update({
+                    "status": "failed", "error_msg": str(sip_err)
+                }).eq("id", lead_id).execute()
+            )
+            await asyncio.to_thread(
+                lambda: supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute()
+            )
+            return
+
+        # 3. Despachar agente explícitamente
+        try:
+            await lkapi.agent_dispatch.create_dispatch(
+                lk_api.CreateAgentDispatchRequest(
+                    room_name=room_name,
+                    agent_name=agent_name_dispatch,
+                )
+            )
+            logger.info(f"🚀 [Motor] Agente {agent_name_dispatch} despachado a {room_name}")
+        except Exception as dispatch_err:
+            # No es fatal: el auto-dispatch de LiveKit actúa como fallback
+            logger.warning(f"⚠️ [Motor] Dispatch explícito fallido (fallback auto-dispatch): {dispatch_err}")
+
+
+async def _process_campaign_batch(campaign: dict) -> int:
+    """
+    Para una campaña dada, obtiene todos los leads disponibles y los despacha
+    en paralelo respetando el semáforo por empresa.
+    Retorna el número de leads procesados.
+    """
+    campaign_id = campaign["id"]
+    now_iso = datetime.utcnow().isoformat()
+
+    try:
+        leads_res = await asyncio.to_thread(
+            lambda: supabase.table("campaign_leads")
+                .select("*")
+                .eq("campaign_id", campaign_id)
+                .eq("status", "pending")
+                .or_(f"next_retry_at.is.null,next_retry_at.lte.{now_iso}")
+                .execute()
+        )
+    except Exception as e:
+        logger.error(f"[Motor] Error leyendo leads de campaña {campaign_id}: {e}")
+        return 0
+
+    leads = leads_res.data
+    if not leads:
+        return 0
+
+    logger.info(f"📋 [Motor] Campaña {campaign_id}: {len(leads)} leads disponibles para despacho")
+
+    # Despachar todos los leads en paralelo (el semáforo limita la concurrencia real)
+    await asyncio.gather(*[_dispatch_single_lead(lead, campaign) for lead in leads])
+    return len(leads)
+
+
+async def _check_campaign_completion(campaign_id: int) -> bool:
+    """Retorna True si no quedan leads en estado pendiente/calling."""
+    try:
+        res = await asyncio.to_thread(
+            lambda: supabase.table("campaign_leads")
+                .select("id")
+                .eq("campaign_id", campaign_id)
+                .in_("status", ["pending", "calling"])
+                .limit(1)
+                .execute()
+        )
+        return len(res.data) == 0
+    except Exception:
+        return False
+
+
+async def campaign_scheduler_loop():
+    """
+    Loop principal del motor de campañas. Se ejecuta como background task
+    en el arranque de la aplicación.
+
+    Cada POLL_INTERVAL segundos:
+      1. Lee todas las campañas en estado 'active' o 'running'.
+      2. Para cada campaña, despacha los leads disponibles.
+      3. Si una campaña ya no tiene leads pendientes, la marca como 'completed'.
+    """
+    POLL_INTERVAL = int(os.getenv("CAMPAIGN_POLL_INTERVAL_SECONDS", "30"))
+    logger.info(f"🔄 [Scheduler] Motor de campañas iniciado (poll cada {POLL_INTERVAL}s)")
+
+    while True:
+        try:
+            active_campaigns = await asyncio.to_thread(
+                lambda: supabase.table("campaigns")
+                    .select("*")
+                    .in_("status", ["active", "running"])
+                    .execute()
+            )
+
+            campaigns = active_campaigns.data
+            if campaigns:
+                logger.info(f"[Scheduler] {len(campaigns)} campañas activas encontradas.")
+
+                # Procesar todas las campañas concurrentemente
+                results = await asyncio.gather(*[
+                    _process_campaign_batch(camp) for camp in campaigns
+                ], return_exceptions=True)
+
+                # Post-procesado: marcar campañas terminadas
+                for camp, result in zip(campaigns, results):
+                    if isinstance(result, Exception):
+                        logger.error(f"[Scheduler] Error procesando campaña {camp['id']}: {result}")
+                        continue
+                    # Si no se despachó ningún lead, comprobar si la campaña está completa
+                    if result == 0:
+                        is_done = await _check_campaign_completion(camp["id"])
+                        if is_done:
+                            await asyncio.to_thread(
+                                lambda: supabase.table("campaigns")
+                                    .update({"status": "completed"})
+                                    .eq("id", camp["id"])
+                                    .execute()
+                            )
+                            logger.info(f"✅ [Scheduler] Campaña {camp['id']} completada.")
+
+        except Exception as e:
+            logger.error(f"❌ [Scheduler] Error en loop principal: {e}")
+
+        await asyncio.sleep(POLL_INTERVAL)
+
+
+# ──────────────────────────────────────────────
+# Endpoint de arranque manual de campaña (UI)
+# ──────────────────────────────────────────────
+
+@router.post("/campaigns/{campaign_id}/start")
+async def start_campaign(campaign_id: int):
+    """Marca la campaña como 'active' para que el scheduler la procese."""
+    if not supabase: return {"error": "No DB"}
+    try:
+        res = supabase.table("campaigns").select("*").eq("id", campaign_id).execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Campaña no encontrada")
+        supabase.table("campaigns").update({"status": "active"}).eq("id", campaign_id).execute()
+        return {"status": "ok", "message": "Campaña marcada como activa. El scheduler la procesará en el próximo ciclo."}
+    except Exception as e:
+        logger.error(f"Error al iniciar campaña: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ──────────────────────────────────────────────
+# Webhook legacy (compatibilidad con n8n antiguo)
+# ──────────────────────────────────────────────
 
 class CallResultWebhook(BaseModel):
     lead_id: int
@@ -464,26 +545,17 @@ class CallResultWebhook(BaseModel):
 
 @router.post("/campaigns/webhook/call-result")
 async def receive_call_result(result: CallResultWebhook):
-    """Recibe los resultados finales de n8n para actualizar el lead."""
-    logger.info(f"📥 [Webhook] Recibido resultado para lead {result.lead_id}: {result.status}")
-    
+    """Recibe resultados de n8n para actualizar el lead (compatibilidad legacy)."""
+    logger.info(f"📥 [Webhook-legacy] Resultado para lead {result.lead_id}: {result.status}")
     try:
-        # 1. Actualizar el lead
-        # Mapeamos 'completed' a 'completed' para consistencia con el frontend
         lead_update = {
             "status": result.status,
-            "transcription": result.transcription,
-            "seconds_used": result.duration, # Usamos seconds_used por consistencia con encuestas
             "error_msg": None if result.status in ("completed", "completada") else f"Incidencia: {result.status}"
         }
-        
-        await asyncio.to_thread(lambda: supabase.table("campaign_leads")
-            .update(lead_update)
-            .eq("id", result.lead_id)
-            .execute())
-        
-        return {"status": "ok", "message": "Lead actualizado correctamente"}
+        await asyncio.to_thread(
+            lambda: supabase.table("campaign_leads").update(lead_update).eq("id", result.lead_id).execute()
+        )
+        return {"status": "ok"}
     except Exception as e:
-        logger.error(f"❌ [Webhook] Error procesando resultado de llamada: {e}")
+        logger.error(f"❌ [Webhook-legacy] Error: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
-

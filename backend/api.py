@@ -33,7 +33,7 @@ load_dotenv()
 from services.supabase_service import supabase, get_ui_cache
 from services.livekit_service import lkapi
 
-app = FastAPI(title="Ausarta Voice Agent API", version="1.0.0")
+app = FastAPI(title="Ausarta Voice Agent API", version="2.0.0")
 executor = ThreadPoolExecutor(max_workers=20)
 
 # CORS
@@ -49,17 +49,18 @@ from routers.logs import router as logs_router
 app.include_router(logs_router)
 
 from models.schemas import (
-    VoiceAgentCreate, VoiceAgentUpdate, CampaignCreate, CampaignLeadModel, 
-    CampaignModel, LlmConfig, EncuestaData, CallEndRequest, AIPromptRequest, 
+    VoiceAgentCreate, VoiceAgentUpdate, CampaignCreate, CampaignLeadModel,
+    CampaignModel, LlmConfig, EncuestaData, CallEndRequest, AIPromptRequest,
     AssistantChatRequest, AssistantToolResponse
 )
 
 
-# --- ENDPOINTS ---
+# --- ENDPOINTS BASE ---
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "service": "Ausarta Backend", "database": "Supabase"}
+    return {"status": "ok", "service": "Ausarta Backend v2", "database": "Supabase"}
+
 
 from routers.dashboard import router as dashboard_router
 from routers.settings import router as settings_router
@@ -74,6 +75,7 @@ app.include_router(agents_router)
 from routers.telephony import router as telephony_router
 app.include_router(telephony_router)
 
+
 # --- CAMPAIGN MANAGEMENT ---
 
 from routers.admin import router as admin_router
@@ -81,12 +83,21 @@ from routers.campaigns import router as campaigns_router
 app.include_router(admin_router)
 app.include_router(campaigns_router)
 
-@app.on_event("startup")
-async def startup_event():
-    print("🌅 Iniciando API (Supabase Integration)...")
-    # Background worker stopped - moved entirely to n8n logic
+
+# --- N8N PROXY + ASSISTANT ---
 
 from routers.n8n_proxy import router as n8n_proxy_router
 from routers.assistant import router as assistant_router
 app.include_router(n8n_proxy_router)
 app.include_router(assistant_router)
+
+
+# --- LIFECYCLE: Arrancar el motor de campañas al iniciar ---
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("🌅 Iniciando API Ausarta v2 (Motor asíncrono de campañas activo)...")
+    # Importar aquí para evitar importación circular durante la carga del módulo
+    from routers.campaigns import campaign_scheduler_loop
+    asyncio.create_task(campaign_scheduler_loop())
+    logger.info("✅ Scheduler de campañas arrancado como background task.")
