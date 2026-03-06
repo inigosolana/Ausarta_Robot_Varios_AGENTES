@@ -348,12 +348,9 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
     agent_name_dispatch = os.getenv("AGENT_NAME_DISPATCH", "default_agent")
     sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
 
-    # Verificación de lock: si esta empresa ya tiene una llamada activa, salir
-    if empresa_id in _empresas_en_llamada:
-        logger.info(f"[Drip] Empresa {empresa_id} ya tiene llamada activa. Lead {lead_id} pospuesto.")
-        return
-
-    _empresas_en_llamada.add(empresa_id)
+    # El lock ( _empresas_en_llamada.add(empresa_id) ) ya ha sido adquirido síncronamente
+    # en el campaign_scheduler_loop antes de llamar a esta función para evitar race conditions.
+    
     encuesta_id = None
 
     try:
@@ -567,6 +564,12 @@ async def campaign_scheduler_loop():
                     continue
 
                 lead = leads_res.data[0]
+                
+                # BLOQUEO SÍNCRONO INMEDIATO:
+                # Evita que la siguiente campaña de esta misma empresa
+                # lance una llamada en este mismo ciclo del bucle.
+                _empresas_en_llamada.add(empresa_id)
+                
                 # Lanzar como task independiente: el scheduler no espera, sigue con las demás empresas
                 asyncio.create_task(_dispatch_single_lead_drip(lead, camp))
 
