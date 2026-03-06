@@ -54,3 +54,18 @@ backend/venv/
 # Agent Settings & Skills
 .agent/
 .agents/
+
+# Virtual environments
+test_env/
+venv/
+.venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+backend/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
