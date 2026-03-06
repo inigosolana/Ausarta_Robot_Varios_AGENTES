@@ -337,17 +337,23 @@ const UserManagementView: React.FC = () => {
         if (!currentProfile) return false;
         if (currentProfile.id === targetUser.id) return false; // Can't manage self
 
-        // AUSARTA PROTECTION: Admins of Ausarta (even if platform owners) 
-        // CANNOT manage users of the Ausarta company (ID 1/Nombre Ausarta)
-        if (targetUser.empresas?.nombre === 'Ausarta' && currentProfile.role === 'admin') {
-            return false;
-        }
-
+        // 1. Superadmin has full control
         if (currentProfile.role === 'superadmin') return true;
 
-        // Admins can manage regular users of their own company
-        if (currentProfile.role === 'admin' && targetUser.role === 'user') {
-            return currentProfile.empresa_id === targetUser.empresa_id;
+        // 2. Ausarta Admin Case (Platform Owner)
+        if (currentProfile.role === 'admin' && currentProfile.empresas?.nombre === 'Ausarta') {
+            // PROTECTION: Cannot manage other Ausarta Admins or Superadmins
+            if (targetUser.empresas?.nombre === 'Ausarta' && (targetUser.role === 'admin' || targetUser.role === 'superadmin')) {
+                return false;
+            }
+            // Can manage ALL other users and admins from ANY company
+            return true;
+        }
+
+        // 3. Regular Company Admin Case
+        if (currentProfile.role === 'admin') {
+            // Can only manage regular users of their own company
+            return currentProfile.empresa_id === targetUser.empresa_id && targetUser.role === 'user';
         }
 
         return false;
