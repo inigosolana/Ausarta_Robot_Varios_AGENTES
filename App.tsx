@@ -366,22 +366,24 @@ const App: React.FC = () => {
 
                 {/* Role Switcher */}
                 <div className="flex gap-1">
-                  {(['superadmin', 'admin', 'user'] as const).map((r) => (
-                    <button
-                      key={r}
-                      title={r}
-                      onClick={() => {
-                        setSpoofedRole(r === realProfile?.role ? null : r);
-                        toast.success(`${t('Simulating')} ${r}`);
-                      }}
-                      className={`text-[9px] flex-1 py-1 rounded transition-all font-bold ${profile?.role === r
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'bg-white dark:bg-gray-800 text-gray-500 hover:bg-indigo-50'
-                        }`}
-                    >
-                      {r.charAt(0).toUpperCase()}
-                    </button>
-                  ))}
+                  {(['superadmin', 'admin', 'user'] as const)
+                    .filter(r => realProfile?.role === 'superadmin' || isRootUser || r !== 'superadmin')
+                    .map((r) => (
+                      <button
+                        key={r}
+                        title={r}
+                        onClick={() => {
+                          setSpoofedRole(r === realProfile?.role ? null : r);
+                          toast.success(`${t('Simulating')} ${r}`);
+                        }}
+                        className={`text-[9px] flex-1 py-1 rounded transition-all font-bold ${profile?.role === r
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'bg-white dark:bg-gray-800 text-gray-500 hover:bg-indigo-50'
+                          }`}
+                      >
+                        {r.charAt(0).toUpperCase()}
+                      </button>
+                    ))}
                 </div>
 
                 {/* Company Switcher */}

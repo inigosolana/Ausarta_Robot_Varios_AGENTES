@@ -190,6 +190,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // Default: modules must be enabled for the company
         // EXCEPT if there's an explicit manual permission override (like premium voice)
         const manualPerm = permissions.find(p => p.module === module);
+
+        // Strict restriction for 'Usage' module: Only for platform owners (Ausarta Admin/Super)
+        if (module === 'usage') {
+            return profile.role === 'superadmin' || (profile.role === 'admin' && profile.empresas?.nombre === 'Ausarta');
+        }
+
         if (manualPerm) return manualPerm.enabled;
 
         return isModuleEnabled;
