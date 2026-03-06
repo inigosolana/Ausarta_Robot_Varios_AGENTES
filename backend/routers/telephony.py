@@ -306,7 +306,10 @@ async def make_outbound_call(request: dict):
             encuesta_id = random.randint(1000, 9999)
 
         agent_name_dispatch = os.getenv("AGENT_NAME_DISPATCH", "default_agent")
-        room_name = f"{agent_name_dispatch}_encuesta_{encuesta_id}"
+        # Formato aislado: empresa + campaña + encuesta_id
+        # Para llamadas ad-hoc (sin campaña), usamos camp_0 como placeholder
+        camp_id_str = str(campaign_id) if campaign_id else "0"
+        room_name = f"empresa_{emp_id or 0}_camp_{camp_id_str}_call_{encuesta_id}"
         sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
 
         # Prevención de doble despacho
@@ -408,19 +411,37 @@ async def livekit_webhook(request: Request):
 
 
 def _extract_encuesta_id_from_room(room_name: str) -> int | None:
-    """Extrae el encuesta_id del nombre de sala. Retorna None si no se puede."""
+    """
+    Extrae el encuesta_id del nombre de sala. Soporta dos formatos:
+      - Nuevo:   empresa_{id}_camp_{id}_call_{encuesta_id}
+      - Legacy:  {prefix}_encuesta_{encuesta_id}  o  encuesta_{encuesta_id}
+    Retorna None si no se puede extraer.
+    """
     try:
+        # Formato nuevo: empresa_N_camp_N_call_N
+        if "call_" in room_name:
+            after_call = room_name.split("call_")[-1]
+            candidate = after_call.split("_")[0]
+            if candidate.isdigit():
+                return int(candidate)
+
+        # Formato legacy: ..._encuesta_{id}
+        if "encuesta_" in room_name:
+            after_enc = room_name.split("encuesta_")[-1]
+            candidate = after_enc.split("_")[0]
+            if candidate.isdigit():
+                return int(candidate)
+
+        # Fallback: el último segmento numérico
         parts = room_name.split("_")
-        # El ID siempre es el último segmento numérico
-        candidate = parts[-1]
-        if candidate.isdigit():
-            return int(candidate)
-        # Si no, probamos el penúltimo (por si el formato varía)
-        if len(parts) >= 2 and parts[-2].isdigit():
-            return int(parts[-2])
+        for segment in reversed(parts):
+            if segment.isdigit():
+                return int(segment)
+
         return None
     except Exception:
         return None
+
 
 
 async def _handle_room_finished(encuesta_id: int, room_name: str):

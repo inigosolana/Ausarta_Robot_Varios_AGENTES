@@ -1,13 +1,15 @@
 """
-Motor de Campañas Asíncrono y Multitenant.
+Motor de Campañas — Goteo Controlado (Drip) Multitenant.
 
 Arquitectura:
 - Un único scheduler loop corre como background task en el arranque de la app.
-- Por cada campaña activa, el scheduler despacha las llamadas en paralelo
-  usando asyncio.gather(), respetando un semáforo por empresa para no saturar
-  los canales SIP de un solo cliente.
-- El estado de las llamadas ya NO se obtiene por polling. Se actualiza cuando
-  el webhook de LiveKit notifica que la sala se cerró (/api/livekit/webhook).
+- GOTEO ESTRICTO: nunca se lanza más de una llamada simultánea por empresa.
+  El sistema mantiene un 'drip lock' por empresa_id. Mientras una empresa
+  tiene una llamada activa (incluyendo el cooldown post-llamada), sus otros
+  leads esperan al siguiente ciclo del scheduler.
+- Diferentes empresas sí procesan sus leads de forma independiente y concurrente.
+- El estado de las llamadas se actualiza vía webhook de LiveKit (/api/livekit/webhook).
+- Salas con naming aislado: empresa_{id}_camp_{camp_id}_call_{enc_id}.
 """
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
@@ -19,6 +21,7 @@ from pydantic import BaseModel
 from models.schemas import CampaignModel, CampaignLeadModel
 from datetime import datetime, timezone, timedelta
 import asyncio
+import random
 import os
 import logging
 
@@ -27,17 +30,16 @@ logger = logging.getLogger("api-backend")
 router = APIRouter(prefix="/api", tags=["campaigns"])
 
 # ──────────────────────────────────────────────
-# CONTROL DE CONCURRENCIA MULTITENANT
-# Semáforos por empresa: máximo N llamadas simultáneas por cliente.
+# DRIP LOCK MULTITENANT
+#
+# Set de empresa_ids que tienen una llamada activa (incluido cooldown).
+# Garantiza que una empresa nunca tenga más de una llamada SIP a la vez.
 # ──────────────────────────────────────────────
-MAX_CONCURRENT_CALLS_PER_COMPANY = int(os.getenv("MAX_CONCURRENT_CALLS_PER_COMPANY", "3"))
-_company_semaphores: dict[int, asyncio.Semaphore] = {}
+_empresas_en_llamada: set[int] = set()
 
-def _get_company_semaphore(empresa_id: int) -> asyncio.Semaphore:
-    """Devuelve (y crea si no existe) el semáforo de concurrencia para una empresa."""
-    if empresa_id not in _company_semaphores:
-        _company_semaphores[empresa_id] = asyncio.Semaphore(MAX_CONCURRENT_CALLS_PER_COMPANY)
-    return _company_semaphores[empresa_id]
+# Rango de cooldown entre llamadas de la misma empresa (segundos)
+_COOLDOWN_MIN = int(os.getenv("DRIP_COOLDOWN_MIN_SECONDS", "120"))  # 2 minutos
+_COOLDOWN_MAX = int(os.getenv("DRIP_COOLDOWN_MAX_SECONDS", "180"))  # 3 minutos
 
 
 # ──────────────────────────────────────────────
@@ -313,29 +315,39 @@ async def stop_campaign(campaign_id: int):
 
 
 # ──────────────────────────────────────────────
-# MOTOR ASÍNCRONO DE CAMPAÑAS
+# MOTOR DE CAMPAÑAS — GOTEO CONTROLADO (DRIP)
 # ──────────────────────────────────────────────
 
-async def _dispatch_single_lead(lead: dict, campaign: dict) -> None:
+async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
     """
-    Lanza una llamada SIP para un único lead y registra la encuesta en BD.
-    Esta función se ejecuta concurrentemente vía asyncio.gather() respetando
-    el semáforo de la empresa.
+    Lanza UNA llamada SIP para un lead y gestiona el drip lock de la empresa.
 
-    El estado post-llamada se actualiza vía webhook de LiveKit, NO aquí.
+    Flujo:
+      1. Adquiere el drip lock de la empresa (exclusión mutua estricta).
+      2. Crea encuesta en BD, asigna nombre de sala aislado, lanza SIP + dispatch agente.
+      3. Hace polling ligero (cada 15s) esperando que el estado en BD sea terminal.
+      4. Una vez terminal (o timeout de 5min), aplica cooldown de 120-180s antes
+         de liberar el lock, para respetar el goteo estricto.
     """
     lead_id = lead["id"]
     phone = lead["phone_number"]
     empresa_id = campaign.get("empresa_id") or 0
+    campaign_id = campaign["id"]
     agent_name_dispatch = os.getenv("AGENT_NAME_DISPATCH", "default_agent")
     sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
 
-    sem = _get_company_semaphore(empresa_id)
-    async with sem:
-        logger.info(f"📞 [Motor] Lanzando lead {lead_id} ({phone}) para campaña {campaign['id']}")
+    # Verificación de lock: si esta empresa ya tiene una llamada activa, salir
+    if empresa_id in _empresas_en_llamada:
+        logger.info(f"[Drip] Empresa {empresa_id} ya tiene llamada activa. Lead {lead_id} pospuesto.")
+        return
+
+    _empresas_en_llamada.add(empresa_id)
+    encuesta_id = None
+
+    try:
+        logger.info(f"☎️  [Drip] Iniciando lead {lead_id} ({phone}) → empresa={empresa_id} camp={campaign_id}")
 
         # 1. Crear encuesta en BD y vincular al lead
-        encuesta_id = None
         try:
             enc_res = await asyncio.to_thread(
                 lambda: supabase.table("encuestas").insert({
@@ -345,13 +357,12 @@ async def _dispatch_single_lead(lead: dict, campaign: dict) -> None:
                     "status": "initiated",
                     "completada": 0,
                     "agent_id": campaign.get("agent_id"),
-                    "empresa_id": campaign.get("empresa_id"),
-                    "campaign_id": campaign["id"],
+                    "empresa_id": empresa_id,
+                    "campaign_id": campaign_id,
                     "campaign_name": campaign.get("name"),
                 }).execute()
             )
             encuesta_id = enc_res.data[0]["id"]
-
             await asyncio.to_thread(
                 lambda: supabase.table("campaign_leads").update({
                     "call_id": encuesta_id,
@@ -360,22 +371,23 @@ async def _dispatch_single_lead(lead: dict, campaign: dict) -> None:
                 }).eq("id", lead_id).execute()
             )
         except Exception as e:
-            logger.error(f"❌ [Motor] Error creando encuesta para lead {lead_id}: {e}")
+            logger.error(f"❌ [Drip] Error creando encuesta para lead {lead_id}: {e}")
             await asyncio.to_thread(
-                lambda: supabase.table("campaign_leads").update({
-                    "status": "failed", "error_msg": str(e)
-                }).eq("id", lead_id).execute()
+                lambda: supabase.table("campaign_leads").update(
+                    {"status": "failed", "error_msg": str(e)}
+                ).eq("id", lead_id).execute()
             )
             return
 
-        room_name = f"{agent_name_dispatch}_encuesta_{encuesta_id}"
+        # 2. Nombre de sala aislado por empresa + campaña + encuesta
+        room_name = f"empresa_{empresa_id}_camp_{campaign_id}_call_{encuesta_id}"
 
-        # 2. Crear sala y lanzar SIP
         try:
             await lkapi.room.create_room(lk_api.CreateRoomRequest(name=room_name))
         except Exception as room_err:
-            logger.warning(f"⚠️ [Motor] Aviso al crear sala {room_name}: {room_err}")
+            logger.warning(f"⚠️ [Drip] Aviso creando sala {room_name}: {room_err}")
 
+        # 3. Lanzar SIP
         try:
             await lkapi.sip.create_sip_participant(lk_api.CreateSIPParticipantRequest(
                 sip_trunk_id=sip_trunk_id,
@@ -384,20 +396,20 @@ async def _dispatch_single_lead(lead: dict, campaign: dict) -> None:
                 participant_identity=f"user_{phone}_{encuesta_id}",
                 participant_name="Cliente",
             ))
-            logger.info(f"☎️ [Motor] SIP iniciado: {phone} → sala {room_name}")
+            logger.info(f"☎️ [Drip] SIP lanzado: {phone} → {room_name}")
         except Exception as sip_err:
-            logger.error(f"❌ [Motor] Error SIP para lead {lead_id}: {sip_err}")
+            logger.error(f"❌ [Drip] Error SIP lead {lead_id}: {sip_err}")
             await asyncio.to_thread(
-                lambda: supabase.table("campaign_leads").update({
-                    "status": "failed", "error_msg": str(sip_err)
-                }).eq("id", lead_id).execute()
+                lambda: supabase.table("campaign_leads").update(
+                    {"status": "failed", "error_msg": str(sip_err)}
+                ).eq("id", lead_id).execute()
             )
             await asyncio.to_thread(
                 lambda: supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute()
             )
             return
 
-        # 3. Despachar agente explícitamente
+        # 4. Dispatch explícito del agente
         try:
             await lkapi.agent_dispatch.create_dispatch(
                 lk_api.CreateAgentDispatchRequest(
@@ -405,43 +417,38 @@ async def _dispatch_single_lead(lead: dict, campaign: dict) -> None:
                     agent_name=agent_name_dispatch,
                 )
             )
-            logger.info(f"🚀 [Motor] Agente {agent_name_dispatch} despachado a {room_name}")
+            logger.info(f"🚀 [Drip] Agente '{agent_name_dispatch}' despachado a {room_name}")
         except Exception as dispatch_err:
-            # No es fatal: el auto-dispatch de LiveKit actúa como fallback
-            logger.warning(f"⚠️ [Motor] Dispatch explícito fallido (fallback auto-dispatch): {dispatch_err}")
+            logger.warning(f"⚠️ [Drip] Dispatch explícito fallido (auto-dispatch como fallback): {dispatch_err}")
 
+        # 5. Polling ligero hasta status terminal (el webhook también actuará en paralelo)
+        TERMINAL = {"completed", "failed", "unreached", "incomplete", "rejected_opt_out"}
+        MAX_WAIT_SECONDS = 300   # 5 minutos como techo
+        POLL_INTERVAL_S  = 15   # chequeamos cada 15s
+        waited = 0
+        while waited < MAX_WAIT_SECONDS:
+            await asyncio.sleep(POLL_INTERVAL_S)
+            waited += POLL_INTERVAL_S
+            try:
+                enc_check = await asyncio.to_thread(
+                    lambda: supabase.table("encuestas").select("status")
+                        .eq("id", encuesta_id).limit(1).execute()
+                )
+                current = enc_check.data[0].get("status") if enc_check.data else None
+                if current in TERMINAL:
+                    logger.info(f"✅ [Drip] Encuesta {encuesta_id} terminal ('{current}') tras {waited}s de espera")
+                    break
+            except Exception as poll_err:
+                logger.warning(f"[Drip] Error en poll de estado encuesta {encuesta_id}: {poll_err}")
 
-async def _process_campaign_batch(campaign: dict) -> int:
-    """
-    Para una campaña dada, obtiene todos los leads disponibles y los despacha
-    en paralelo respetando el semáforo por empresa.
-    Retorna el número de leads procesados.
-    """
-    campaign_id = campaign["id"]
-    now_iso = datetime.utcnow().isoformat()
+        # 6. Cooldown obligatorio antes de liberar el lock
+        cooldown = random.randint(_COOLDOWN_MIN, _COOLDOWN_MAX)
+        logger.info(f"⏳ [Drip] Cooldown {cooldown}s para empresa {empresa_id} antes del siguiente lead...")
+        await asyncio.sleep(cooldown)
 
-    try:
-        leads_res = await asyncio.to_thread(
-            lambda: supabase.table("campaign_leads")
-                .select("*")
-                .eq("campaign_id", campaign_id)
-                .eq("status", "pending")
-                .or_(f"next_retry_at.is.null,next_retry_at.lte.{now_iso}")
-                .execute()
-        )
-    except Exception as e:
-        logger.error(f"[Motor] Error leyendo leads de campaña {campaign_id}: {e}")
-        return 0
-
-    leads = leads_res.data
-    if not leads:
-        return 0
-
-    logger.info(f"📋 [Motor] Campaña {campaign_id}: {len(leads)} leads disponibles para despacho")
-
-    # Despachar todos los leads en paralelo (el semáforo limita la concurrencia real)
-    await asyncio.gather(*[_dispatch_single_lead(lead, campaign) for lead in leads])
-    return len(leads)
+    finally:
+        _empresas_en_llamada.discard(empresa_id)
+        logger.info(f"🔓 [Drip] Lock liberado para empresa {empresa_id}")
 
 
 async def _check_campaign_completion(campaign_id: int) -> bool:
@@ -465,53 +472,84 @@ async def campaign_scheduler_loop():
     Loop principal del motor de campañas. Se ejecuta como background task
     en el arranque de la aplicación.
 
-    Cada POLL_INTERVAL segundos:
-      1. Lee todas las campañas en estado 'active' o 'running'.
-      2. Para cada campaña, despacha los leads disponibles.
-      3. Si una campaña ya no tiene leads pendientes, la marca como 'completed'.
+    Lógica de goteo:
+      - Cada POLL_INTERVAL segundos lee campañas activas.
+      - Por cada campaña, si la empresa NO tiene lock activo, obtiene UN lead
+        y lanza _dispatch_single_lead_drip() como asyncio.create_task().
+      - Distintas empresas corren sus tareas de goteo de forma independiente.
+      - Una misma empresa nunca tiene más de una llamada activa simultánea.
     """
     POLL_INTERVAL = int(os.getenv("CAMPAIGN_POLL_INTERVAL_SECONDS", "30"))
-    logger.info(f"🔄 [Scheduler] Motor de campañas iniciado (poll cada {POLL_INTERVAL}s)")
+    logger.info(f"🔄 [Scheduler] Motor Drip iniciado (poll cada {POLL_INTERVAL}s, cooldown {_COOLDOWN_MIN}-{_COOLDOWN_MAX}s)")
 
     while True:
         try:
-            active_campaigns = await asyncio.to_thread(
+            active_res = await asyncio.to_thread(
                 lambda: supabase.table("campaigns")
                     .select("*")
                     .in_("status", ["active", "running"])
                     .execute()
             )
+            campaigns = active_res.data or []
 
-            campaigns = active_campaigns.data
             if campaigns:
-                logger.info(f"[Scheduler] {len(campaigns)} campañas activas encontradas.")
+                logger.info(f"[Scheduler] {len(campaigns)} campañas activas.")
 
-                # Procesar todas las campañas concurrentemente
-                results = await asyncio.gather(*[
-                    _process_campaign_batch(camp) for camp in campaigns
-                ], return_exceptions=True)
+            now_iso = datetime.utcnow().isoformat()
 
-                # Post-procesado: marcar campañas terminadas
-                for camp, result in zip(campaigns, results):
-                    if isinstance(result, Exception):
-                        logger.error(f"[Scheduler] Error procesando campaña {camp['id']}: {result}")
-                        continue
-                    # Si no se despachó ningún lead, comprobar si la campaña está completa
-                    if result == 0:
-                        is_done = await _check_campaign_completion(camp["id"])
-                        if is_done:
+            for camp in campaigns:
+                empresa_id = camp.get("empresa_id") or 0
+
+                # Si la empresa ya tiene un goteo en curso, no lanzamos más
+                if empresa_id in _empresas_en_llamada:
+                    logger.debug(f"[Scheduler] Empresa {empresa_id} en llamada activa, skipping campaña {camp['id']}.")
+                    continue
+
+                # Obtener el siguiente lead disponible (el más antiguo / con retry más próximo)
+                try:
+                    # Usamos variable local explícita para evitar cierre sobre 'camp' que puede mutar
+                    camp_id_local = camp["id"]
+                    leads_res = await asyncio.to_thread(
+                        lambda: supabase.table("campaign_leads")
+                            .select("*")
+                            .eq("campaign_id", camp_id_local)
+                            .eq("status", "pending")
+                            .or_(f"next_retry_at.is.null,next_retry_at.lte.{now_iso}")
+                            .order("next_retry_at", desc=False, nullsfirst=True)
+                            .limit(1)
+                            .execute()
+                    )
+                except Exception as fetch_err:
+                    logger.error(f"[Scheduler] Error leyendo leads campaña {camp['id']}: {fetch_err}")
+                    continue
+
+                if not leads_res.data:
+                    # Sin leads disponibles: comprobar si terminó la campaña
+                    is_done = await _check_campaign_completion(camp["id"])
+                    if is_done:
+                        try:
+                            camp_id_done = camp["id"]
                             await asyncio.to_thread(
                                 lambda: supabase.table("campaigns")
                                     .update({"status": "completed"})
-                                    .eq("id", camp["id"])
+                                    .eq("id", camp_id_done)
                                     .execute()
                             )
                             logger.info(f"✅ [Scheduler] Campaña {camp['id']} completada.")
+                        except Exception as done_err:
+                            logger.error(f"[Scheduler] Error marcando campaña {camp['id']} como completada: {done_err}")
+                    continue
+
+                lead = leads_res.data[0]
+                # Lanzar como task independiente: el scheduler no espera, sigue con las demás empresas
+                asyncio.create_task(_dispatch_single_lead_drip(lead, camp))
 
         except Exception as e:
             logger.error(f"❌ [Scheduler] Error en loop principal: {e}")
 
         await asyncio.sleep(POLL_INTERVAL)
+
+
 
 
 # ──────────────────────────────────────────────
