@@ -62,7 +62,7 @@
       "id": "map-profile-data",
       "name": "MapProfileData",
       "parameters": {
-        "jsCode": "const authResponse = $input.item.json;\nconst webhookBody = $('Webhook').first().json.body;\n\nreturn {\n  json: {\n    id: authResponse.id,\n    email: webhookBody.email,\n    full_name: webhookBody.full_name,\n    role: webhookBody.role || 'user',\n    empresa_id: webhookBody.empresa_id || null,\n    is_active: true\n  }\n};",
+        "jsCode": "const authResponse = .item.json;\nconst webhookBody = .first().json.body;\n\nreturn {\n  json: {\n    id: authResponse.id,\n    email: webhookBody.email,\n    full_name: webhookBody.full_name,\n    role: webhookBody.role || 'user',\n    empresa_id: webhookBody.empresa_id || null,\n    is_active: true\n  }\n};",
         "mode": "runOnceForEachItem"
       },
       "position": [
