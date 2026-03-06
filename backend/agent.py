@@ -429,7 +429,23 @@ async def entrypoint(ctx: JobContext):
                     except: pass
                 asyncio.create_task(force_hangup_room())
 
-        await finished.wait()
+        # Kill switch: si la sala no se cierra en 10 minutos, forzamos la desconexión
+        # para evitar workers zombi que consumen recursos indefinidamente.
+        CALL_TIMEOUT_SECONDS = int(os.getenv("AGENT_CALL_TIMEOUT_SECONDS", "600"))
+        try:
+            await asyncio.wait_for(finished.wait(), timeout=CALL_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.error(
+                f"🚨 [{job_id}] KILL SWITCH: Timeout de seguridad ({CALL_TIMEOUT_SECONDS}s) alcanzado. "
+                f"Forzando desconexión del worker para sala '{room_name}'."
+            )
+            try:
+                await ctx.room.disconnect()
+            except Exception as disc_err:
+                logger.warning(f"[{job_id}] Error al forzar desconexión: {disc_err}")
+            # finished.set() asegura que el bloque finally no quede bloqueado
+            finished.set()
+
     
     except Exception as e:
         handle_error(e)
