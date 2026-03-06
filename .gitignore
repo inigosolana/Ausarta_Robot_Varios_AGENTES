@@ -55,17 +55,12 @@ backend/venv/
 .agent/
 .agents/
 
-# Virtual environments
+# Entornos virtuales
 test_env/
 venv/
-.venv/
 env/
-ENV/
-
-# Python cache
+# Dependencias
+node_modules/
 __pycache__/
-backend/__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
+# Configuraciones locales y skills del agente
+.agent/
