@@ -417,16 +417,31 @@ async def entrypoint(ctx: JobContext):
             stt_plugin = deepgram.STT(model="nova-3", language=language)
             logger.info("🎙️ Usando STT: Deepgram Nova-3")
 
+        from livekit.agents.llm.fallback_adapter import FallbackAdapter
+
+        # LLM Principal (Groq)
+        main_llm = openai.LLM(
+            model=llm_model, 
+            base_url="https://api.groq.com/openai/v1",
+            api_key=os.getenv("GROQ_API_KEY"),
+            temperature=0.1
+        )
+        
+        # LLM Secundario (OpenAI - gpt-4o-mini)
+        fallback_llm = openai.LLM(
+            model="gpt-4o-mini",
+            api_key=os.getenv("OPENAI_API_KEY"),
+            temperature=0.1
+        )
+
+        # Usar FallbackAdapter transparente al cliente
+        final_llm = FallbackAdapter([main_llm, fallback_llm], attempt_timeout=10.0)
+
         # --- Crear sesión del agente (AgentSession, compatible con versión instalada) ---
         session = AgentSession(
             vad=vad_model,
             stt=stt_plugin,
-            llm=openai.LLM(
-                model=llm_model, 
-                base_url="https://api.groq.com/openai/v1",
-                api_key=os.getenv("GROQ_API_KEY"),
-                temperature=0.1
-            ),
+            llm=final_llm,
             tts=cartesia.TTS(
                 model="sonic-multilingual",
                 voice=voice_id,

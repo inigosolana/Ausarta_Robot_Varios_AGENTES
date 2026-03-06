@@ -515,6 +515,13 @@ async def campaign_scheduler_loop():
                 logger.info(f"[Scheduler] {len(campaigns)} campañas activas.")
 
             now_iso = datetime.utcnow().isoformat()
+            
+            MAX_CONCURRENT_CALLS = int(os.getenv("MAX_CONCURRENT_CALLS", "10"))
+            
+            if len(_empresas_en_llamada) >= MAX_CONCURRENT_CALLS:
+                logger.warning(f"Límite global de canales SIP alcanzado ({MAX_CONCURRENT_CALLS}). Esperando...")
+                await asyncio.sleep(POLL_INTERVAL)
+                continue
 
             for camp in campaigns:
                 empresa_id = camp.get("empresa_id") or 0

@@ -92,14 +92,8 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
     current_db_status = (curr_data.get("status") or "")
 
     # Si llegaron datos pero sin status explícito:
-    # forzamos 'incomplete' siempre que el estado actual no sea terminal.
-    # CORRECCIÓN DEL BUG: normalized_status se actualiza aquí para que el bloque
-    # de propagación a campaign_leads lo vea correctamente.
-    if not normalized_status:
-        if current_db_status not in _TERMINAL_STATUSES:
-            normalized_status = "incomplete"
-            update_data["status"] = "incomplete"
-    else:
+    # Mantenemos el que haya calculado, si no se queda sin tocar.
+    if normalized_status:
         update_data["status"] = normalized_status
         if normalized_status == "completed":
             update_data["completada"] = 1
@@ -339,7 +333,7 @@ async def make_outbound_call(request: dict):
         try:
             import json
             metadata_str = json.dumps({
-                "empresa_id": int(empresa_id),
+                "empresa_id": int(emp_id or 0),
                 "survey_id": int(encuesta_id)
             })
             await lkapi.agent_dispatch.create_dispatch(
