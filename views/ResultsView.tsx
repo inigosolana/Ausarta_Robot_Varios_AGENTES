@@ -213,12 +213,12 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     return (
         <div className="space-y-6">
             {!hideHeader && (
-                <header className="flex justify-between items-center">
-                    <div>
-                        <h1 className="text-2xl font-bold text-gray-900">{title || t('Survey Results')}</h1>
-                        <p className="text-gray-500 text-sm mt-1">{t('Detailed view of all agent interactions')}</p>
+                <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-1">
+                        <h1 className="text-xl md:text-2xl font-bold text-gray-900">{title || t('Survey Results')}</h1>
+                        <p className="text-gray-500 text-xs md:text-sm">{t('Detailed view of all agent interactions')}</p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                         <button
                             onClick={loadResults}
                             className="p-2 bg-white border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"

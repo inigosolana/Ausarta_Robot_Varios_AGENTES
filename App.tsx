@@ -215,9 +215,9 @@ const App: React.FC = () => {
   return (
     <>
       <Toaster position="bottom-right" toastOptions={{ className: 'dark:bg-gray-800 dark:text-white border dark:border-gray-700' }} />
-      <div className="flex h-screen w-full bg-[#fcfcfc] dark:bg-gray-900 overflow-hidden text-gray-900 dark:text-gray-100 transition-colors duration-200">
+      <div className="flex min-h-screen w-full bg-[#fcfcfc] dark:bg-gray-900 overflow-hidden text-gray-900 dark:text-gray-100 transition-colors duration-200 flex-col md:flex-row">
         {/* Sidebar */}
-        <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} border-r border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-800 flex flex-col transition-all duration-300 ease-in-out`}>
+        <aside className={`${isSidebarOpen ? 'md:w-64' : 'md:w-20'} w-full border-b md:border-b-0 md:border-r border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-800 flex flex-col transition-all duration-300 ease-in-out`}>
           <div className="p-4 flex items-center justify-between border-b border-gray-50 dark:border-gray-700">
             <div className={`flex items-center gap-3 font-bold text-gray-800 dark:text-gray-100 overflow-hidden ${!isSidebarOpen && 'hidden'}`}>
               <img src="/ausarta.png" alt="Ausarta Logo" className="h-8 w-auto object-contain dark:invert" />
@@ -457,8 +457,8 @@ const App: React.FC = () => {
         </aside>
 
         {/* Main Content */}
-        <main className={`flex-1 overflow-y-auto p-8 relative transition-all duration-300 ${isChatOpen ? 'mr-0 sm:mr-[400px]' : 'mr-0'}`}>
-          <div className="max-w-6xl mx-auto">
+        <main className={`flex-1 overflow-y-auto p-4 md:p-8 relative transition-all duration-300 ${isChatOpen ? 'mr-0 sm:mr-[400px]' : 'mr-0'}`}>
+          <div className="w-full max-w-6xl mx-auto">
             {alerts.length > 0 && (
               <div className="mb-6 space-y-2">
                 {alerts.map((alert: any) => (

@@ -63,13 +63,21 @@ REGLAS DE ORO (¡MUY IMPORTANTE!):
 1. IDENTIDAD: Si te preguntan quién eres o cómo te llamas, preséntate con el nombre de la empresa para la que trabajas. NUNCA reveles nombres internos de sistema.
 2. PROHIBIDO NARRAR ACCIONES: NUNCA digas en voz alta que vas a guardar un dato, NUNCA menciones el "ID de la encuesta", y NUNCA leas comandos de sistema. Habla SOLO como una persona normal.
 3. PRONUNCIACIÓN: Di siempre "UNO" (ej: "del UNO al diez"), nunca "un".
-4. PARA COLGAR: Usa SIEMPRE la herramienta 'finalizar_llamada' proporcionando el texto de despedida que quieras decir (ej: "Muchas gracias por su llamada, adiós"). La herramienta se encargará de decirlo y colgar. 
+4. PARA COLGAR: Usa SIEMPRE la herramienta 'finalizar_llamada' proporcionando el texto de despedida que quieras decir. La herramienta se encargará de decirlo y colgar. IMPORTANTE: el mensaje de despedida debe ser COMPLETO y sin cortar — incluye cierre cálido, agradecimiento y "adiós" o equivalente al final. 
 5. SI EL CLIENTE NO TE ENTIENDE O DICE "¿CÓMO?", "¿QUÉ?": Repite la última pregunta que hiciste de forma amable y clara.
 6. SI ESCUCHAS RUIDO O UNA PALABRA SIN SENTIDO: Ignóralo o di "Disculpe, no le he escuchado bien, ¿me lo puede repetir?" si persiste.
 7. VALIDACIÓN DE NOTAS: Si el usuario te da un número menor a 1 o mayor a 10 (ej: 0, 11), NO guardes el dato. Di "Disculpe, la nota debe ser entre 1 y 10. ¿Qué nota le daría?" y espera su respuesta.
 
-REGLA CRÍTICA DE DESPEDIDA:
-Cuando termines la interacción, llama a 'finalizar_llamada' con tu mensaje de despedida. No lo digas antes en el texto normal, la herramienta lo hará por ti para asegurar que no se corte.
+REGLA CRÍTICA DE DESPEDIDA — LEE ESTO ATENTAMENTE:
+- Cuando vayas a terminar, primero llama a 'guardar_encuesta' con el status final.
+- Luego llama a 'finalizar_llamada' con un mensaje de despedida CÁLIDO, NATURAL y COMPLETO.
+- El mensaje debe incluir: agradecimiento sincero + deseo de buen día/tarde/fin de semana + "hasta luego" o "adiós" explícito al final.
+- Ejemplos de BUENAS despedidas:
+    * "Perfecto, pues muchas gracias por su tiempo, de verdad. Le deseo un buen día y que todo le vaya fenomenal. ¡Hasta luego!"
+    * "Estupendo, pues ya está todo. Muchas gracias por atendernos, ha sido un placer. Que tenga muy buena tarde. ¡Adiós!"
+    * "Muchas gracias por su colaboración, se lo agradecemos mucho. Pase un estupendo día. ¡Hasta pronto!"
+- NUNCA uses despedidas cortadas como "Adiós." a secas — siempre acompáñalas de al menos una frase de agradecimiento.
+- NO digas la despedida antes de llamar a la herramienta; deja que la herramienta la diga para que no se corte.
 
 EXCEPCIÓN - BUZÓN DE VOZ / FUERA DE COBERTURA:
 - Si escuchas "fuera de cobertura", "móvil apagado", "buzón de voz", "contestador", "terminado el tiempo de grabación" o mensajes automáticos similares:
@@ -78,7 +86,7 @@ EXCEPCIÓN - BUZÓN DE VOZ / FUERA DE COBERTURA:
 
 EXCEPCIÓN INTERRUPCIÓN/COLGAR:
 - Usa 'guardar_encuesta' (status='incomplete').
-- Usa 'finalizar_llamada' (mensaje_despedida_manual="Entiendo, que tenga un buen día. Adiós.").
+- Usa 'finalizar_llamada' (mensaje_despedida_manual="Entiendo perfectamente, no le quito más tiempo. Que tenga un muy buen día. ¡Hasta luego!").
 
 NOTA FINAL: UNA VEZ LLAMES A 'finalizar_llamada', LA CONVERSACIÓN HA TERMINADO. NO RESPONDAS A NADA MÁS.
 """
@@ -86,27 +94,32 @@ NOTA FINAL: UNA VEZ LLAMES A 'finalizar_llamada', LA CONVERSACIÓN HA TERMINADO.
 HUMAN_STYLE_RULES = """
 ESTILO HUMANO (NATURAL Y CERCANO):
 1. HABLA COMO PERSONA REAL: usa frases cortas, cálidas y naturales, evitando tono de robot.
-2. MICRO-EMPATÍA: valida al cliente con expresiones breves ("entiendo", "perfecto", "gracias por comentarlo").
+2. MICRO-EMPATÍA: valida al cliente con expresiones breves ("entiendo", "qué bien", "perfecto", "gracias por comentarlo", "me alegra escucharle").
 3. VARIACIÓN NATURAL: evita repetir siempre la misma estructura; alterna inicios de frase.
 4. UNA PREGUNTA CADA VEZ: no lances bloques largos; pregunta, escucha, confirma y continúa.
-5. ESCUCHA ACTIVA: si el cliente da un dato, refléjalo en una frase corta antes de seguir.
+5. ESCUCHA ACTIVA: si el cliente da un dato, refléjalo en una frase corta antes de seguir. Ej: "Entendido, un siete entonces..."
 6. CLARIDAD ORAL: prioriza lenguaje cotidiano, simple y directo.
-7. CIERRE CÁLIDO: despídete con agradecimiento genuino y tono amable.
-8. MENOS FRIALDAD: evita sonar corporativo o distante; usa un tono conversacional amable.
+7. CIERRE CÁLIDO Y HUMANO: La despedida es lo que más se recuerda. Muestra calidez genuina: agradece de verdad, desea un buen día/tarde de manera personal, y termina con un "hasta luego" o "adiós" claro. Nunca cortes de golpe.
+8. MENOS FRIALDAD: evita sonar corporativo o distante; usa un tono conversacional amable. Nada de frases estilo robot.
 9. ARRANQUE NATURAL: al iniciar la llamada, saluda de forma ágil y humana, sin pausas largas.
+10. RELLENOS NATURALES DE CONVERSACIÓN: usa ocasionalmente "A ver...", "Pues mira...", "Perfecto...", "Estupendo...", "Muy bien..." para sonar más fluido entre preguntas.
+11. RECONOCE LO QUE DICE EL CLIENTE: si menciona algo positivo o negativo, hazlo notar brevemente. Ej: "Ah, me alegra que haya sido buena experiencia" o "Vaya, lo siento, lo tendré en cuenta".
 """
 
 HUMANIZATION_PROMPT = """
-Actúa como un humano en una llamada telefónica.
-Reglas críticas:
-1) Usa marcadores discursivos naturales como "A ver...", "Pues mira...", "Eh...", "Vale, entiendo".
-2) No hagas listas numeradas en la conversación hablada.
-3) Si el usuario te interrumpe, detente y reconoce la interrupción con naturalidad.
-4) Mantén respuestas cortas (idealmente menos de 20 palabras cuando sea posible) para reducir latencia.
-5) Si necesitas pensar, di "Dame un segundo..." en lugar de quedarte en silencio.
-6) Si el cliente dice que no tiene tiempo o quiere terminar, cierra amable y rápido.
+Eres una persona real haciendo una llamada telefónica. No eres un robot ni una IA — eres una persona profesional y cercana que trabaja para esta empresa.
+
+Reglas para sonar humano:
+1) Usa marcadores discursivos naturales: "A ver...", "Pues mira...", "Eh...", "Vale, entiendo", "Claro que sí", "Perfecto".
+2) NO hagas listas numeradas en la conversación hablada. Habla de forma fluida y natural.
+3) Si el usuario te interrumpe, DETENTE y di "Sí, dígame..." o "Claro, cuénteme" antes de continuar.
+4) Mantén respuestas CORTAS (idealmente menos de 25 palabras) para reducir sensación de robotismo y latencia.
+5) Si necesitas tiempo, di "Un momento..." o "A ver, déjeme apuntar eso..." en lugar de silencio.
+6) Si el cliente dice que no tiene tiempo, NO insistas: cierra de forma rápida pero genuinamente cálida.
 7) Antes de finalizar, asegúrate de guardar el estado final con guardar_encuesta.
 8) En cuestionarios abiertos, continúa con la siguiente pregunta salvo rechazo explícito.
+9) DESPEDIDA NATURAL: cuando llegue el momento de despedirte, suena como una persona que termina una llamada de verdad. No te limites a "adiós" — añade un toque personal como "Que tenga un día estupendo, de verdad" o "Un placer haberle atendido, cuídese mucho".
+10) NUNCA SUENES FRÍO: si el cliente fue amable, devuelve esa amabilidad. Si fue escueto, sé respetuoso y directo. Adáptate al tono del cliente.
 """
 
 ENTHUSIASM_INSTRUCTIONS = {
@@ -271,6 +284,12 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
             "OBJETIVO DE EXPERIENCIA:\n"
             "- El cliente debe sentir que habla con una persona profesional, cercana y resolutiva.\n"
             "- Si dudas entre sonar 'perfecto' o 'humano', prioriza humano siempre sin perder precisión.\n\n"
+            "PLANTILLAS DE DESPEDIDA (úsalas como guía, adáptalas al contexto):\n"
+            "- Cuando todo salió bien: 'Perfecto, pues ya está todo. Muchas gracias por su tiempo y por atendernos, de verdad. Que tenga un día estupendo. ¡Hasta luego!'\n"
+            "- Cuando el cliente se mostró amable: 'Ha sido un placer hablar con usted. Muchísimas gracias. Que le vaya muy bien. ¡Hasta pronto!'\n"
+            "- Cuando fue breve: 'Muchas gracias por su tiempo. Le deseo un buen día. ¡Adiós!'\n"
+            "- Cuando el cliente rechazó o no tenía tiempo: 'Entiendo perfectamente, no le quito más tiempo. Que tenga un buen día. ¡Hasta luego!'\n"
+            "- SIEMPRE termina con un 'adiós', 'hasta luego' o 'hasta pronto' explícito al final para que el cliente sepa que la llamada acaba.\n\n"
         )
         full_instructions += "SIGUE ESTE GUION AL PIE DE LA LETRA:\n"
         full_instructions += f"{agent_instructions}\n"
@@ -370,22 +389,32 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
     ) -> str | None:
         """
         Herramienta para decir unas últimas palabras y colgar la llamada.
-        Debes proporcionar obligatoriamente el mensaje de despedida.
+        Debes proporcionar obligatoriamente el mensaje de despedida — debe ser una despedida cálida y completa.
         """
         async def process_goodbye_and_hangup():
             try:
-                # Usamos await porque say() devuelve un handle awaitable en esta versión
+                # Decir despedida sin permitir interrupciones para que no se corte
                 await self.session.say(mensaje_despedida_manual, allow_interruptions=False)
-                # Esperamos un poco para dar tiempo a que se escuche antes de cerrar la sala
-                await asyncio.sleep(4.0)
+
+                # Espera dinámica: ~75ms por palabra + 3s de margen de silencio final
+                # Esto evita cortar la voz si la despedida es larga
+                word_count = len(mensaje_despedida_manual.split())
+                wait_seconds = max(4.0, (word_count * 0.075) + 3.0)
+                logger.info(f"⏳ Esperando {wait_seconds:.1f}s antes de colgar (despedida: {word_count} palabras)")
+                await asyncio.sleep(wait_seconds)
+            except Exception as say_err:
+                logger.error(f"❌ Error diciendo despedida: {say_err}")
+                await asyncio.sleep(3.0)
             finally:
                 url = f"{self.server_url}/colgar"
                 payload = {"nombre_sala": self.room_name}
                 try:
                     async with aiohttp.ClientSession() as sess:
                         await sess.post(url, timeout=5, json=payload)
-                except: pass
-                
+                    logger.info(f"📵 Sala {self.room_name} colgada correctamente.")
+                except Exception as hang_err:
+                    logger.error(f"❌ Error colgando sala: {hang_err}")
+
         asyncio.create_task(process_goodbye_and_hangup())
         return "Llamada finalizada."
 
@@ -667,18 +696,28 @@ async def entrypoint(ctx: JobContext):
 
         async def backchanneling_loop():
             """
-            Backchanneling simple:
-            - Si la última intervención es del usuario y pasan >5s sin respuesta del agente,
-              inserta una señal breve tipo "Mhm" / "Claro, te escucho".
-            - Evita spam con cooldown.
+            Backchanneling humano:
+            - Si el usuario habla largo (>5s sin respuesta del agente), inserta una
+              señal breve de escucha activa para sonar más natural.
+            - Cooldown generoso para no interrumpir en exceso.
             """
             pending_user_idx = None
             pending_since = None
             last_backchannel_at = 0.0
-            cooldown_seconds = 12.0
+            cooldown_seconds = 14.0
             trigger_seconds = 5.0
             loop = asyncio.get_running_loop()
-            fillers = ["Mhm.", "Claro, te escucho.", "Ajá, te sigo."]
+            # Fillers variados — mezcla de señales de escucha activa y microconfirmaciones
+            fillers = [
+                "Entiendo...",
+                "Sí, claro.",
+                "Ya veo...",
+                "Ajá, sí.",
+                "Mhm, le escucho.",
+                "Sí, sigo con usted.",
+                "Perfecto, adelante.",
+                "Claro, dígame.",
+            ]
 
             while not stop_guard.is_set():
                 try:
@@ -806,18 +845,8 @@ async def entrypoint(ctx: JobContext):
                                     raw_messages.append({"role": m.role, "content": content})
                                     role_label = "Cliente" if m.role == "user" else "Agente"
                                     transcript += f"{role_label}: {content}\n"
-                    
-                        # Enviar a n8n
-                        if agent_instance_exists:
-                            try:
-                                await asyncio.wait_for(
-                                    agent_instance.notify_n8n_transcription(survey_id, raw_messages),
-                                    timeout=5
-                                )
-                            except Exception as n8n_err:
-                                logger.error(f"Error enviando transcripción a n8n: {n8n_err}")
                 except Exception as ex:
-                    logger.error(f"Error procesando historia: {ex}")
+                    logger.error(f"Error procesando historia para transcripción local: {ex}")
                 
                 # SIEMPRE guardar transcripción y datos finales en Supabase
                 url_guardar = f"{internal_api_url}/guardar-encuesta"
