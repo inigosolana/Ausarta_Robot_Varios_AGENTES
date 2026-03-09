@@ -362,7 +362,7 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
     phone = lead["phone_number"]
     empresa_id = campaign.get("empresa_id") or 0
     campaign_id = campaign["id"]
-    agent_name_dispatch = os.getenv("AGENT_NAME_DISPATCH", "default_agent")
+    agent_name_dispatch = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip() or "default_agent"
     sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
 
     # El lock ( _empresas_en_llamada.add(empresa_id) ) ya ha sido adquirido síncronamente
@@ -422,7 +422,20 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
         except Exception as room_err:
             logger.warning(f"⚠️ [Drip] Aviso creando sala {room_name}: {room_err}")
 
-        # 3. Lanzar SIP
+        # 3. Dispatch agente PRIMERO para que esté en la sala cuando el cliente conteste
+        try:
+            await dispatch_agent_explicit(
+                room_name=room_name,
+                agent_name=agent_name_dispatch,
+                metadata=room_metadata,
+            )
+            logger.info(f"🚀 [Drip] Agente '{agent_name_dispatch}' despachado a {room_name}")
+            # Breve espera para que el agente entre antes de iniciar la llamada SIP
+            await asyncio.sleep(float(os.getenv("DRIP_AGENT_JOIN_DELAY_SECONDS", "3")))
+        except Exception as dispatch_err:
+            logger.warning(f"⚠️ [Drip] Dispatch explícito fallido (auto-dispatch como fallback): {dispatch_err}")
+
+        # 4. Lanzar SIP (cliente escuchará al agente al descolgar)
         try:
             await lkapi.sip.create_sip_participant(lk_api.CreateSIPParticipantRequest(
                 sip_trunk_id=sip_trunk_id,
@@ -443,17 +456,6 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
                 lambda: supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute()
             )
             return
-
-        # 4. Dispatch explícito del agente con metadata multitenant
-        try:
-            await dispatch_agent_explicit(
-                room_name=room_name,
-                agent_name=agent_name_dispatch,
-                metadata=room_metadata,
-            )
-            logger.info(f"🚀 [Drip] Agente '{agent_name_dispatch}' despachado a {room_name}")
-        except Exception as dispatch_err:
-            logger.warning(f"⚠️ [Drip] Dispatch explícito fallido (auto-dispatch como fallback): {dispatch_err}")
 
         # 5. Polling ligero hasta status terminal (el webhook también actuará en paralelo)
         TERMINAL = {"completed", "failed", "unreached", "incomplete", "rejected_opt_out"}

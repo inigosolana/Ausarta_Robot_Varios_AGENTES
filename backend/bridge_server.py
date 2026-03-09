@@ -3,8 +3,8 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
-import asyncio 
-from datetime import datetime
+import asyncio
+from datetime import datetime, timedelta
 from typing import Optional, Union
 from dotenv import load_dotenv
 from livekit import api
@@ -260,20 +260,72 @@ async def guardar_encuesta(datos: FinEncuesta):
     # Lógica de estados
     if datos.status:
         print(f"🔄 Actualizando status a: {datos.status}")
-        updates["status"] = datos.status
-        if datos.status == 'completada':
-             updates["completada"] = 1
+        raw_status = (datos.status or "").strip().lower()
+        _STATUS_MAP_PRE = {
+            "completed": "completed", "failed": "failed", "incomplete": "incomplete",
+            "unreached": "unreached", "rejected_opt_out": "rejected_opt_out",
+            "rejected": "rejected_opt_out", "completada": "completed", "fallida": "failed",
+            "parcial": "incomplete", "no_contesta": "unreached", "rechazada": "rejected_opt_out",
+        }
+        normalized_status = _STATUS_MAP_PRE.get(raw_status) or datos.status
+        updates["status"] = normalized_status
+        if normalized_status == "completed":
+            updates["completada"] = 1
     elif val_comentarios is not None:
-         # Implicit completion if comments are passed locally (fallback)
          pass
 
     if not updates:
         print("⚠️ Llamada a guardar sin datos nuevos.")
         return {"status": "no_changes"}
 
+    # Propagación a campaign_leads
+    _PROPAGABLE = {"completed", "rejected_opt_out", "incomplete", "failed", "unreached"}
+    normalized_status = updates.get("status")
+
     try:
         supabase.table("encuestas").update(updates).eq("id", id_final).execute()
         print(f"💾 Guardado incremental en ficha {id_final}: {updates}")
+
+        # Propagar a campaign_leads (misma lógica que telephony)
+        if normalized_status and normalized_status in _PROPAGABLE:
+            try:
+                enc = supabase.table("encuestas").select("status, empresa_id, telefono").eq("id", id_final).limit(1).execute()
+                curr_data = enc.data[0] if enc.data else {}
+                lead_update = {"status": normalized_status}
+                if normalized_status == "rejected_opt_out":
+                    lead_update["no_reintentar"] = True
+                elif normalized_status in ("incomplete", "failed", "unreached"):
+                    retry_seconds, max_retries, current_retries = 3600, 3, 0
+                    try:
+                        lead_res = supabase.table("campaign_leads").select("campaign_id, retries_attempted").eq("call_id", id_final).limit(1).execute()
+                        if lead_res.data:
+                            current_retries = lead_res.data[0].get("retries_attempted", 0) or 0
+                            camp_id = lead_res.data[0]["campaign_id"]
+                            camp_res = supabase.table("campaigns").select("retry_interval, retries_count").eq("id", camp_id).limit(1).execute()
+                            if camp_res.data:
+                                ri = camp_res.data[0].get("retry_interval")
+                                max_retries = camp_res.data[0].get("retries_count", 3) or 3
+                                if ri and ri > 0:
+                                    retry_seconds = ri
+                    except Exception as e:
+                        print(f"Error leyendo config reintentos: {e}")
+                    new_retries = current_retries + 1
+                    lead_update["retries_attempted"] = new_retries
+                    if new_retries < max_retries:
+                        lead_update["status"] = "pending"
+                        lead_update["next_retry_at"] = (datetime.utcnow() + timedelta(seconds=retry_seconds)).isoformat()
+                        print(f"🔄 Reintento {new_retries}/{max_retries} programado → {lead_update['next_retry_at']}")
+                    else:
+                        print(f"🚫 Máx reintentos alcanzado ({new_retries}/{max_retries})")
+                r = supabase.table("campaign_leads").update(lead_update).eq("call_id", id_final).execute()
+                if (not r.data or len(r.data) == 0) and curr_data.get("telefono"):
+                    enc_full = supabase.table("encuestas").select("campaign_id").eq("id", id_final).execute()
+                    if enc_full.data and enc_full.data[0].get("campaign_id"):
+                        supabase.table("campaign_leads").update({**lead_update, "call_id": id_final}).eq("campaign_id", enc_full.data[0]["campaign_id"]).eq("phone_number", curr_data["telefono"]).execute()
+                print(f"📊 Lead propagado: {lead_update}")
+            except Exception as prop_err:
+                print(f"⚠️ Error propagando a campaign_leads: {prop_err}")
+
         return {"status": "success"}
     except Exception as e:
         print(f"Error updating Supabase: {e}")

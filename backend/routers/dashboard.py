@@ -61,13 +61,27 @@ async def get_dashboard_stats(
         return r.count if r.count is not None else 0
 
     def fetch_scores():
-        q = supabase.table("encuestas").select("puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez").not_.is_("puntuacion_comercial", "null")
+        q = supabase.table("encuestas").select("puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, datos_extra")
         if empresa_id: q = q.eq("empresa_id", empresa_id)
         if agent_id: q = q.eq("agent_id", agent_id)
         if campaign_id: q = q.eq("campaign_id", campaign_id)
         if start_date: q = q.gte("fecha", start_date)
         if end_date: q = q.lte("fecha", end_date)
         return q.execute().data
+
+    def fetch_status_breakdown():
+        q = supabase.table("encuestas").select("status")
+        if empresa_id: q = q.eq("empresa_id", empresa_id)
+        if agent_id: q = q.eq("agent_id", agent_id)
+        if campaign_id: q = q.eq("campaign_id", campaign_id)
+        if start_date: q = q.gte("fecha", start_date)
+        if end_date: q = q.lte("fecha", end_date)
+        r = q.execute()
+        if not r.data:
+            return {}
+        from collections import Counter
+        statuses = [row.get("status") or "unknown" for row in r.data]
+        return dict(Counter(statuses))
 
     def check_question_based():
         try:
@@ -92,24 +106,27 @@ async def get_dashboard_stats(
             loop.run_in_executor(executor, fetch_completed),
             loop.run_in_executor(executor, fetch_pending),
             loop.run_in_executor(executor, fetch_scores),
+            loop.run_in_executor(executor, fetch_status_breakdown),
             loop.run_in_executor(executor, check_question_based)
         )
-        total_calls, completed_calls, pending_calls, scores_data, is_question_based = results
+        total_calls, completed_calls, pending_calls, scores_data, status_breakdown, is_question_based = results
 
         avg_comercial = 0; avg_instalador = 0; avg_rapidez = 0; avg_overall = 0
-        count = len(scores_data)
-        if count > 0:
-            sum_com = sum(r['puntuacion_comercial'] or 0 for r in scores_data)
-            sum_ins = sum(r['puntuacion_instalador'] or 0 for r in scores_data)
-            sum_rap = sum(r['puntuacion_rapidez'] or 0 for r in scores_data)
-            avg_comercial = sum_com / count
-            avg_instalador = sum_ins / count
-            avg_rapidez = sum_rap / count
-            avg_overall = (avg_comercial + avg_instalador + avg_rapidez) / 3
+        if scores_data:
+            vals_com = [r['puntuacion_comercial'] for r in scores_data if r.get('puntuacion_comercial') is not None]
+            vals_ins = [r['puntuacion_instalador'] for r in scores_data if r.get('puntuacion_instalador') is not None]
+            vals_rap = [r['puntuacion_rapidez'] for r in scores_data if r.get('puntuacion_rapidez') is not None]
+            if vals_com: avg_comercial = sum(vals_com) / len(vals_com)
+            if vals_ins: avg_instalador = sum(vals_ins) / len(vals_ins)
+            if vals_rap: avg_rapidez = sum(vals_rap) / len(vals_rap)
+            all_vals = vals_com + vals_ins + vals_rap
+            if all_vals:
+                avg_overall = sum(all_vals) / len(all_vals)
 
         return {
             "total_calls": total_calls, "completed_calls": completed_calls, "pending_calls": pending_calls,
             "is_question_based": is_question_based,
+            "status_breakdown": status_breakdown or {},
             "avg_scores": {
                 "comercial": round(float(avg_comercial), 1),
                 "instalador": round(float(avg_instalador), 1),

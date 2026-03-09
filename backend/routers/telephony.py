@@ -333,6 +333,18 @@ async def make_outbound_call(request: dict):
         except Exception as e:
             logger.warning(f"⚠️ Aviso al crear sala {room_name}: {e}")
 
+        # Despachar agente ANTES del SIP para que esté listo cuando el cliente conteste
+        try:
+            await dispatch_agent_explicit(
+                room_name=room_name,
+                agent_name=agent_name_dispatch,
+                metadata=room_metadata,
+            )
+            logger.info(f"✅ Agente {agent_name_dispatch} despachado a sala {room_name}")
+            await asyncio.sleep(float(os.getenv("DRIP_AGENT_JOIN_DELAY_SECONDS", "3")))
+        except Exception as dispatch_err:
+            logger.warning(f"⚠️ Dispatch explícito fallido (auto-dispatch como fallback): {dispatch_err}")
+
         try:
             await lkapi.sip.create_sip_participant(api.CreateSIPParticipantRequest(
                 sip_trunk_id=sip_trunk_id,
@@ -344,15 +356,6 @@ async def make_outbound_call(request: dict):
         except Exception as sip_err:
             _processing_rooms.discard(room_name)
             raise sip_err
-
-        # Despachar agente explícitamente con metadata de aislamiento
-        try:
-            await dispatch_agent_explicit(
-                room_name=room_name,
-                agent_name=agent_name_dispatch,
-                metadata=room_metadata,
-            )
-            logger.info(f"✅ Agente {agent_name_dispatch} despachado a sala {room_name}")
         except Exception as dispatch_err:
             logger.warning(f"⚠️ Dispatch explícito fallido (auto-dispatch como fallback): {dispatch_err}")
 

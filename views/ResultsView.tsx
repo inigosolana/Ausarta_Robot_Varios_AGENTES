@@ -303,6 +303,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                 >
                     <option value="all">{t('Todos los tipos')}</option>
                     <option value="ENCUESTA_NUMERICA">{t('Numérica')}</option>
+                    <option value="ENCUESTA_MIXTA">{t('Mixta')}</option>
                     <option value="PREGUNTAS_ABIERTAS">{t('Preguntas Abiertas')}</option>
                     <option value="CUALIFICACION_LEAD">{t('Cualificación Lead')}</option>
                     <option value="AGENDAMIENTO_CITA">{t('Cita / Reunión')}</option>
@@ -447,6 +448,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                         {(() => {
                                             const type = row.tipo_resultados;
                                             const badgeClass = type === 'ENCUESTA_NUMERICA' ? 'bg-green-50 text-green-700 border-green-200' :
+                                                type === 'ENCUESTA_MIXTA' ? 'bg-teal-50 text-teal-700 border-teal-200' :
                                                 type === 'CUALIFICACION_LEAD' ? 'bg-orange-50 text-orange-700 border-orange-200' :
                                                     type === 'AGENDAMIENTO_CITA' ? 'bg-purple-50 text-purple-700 border-purple-200' :
                                                         type === 'SOPORTE_CLIENTE' ? 'bg-blue-50 text-blue-700 border-blue-200' :
@@ -476,6 +478,44 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                                                 </div>
                                                             ))}
                                                         </div>
+                                                    </div>
+                                                );
+                                            } else if (type === 'ENCUESTA_MIXTA') {
+                                                const mixedItems = extractMixedItems(row);
+                                                return (
+                                                    <div className="flex flex-col items-center">
+                                                        <Badge />
+                                                        {mixedItems.length === 0 ? (
+                                                            <span className="text-gray-400 text-xs">-</span>
+                                                        ) : (
+                                                            <div className="flex flex-col items-center gap-1 max-w-[220px]">
+                                                                <div className="flex flex-wrap justify-center gap-1">
+                                                                    {mixedItems.filter(i => i.type === 'number').slice(0, 3).map((i, idx) => (
+                                                                        <div key={`${i.label}-${idx}`} className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-md px-1.5 py-0.5">
+                                                                            <span className="text-[9px] text-gray-500 uppercase">{i.label.slice(0, 3)}</span>
+                                                                            <span className={`w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold ${getScoreColor(Number(i.value))}`}>
+                                                                                {i.value}
+                                                                            </span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                                <div className="flex flex-wrap justify-center gap-1">
+                                                                    {mixedItems.filter(i => i.type === 'choice').slice(0, 2).map((i, idx) => (
+                                                                        <span key={`${i.label}-${idx}`} className="px-1.5 py-0.5 rounded bg-purple-50 border border-purple-200 text-[10px] text-purple-700">
+                                                                            {i.label}: {String(i.value)}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                                {mixedItems.find(i => i.type === 'text') && (
+                                                                    <div
+                                                                        className="text-[10px] text-gray-500 max-w-[200px] truncate italic"
+                                                                        title={String(mixedItems.find(i => i.type === 'text')?.value || '')}
+                                                                    >
+                                                                        {String(mixedItems.find(i => i.type === 'text')?.value || '')}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 );
                                             } else if (type === 'CUALIFICACION_LEAD') {
@@ -575,8 +615,77 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     );
 };
 
+type MixedItemType = 'number' | 'text' | 'choice';
+type MixedItem = { label: string; value: any; type: MixedItemType };
+
+function prettifyKey(raw: string): string {
+    return raw
+        .replace(/_/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function isLikelyChoice(value: any): boolean {
+    if (typeof value !== 'string') return false;
+    const v = value.trim().toLowerCase();
+    const choices = [
+        'comercial', 'tecnico', 'técnico', 'calidad-precio', 'calidad precio',
+        'servicio', 'servicio general', 'si', 'sí', 'no'
+    ];
+    return choices.includes(v);
+}
+
+function extractMixedItems(row: SurveyResult): MixedItem[] {
+    const extra: Record<string, any> = (row.datos_extra && typeof row.datos_extra === 'object') ? row.datos_extra : {};
+    const items: MixedItem[] = [];
+    const seen = new Set<string>();
+    const add = (label: string, value: any, type: MixedItemType) => {
+        const key = `${label}:${String(value)}`;
+        if (value === null || value === undefined || value === '' || seen.has(key)) return;
+        seen.add(key);
+        items.push({ label, value, type });
+    };
+
+    add('Experiencia', extra.experiencia_general ?? row.puntuacion_rapidez, 'number');
+    add('Comercial', row.puntuacion_comercial ?? extra.nota_comercial, 'number');
+    add('Tecnico', row.puntuacion_instalador ?? extra.nota_tecnico ?? extra.nota_instalador, 'number');
+    add('Motivo', extra.motivo_contratacion, isLikelyChoice(extra.motivo_contratacion) ? 'choice' : 'text');
+    add('Detalle', extra.detalle_problema, 'text');
+
+    const dynamicArrays = [extra.respuestas, extra.preguntas, extra.answers, extra.questions];
+    for (const arr of dynamicArrays) {
+        if (!Array.isArray(arr)) continue;
+        for (const e of arr) {
+            if (!e || typeof e !== 'object') continue;
+            const label = e.label || e.pregunta || e.question || e.name || 'Respuesta';
+            const value = e.value ?? e.respuesta ?? e.answer;
+            const typeRaw = (e.type || e.tipo || '').toString().toLowerCase();
+            const type: MixedItemType =
+                typeRaw.includes('num') ? 'number'
+                    : typeRaw.includes('open') || typeRaw.includes('text') ? 'text'
+                        : typeRaw.includes('choice') || typeRaw.includes('option') ? 'choice'
+                            : (typeof value === 'number' ? 'number' : (isLikelyChoice(value) ? 'choice' : 'text'));
+            add(label, value, type);
+        }
+    }
+
+    const reserved = new Set([
+        'experiencia_general', 'nota_comercial', 'nota_tecnico', 'nota_instalador',
+        'motivo_contratacion', 'detalle_problema', 'respuestas', 'preguntas', 'answers', 'questions'
+    ]);
+    Object.entries(extra).forEach(([k, v]) => {
+        if (reserved.has(k)) return;
+        if (Array.isArray(v) || (v && typeof v === 'object')) return;
+        const type: MixedItemType = typeof v === 'number' ? 'number' : (isLikelyChoice(v) ? 'choice' : 'text');
+        add(prettifyKey(k), v, type);
+    });
+
+    return items;
+}
+
 function getScoreColor(score: number | null): string {
-    if (score === null) return 'bg-gray-50 text-gray-400 border border-gray-100';
+    if (score === null || Number.isNaN(score)) return 'bg-gray-50 text-gray-400 border border-gray-100';
     if (score >= 9) return 'bg-green-100 text-green-700 border border-green-200';
     if (score >= 7) return 'bg-blue-100 text-blue-700 border border-blue-200';
     if (score >= 5) return 'bg-yellow-100 text-yellow-700 border border-yellow-200';

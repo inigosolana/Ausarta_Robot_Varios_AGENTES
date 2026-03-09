@@ -256,6 +256,7 @@ const AgentManagementView: React.FC = () => {
                                 )}
                                 {agent.tipo_resultados && (
                                     <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${agent.tipo_resultados === 'ENCUESTA_NUMERICA' ? 'bg-green-50 text-green-700 border-green-200' :
+                                        agent.tipo_resultados === 'ENCUESTA_MIXTA' ? 'bg-teal-50 text-teal-700 border-teal-200' :
                                         agent.tipo_resultados === 'CUALIFICACION_LEAD' ? 'bg-orange-50 text-orange-700 border-orange-200' :
                                             agent.tipo_resultados === 'AGENDAMIENTO_CITA' ? 'bg-purple-50 text-purple-700 border-purple-200' :
                                                 agent.tipo_resultados === 'SOPORTE_CLIENTE' ? 'bg-blue-50 text-blue-700 border-blue-200' :

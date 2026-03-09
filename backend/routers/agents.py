@@ -62,6 +62,7 @@ async def update_agent(agent_id: str, config: dict):
         if "voice_id" in config: db_config["voice_id"] = config["voice_id"]
         if "speaking_speed" in config: db_config["speaking_speed"] = config["speaking_speed"]
         if "empresa_id" in config: db_config["empresa_id"] = config["empresa_id"]
+        if "tipo_resultados" in config: db_config["tipo_resultados"] = config["tipo_resultados"]
         
         db_config["updated_at"] = datetime.utcnow().isoformat()
         supabase.table("agent_config").update(db_config).eq("id", int(agent_id)).execute()
@@ -127,6 +128,7 @@ async def create_agent(config: dict):
             "voice_id": config.get("voice_id") or config.get("tts_voice", DEFAULT_AUSARTA_VOICE_ID),
             "speaking_speed": config.get("speaking_speed", 1.0),
             "empresa_id": config.get("empresa_id"),
+            "tipo_resultados": config.get("tipo_resultados"),
         }
         
         res = supabase.table("agent_config").insert(db_config).execute()

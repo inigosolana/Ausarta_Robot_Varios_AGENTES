@@ -48,6 +48,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
         voice_id: agent?.voice_id || '',
         speaking_speed: agent?.speaking_speed ?? 1.0,
         empresa_id: agent?.empresa_id || null,
+        tipo_resultados: agent?.tipo_resultados || undefined,
     });
 
     const [aiConfig, setAiConfig] = useState<AIConfig>({ ...defaultAIConfig });
@@ -236,7 +237,8 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                     greeting: aiData.greeting || prev.greeting,
                     description: aiData.description || prev.description,
                     instructions: aiData.instructions || prev.instructions,
-                    critical_rules: Array.isArray(aiData.critical_rules) ? aiData.critical_rules.join('\n') : (aiData.critical_rules || prev.critical_rules)
+                    critical_rules: Array.isArray(aiData.critical_rules) ? aiData.critical_rules.join('\n') : (aiData.critical_rules || prev.critical_rules),
+                    tipo_resultados: aiData.tipo_resultados || prev.tipo_resultados
                 }));
                 setShowAiPromptModal(false);
                 setAiPromptRequest('');

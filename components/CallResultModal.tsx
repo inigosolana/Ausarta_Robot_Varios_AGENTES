@@ -44,6 +44,42 @@ export function CallResultModal({ result, onClose }: CallResultModalProps) {
         return { speaker: 'customer', text: line };
     };
 
+    const buildMixedSummary = () => {
+        const extra: Record<string, any> = (result.datos_extra && typeof result.datos_extra === 'object') ? result.datos_extra : {};
+        const rows: Array<{ label: string; value: any; type: 'number' | 'choice' | 'text' }> = [];
+        const push = (label: string, value: any, type: 'number' | 'choice' | 'text') => {
+            if (value === null || value === undefined || value === '') return;
+            rows.push({ label, value, type });
+        };
+        const isChoice = (v: any) => {
+            if (typeof v !== 'string') return false;
+            const s = v.toLowerCase().trim();
+            return ['comercial', 'tecnico', 'técnico', 'calidad-precio', 'calidad precio', 'servicio', 'servicio general', 'si', 'sí', 'no'].includes(s);
+        };
+
+        push('Experiencia general', extra.experiencia_general ?? result.puntuacion_rapidez, 'number');
+        push('Atencion comercial', result.puntuacion_comercial ?? extra.nota_comercial, 'number');
+        push('Atencion tecnica', result.puntuacion_instalador ?? extra.nota_tecnico ?? extra.nota_instalador, 'number');
+        push('Motivo de contratacion', extra.motivo_contratacion, isChoice(extra.motivo_contratacion) ? 'choice' : 'text');
+        push('Detalle del problema', extra.detalle_problema, 'text');
+
+        const candidates = [extra.respuestas, extra.preguntas, extra.answers, extra.questions];
+        for (const arr of candidates) {
+            if (!Array.isArray(arr)) continue;
+            for (const e of arr) {
+                if (!e || typeof e !== 'object') continue;
+                const label = e.label || e.pregunta || e.question || e.name || 'Respuesta';
+                const value = e.value ?? e.respuesta ?? e.answer;
+                const rawType = (e.type || e.tipo || '').toString().toLowerCase();
+                const type: 'number' | 'choice' | 'text' =
+                    rawType.includes('num') ? 'number' : rawType.includes('choice') || rawType.includes('option') ? 'choice' : (typeof value === 'number' ? 'number' : (isChoice(value) ? 'choice' : 'text'));
+                push(label, value, type);
+            }
+        }
+        return rows;
+    };
+    const mixedSummary = result.tipo_resultados === 'ENCUESTA_MIXTA' ? buildMixedSummary() : [];
+
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
             <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
@@ -117,7 +153,27 @@ export function CallResultModal({ result, onClose }: CallResultModalProps) {
                                     </ul>
                                 </div>
                             )}
-                            {result.tipo_resultados !== 'CUALIFICACION_LEAD' && result.tipo_resultados !== 'AGENDAMIENTO_CITA' && !result.datos_extra.puntos_clave && (
+                            {result.tipo_resultados === 'ENCUESTA_MIXTA' && (
+                                <div className="space-y-2">
+                                    {mixedSummary.length === 0 ? (
+                                        <p className="text-sm text-gray-500 italic">{t('Sin respuestas estructuradas')}</p>
+                                    ) : (
+                                        mixedSummary.map((r, idx) => (
+                                            <div key={`${r.label}-${idx}`} className="bg-white p-2 rounded-lg border border-gray-100 text-sm flex items-start gap-2">
+                                                <span className="text-[11px] font-semibold text-gray-500 min-w-[140px]">{r.label}</span>
+                                                {r.type === 'number' ? (
+                                                    <span className="px-2 py-0.5 rounded bg-teal-50 border border-teal-200 text-teal-700 font-bold">{r.value}</span>
+                                                ) : r.type === 'choice' ? (
+                                                    <span className="px-2 py-0.5 rounded bg-purple-50 border border-purple-200 text-purple-700">{String(r.value)}</span>
+                                                ) : (
+                                                    <span className="text-gray-700 italic">{String(r.value)}</span>
+                                                )}
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            )}
+                            {result.tipo_resultados !== 'CUALIFICACION_LEAD' && result.tipo_resultados !== 'AGENDAMIENTO_CITA' && result.tipo_resultados !== 'ENCUESTA_MIXTA' && !result.datos_extra.puntos_clave && (
                                 <div className="text-sm text-gray-700 bg-white p-3 rounded-lg border border-gray-100">
                                     <pre className="text-xs font-mono whitespace-pre-wrap overflow-hidden">{JSON.stringify(result.datos_extra, null, 2)}</pre>
                                 </div>

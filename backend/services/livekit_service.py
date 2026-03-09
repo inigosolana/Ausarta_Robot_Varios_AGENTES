@@ -9,7 +9,7 @@ load_dotenv()
 LIVEKIT_URL = os.getenv('LIVEKIT_URL')
 LIVEKIT_API_KEY = os.getenv('LIVEKIT_API_KEY')
 LIVEKIT_API_SECRET = os.getenv('LIVEKIT_API_SECRET')
-DEFAULT_AGENT_NAME = os.getenv("AGENT_NAME_DISPATCH", "ausarta_agent")
+DEFAULT_AGENT_NAME = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip() or "default_agent"
 
 logger = logging.getLogger("api-backend")
 

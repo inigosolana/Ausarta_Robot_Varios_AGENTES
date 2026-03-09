@@ -338,8 +338,9 @@ class DynamicAgent(Agent):
         # Detección de tipo de agente (Campo explícito 'tipo_resultados' o fallback)
         tipo_res = agent_config.get("tipo_resultados")
         
-        is_numeric = (tipo_res == 'ENCUESTA_NUMERICA')
+        is_numeric = (tipo_res in ['ENCUESTA_NUMERICA', 'ENCUESTA_MIXTA'])
         has_preguntas = (tipo_res in ['PREGUNTAS_ABIERTAS', 'CUALIFICACION_LEAD', 'AGENDAMIENTO_CITA', 'SOPORTE_CLIENTE'])
+        is_mixed = (tipo_res == 'ENCUESTA_MIXTA')
         
         # Fallback para agentes antiguos o si n8n aún no lo clasificó
         if tipo_res is None:
@@ -348,15 +349,26 @@ class DynamicAgent(Agent):
             has_preguntas = (survey_type_legacy in ['open_questions', 'mixed'])
             
             if survey_type_legacy is None:
-                numeric_keywords = ["1 al 10", "0 al 10", "del uno al diez", "numérica", "puntuación", "uno al 10", "uno al diez"]
+                numeric_keywords = ["1 al 10", "0 al 10", "del uno al diez", "numérica", "puntuación", "uno al 10", "uno al diez", "1 al 5"]
                 is_numeric = any(kw in inst_lower for kw in numeric_keywords) or "dakota" in agent_name.lower()
                 has_preguntas = any(p in inst_lower for p in ["pregunta 1", "pregunta 2", "pregunta:"])
+                # Detectar encuesta mixta: tiene numéricas + condicionales o "SI ... pregunta"
+                condicional_markers = ["si la nota", "condicional", "si responde", "si dice", "si fue 1", "si fue 2", "si fue 3"]
+                is_mixed = is_numeric and any(m in inst_lower for m in condicional_markers)
             
             if survey_type_legacy == 'mixed':
                 is_numeric = True
                 has_preguntas = True
+                is_mixed = True
         
-        if is_numeric:
+        if is_mixed:
+            base_rules_to_use += """
+REGLA ESPECIAL PARA ENCUESTAS MIXTAS (numéricas + condicionales/abiertas):
+- Obtén las puntuaciones numéricas y usa 'nota_comercial', 'nota_instalador', 'nota_rapidez' según corresponda.
+- Si hay preguntas condicionales o abiertas (ej: "detalle del problema", "motivo de contratación"), inclúyelas en 'datos_extra' con claves claras (detalle_problema, motivo_contratacion, experiencia_general, etc).
+- Llama a guardar_encuesta con todos los datos: notas numéricas + datos_extra.
+"""
+        elif is_numeric:
             base_rules_to_use += """
 REGLA ESPECIAL PARA ENCUESTAS NUMÉRICAS:
 - Esta es una encuesta de puntuación del 0 al 10.
@@ -458,13 +470,15 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         nota_instalador: Optional[int] = None, 
         nota_rapidez: Optional[int] = None, 
         comentarios: Optional[str] = None,
-        status: Optional[str] = None
+        status: Optional[str] = None,
+        datos_extra: Optional[dict] = None
     ) -> str | None:
         """
         Guarda los datos de la encuesta/llamada. 
-        - Si la encuesta es NUMÉRICA, usa los campos 'nota_comercial', 'nota_instalador' y 'nota_rapidez' (valores del 1 al 10).
-        - Si la encuesta es ABIERTA o el usuario da feedback extra, usa el campo 'comentarios'.
-        - 'status' puede ser 'completed', 'failed', 'incomplete' o 'rejected_opt_out'.
+        - Si la encuesta es NUMÉRICA, usa 'nota_comercial', 'nota_instalador', 'nota_rapidez' (1-10).
+        - Si la encuesta es ABIERTA o hay feedback extra, usa 'comentarios'.
+        - Para ENCUESTA_MIXTA (numéricas + pregunta abierta/condicional), usa 'datos_extra' con claves como: experiencia_general (1-5), detalle_problema (texto si nota<4), nota_comercial, nota_tecnico, motivo_contratacion.
+        - 'status': 'completed', 'failed', 'incomplete' o 'rejected_opt_out'.
         """
         self.data_saved = True
         
@@ -482,6 +496,15 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
             "comentarios": comentarios,
             "status": status
         }
+        if datos_extra:
+            if isinstance(datos_extra, dict):
+                payload["datos_extra"] = datos_extra
+            elif isinstance(datos_extra, str):
+                try:
+                    import json
+                    payload["datos_extra"] = json.loads(datos_extra)
+                except Exception:
+                    payload["datos_extra"] = {"raw": datos_extra}
         
         # IMPORTANTE: Await directo en vez de fire-and-forget para asegurar que se guarda
         try:

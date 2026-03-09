@@ -18,6 +18,15 @@ import { LiveMonitoring } from './LiveMonitoring';
 // API URL - Consistent with other views
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+const STATUS_LABELS: Record<string, string> = {
+    completed: 'Completadas',
+    rejected_opt_out: 'Rechazadas',
+    incomplete: 'Incompletas',
+    unreached: 'No contestó',
+    failed: 'Fallidas',
+    unknown: 'Otros'
+};
+
 interface DashboardStats {
     total_calls: number;
     completed_calls: number;
@@ -29,6 +38,7 @@ interface DashboardStats {
         overall: number;
     };
     is_question_based?: boolean;
+    status_breakdown?: Record<string, number>;
 }
 
 interface Call {
@@ -266,6 +276,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     color="orange"
                 />
             </div>
+
+            {/* Status breakdown */}
+            {stats?.status_breakdown && Object.keys(stats.status_breakdown).length > 0 && (
+                <div className="flex flex-wrap gap-3 p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700">
+                    <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">{t('By status', 'Por estado')}:</span>
+                    {Object.entries(stats.status_breakdown).map(([status, count]) => (
+                        <span key={status} className="px-3 py-1 rounded-lg bg-gray-100 dark:bg-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300">
+                            {STATUS_LABELS[status] || status}: <strong>{count}</strong>
+                        </span>
+                    ))}
+                </div>
+            )}
 
             {/* Main Content Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
