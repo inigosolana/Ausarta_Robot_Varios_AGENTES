@@ -37,6 +37,11 @@ async def finalizar_llamada(req: CallEndRequest):
         await lkapi.room.delete_room(api.DeleteRoomRequest(room=req.nombre_sala))
         return {"status": "ok", "message": f"Sala {req.nombre_sala} cerrada"}
     except Exception as e:
+        err_msg = str(e).lower()
+        # Sala ya cerrada (cliente colgó primero, room_finished, etc.) → tratar como éxito
+        if "not_found" in err_msg or "does not exist" in err_msg or "404" in err_msg:
+            logger.info(f"✓ Sala {req.nombre_sala} ya cerrada (no existe). OK.")
+            return {"status": "ok", "message": "Sala ya cerrada"}
         logger.error(f"⚠️ Error al cerrar sala {req.nombre_sala}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 

@@ -63,7 +63,7 @@ REGLAS DE ORO (¡MUY IMPORTANTE!):
 1. IDENTIDAD: Si te preguntan quién eres o cómo te llamas, preséntate con el nombre de la empresa para la que trabajas. NUNCA reveles nombres internos de sistema.
 2. PROHIBIDO NARRAR ACCIONES: NUNCA digas en voz alta que vas a guardar un dato, NUNCA menciones el "ID de la encuesta", y NUNCA leas comandos de sistema. Habla SOLO como una persona normal.
 3. PRONUNCIACIÓN: Di siempre "UNO" (ej: "del UNO al diez"), nunca "un".
-4. PARA COLGAR: Usa SIEMPRE la herramienta 'finalizar_llamada' proporcionando el texto de despedida que quieras decir. La herramienta se encargará de decirlo y colgar. IMPORTANTE: el mensaje de despedida debe ser COMPLETO y sin cortar — incluye cierre cálido, agradecimiento y "adiós" o equivalente al final. 
+4. PARA COLGAR: Usa SIEMPRE la herramienta 'finalizar_llamada' con un mensaje de despedida CORTÍSIMO (máx. 6-8 palabras). La herramienta lo dice y colgará enseguida. Ej: "Gracias por su tiempo. ¡Hasta luego!" 
 5. SI EL CLIENTE NO TE ENTIENDE O DICE "¿CÓMO?", "¿QUÉ?": Repite la última pregunta que hiciste de forma amable y clara.
 6. SI ESCUCHAS RUIDO, SILENCIO O UNA PALABRA SIN SENTIDO: reconduce SIEMPRE la conversación con una pregunta corta de seguimiento en 1-2 segundos ("¿Sigue ahí?", "¿Me escucha bien?", "Si le parece, seguimos con la pregunta...").
 7. TÉCNICA DE RECONDUCCIÓN ESTRICTA: Eres amable pero tienes una misión. Si el cliente te responde contando una historia larga, quejándose, o hablando de un tema que no tiene nada que ver con tu pregunta, DEBES aplicar la fórmula "VALIDACIÓN CORTA + PREGUNTA ORIGINAL". NUNCA te enredes en conversaciones paralelas que duren más de 1 frase.
@@ -73,13 +73,13 @@ REGLAS DE ORO (¡MUY IMPORTANTE!):
 
 REGLA CRÍTICA DE DESPEDIDA — LEE ESTO ATENTAMENTE:
 - Cuando vayas a terminar, primero llama a 'guardar_encuesta' con el status final.
-- Luego llama a 'finalizar_llamada' con un mensaje de despedida CÁLIDO pero BREVE (1 frase, 2-4 segundos de habla).
-- IMPORTANTE: La despedida debe ser CORTA para que la llamada cuelgue rápido. Una sola frase con gracias + hasta luego.
-- Ejemplos de despedidas correctas (cortas):
-    * "Muchas gracias por su tiempo, hasta luego."
-    * "Perfecto, gracias. Que tenga buen día. ¡Adiós!"
-    * "Gracias por atendernos. Hasta pronto."
-- NO uses despedidas largas de varias frases (eso retrasa el colgado y el cliente espera en vano).
+- Luego llama a 'finalizar_llamada' con un mensaje de despedida CÁLIDO pero ULTRA-BREVE.
+- OBLIGATORIO: Máximo 6-8 palabras. La llamada colgará al terminar de hablar; si es largo, el cliente espera.
+- Ejemplos correctos (cortos):
+    * "Muchas gracias. ¡Hasta luego!"
+    * "Perfecto, gracias. ¡Hasta pronto!"
+    * "Gracias por atendernos. ¡Adiós!"
+- PROHIBIDO: Despedidas largas ("Muchas gracias por su tiempo y por atendernos, de verdad. Que tenga..."). Usa UNA sola frase corta.
 - NO digas la despedida antes de llamar a la herramienta; deja que la herramienta la diga para que no se corte.
 
 EXCEPCIÓN - BUZÓN DE VOZ / FUERA DE COBERTURA:
@@ -102,7 +102,7 @@ ESTILO HUMANO (NATURAL Y CERCANO):
 4. UNA PREGUNTA CADA VEZ: no lances bloques largos; pregunta, escucha, confirma y continúa.
 5. ESCUCHA ACTIVA: si el cliente da un dato, refléjalo en una frase corta antes de seguir. Ej: "Entendido, un siete entonces..."
 6. CLARIDAD ORAL: prioriza lenguaje cotidiano, simple y directo.
-7. CIERRE CÁLIDO Y HUMANO: La despedida es lo que más se recuerda. Muestra calidez genuina: agradece de verdad, desea un buen día/tarde de manera personal, y termina con un "hasta luego" o "adiós" claro. Nunca cortes de golpe.
+7. CIERRE CÁLIDO Y HUMANO: la despedida debe ser muy breve (1 frase, 4-8 palabras), con agradecimiento y "hasta luego" o "adiós" al final.
 8. MENOS FRIALDAD: evita sonar corporativo o distante; usa un tono conversacional amable. Nada de frases estilo robot.
 9. ARRANQUE NATURAL: al iniciar la llamada, saluda de forma ágil y humana, sin pausas largas.
 10. RELLENOS NATURALES DE CONVERSACIÓN: usa ocasionalmente "A ver...", "Pues mira...", "Perfecto...", "Estupendo...", "Muy bien..." para sonar más fluido entre preguntas.
@@ -121,7 +121,7 @@ Reglas para sonar humano:
 6) Si el cliente dice que no tiene tiempo, NO insistas: cierra de forma rápida pero genuinamente cálida.
 7) Antes de finalizar, asegúrate de guardar el estado final con guardar_encuesta.
 8) En cuestionarios abiertos, continúa con la siguiente pregunta salvo rechazo explícito.
-9) DESPEDIDA NATURAL: cuando llegue el momento de despedirte, suena como una persona que termina una llamada de verdad. No te limites a "adiós" — añade un toque personal como "Que tenga un día estupendo, de verdad" o "Un placer haberle atendido, cuídese mucho".
+9) DESPEDIDA NATURAL: cuando llegue el momento de despedirte, usa una sola frase corta (4-8 palabras). Ejemplo: "Muchas gracias. Hasta luego."
 10) NUNCA SUENES FRÍO: si el cliente fue amable, devuelve esa amabilidad. Si fue escueto, sé respetuoso y directo. Adáptate al tono del cliente.
 """
 
@@ -224,6 +224,35 @@ def _normalize_message_text(content) -> str:
         return str(content_attr).strip()
 
     return str(content).strip()
+
+
+def _normalize_goodbye_message(message: str) -> str:
+    """
+    Garantiza una despedida corta para evitar retrasos al colgar.
+    """
+    default_goodbye = "Muchas gracias. Hasta luego."
+    text = _normalize_message_text(message)
+    if not text:
+        return default_goodbye
+
+    text = " ".join(text.split())
+    low = text.lower()
+
+    # Si el LLM se alarga, forzamos una plantilla breve.
+    if len(text.split()) > 8:
+        if any(k in low for k in ("buzón", "buzon", "contestador", "fuera de cobertura")):
+            return "Buzón detectado. Hasta luego."
+        if any(k in low for k in ("no es un buen momento", "no le quito más tiempo")):
+            return "Entendido, gracias. Hasta luego."
+        return default_goodbye
+
+    # Asegurar cierre explícito para señal de fin al cliente.
+    if not any(k in low for k in ("adiós", "adios", "hasta luego", "hasta pronto")):
+        if text[-1] in ".!?":
+            text = f"{text} Hasta luego."
+        else:
+            text = f"{text}. Hasta luego."
+    return text
 
 
 def _extract_transcript_from_session(session_obj) -> tuple[list[dict], str]:
@@ -364,10 +393,10 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
             "- El cliente debe sentir que habla con una persona profesional, cercana y resolutiva.\n"
             "- Si dudas entre sonar 'perfecto' o 'humano', prioriza humano siempre sin perder precisión.\n\n"
             "PLANTILLAS DE DESPEDIDA (úsalas como guía, adáptalas al contexto):\n"
-            "- Cuando todo salió bien: 'Perfecto, pues ya está todo. Muchas gracias por su tiempo y por atendernos, de verdad. Que tenga un día estupendo. ¡Hasta luego!'\n"
-            "- Cuando el cliente se mostró amable: 'Ha sido un placer hablar con usted. Muchísimas gracias. Que le vaya muy bien. ¡Hasta pronto!'\n"
-            "- Cuando fue breve: 'Muchas gracias por su tiempo. Le deseo un buen día. ¡Adiós!'\n"
-            "- Cuando el cliente rechazó o no tenía tiempo: 'Entiendo perfectamente, no le quito más tiempo. Que tenga un buen día. ¡Hasta luego!'\n"
+            "- Cuando todo salió bien: 'Muchas gracias. Hasta luego.'\n"
+            "- Cuando el cliente se mostró amable: 'Gracias por todo. Hasta pronto.'\n"
+            "- Cuando fue breve: 'Perfecto, gracias. Adiós.'\n"
+            "- Cuando el cliente rechazó o no tenía tiempo: 'Entendido, gracias. Hasta luego.'\n"
             "- SIEMPRE termina con un 'adiós', 'hasta luego' o 'hasta pronto' explícito al final para que el cliente sepa que la llamada acaba.\n\n"
         )
         full_instructions += "SIGUE ESTE GUION AL PIE DE LA LETRA:\n"
@@ -470,7 +499,7 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
     ) -> str | None:
         """
         Herramienta para decir unas últimas palabras y colgar la llamada.
-        Debes proporcionar obligatoriamente el mensaje de despedida — debe ser una despedida cálida y completa.
+        Debes proporcionar obligatoriamente el mensaje de despedida — debe ser cálida y breve.
         """
         # Protección anti-duplicado: evita repetir despedida si el LLM llama dos veces a la tool.
         if self.hangup_started:
@@ -489,7 +518,8 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
                         if latest_user:
                             break
 
-            goodbye_l = (mensaje_despedida_manual or "").lower()
+            safe_goodbye = _normalize_goodbye_message(mensaje_despedida_manual)
+            goodbye_l = safe_goodbye.lower()
             identity_cues = (
                 "quien eres", "quién eres", "de parte de", "quien llama", "quién llama", "de donde", "de dónde"
             )
@@ -512,12 +542,15 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         async def process_goodbye_and_hangup():
             try:
                 # Decir despedida sin interrupciones y colgar casi al instante al terminar
-                await self.session.say(mensaje_despedida_manual, allow_interruptions=False)
+                safe_goodbye = _normalize_goodbye_message(mensaje_despedida_manual)
+                if safe_goodbye != _normalize_message_text(mensaje_despedida_manual):
+                    logger.info(f"✂️ [{self.room_name}] Despedida normalizada a formato corto: '{safe_goodbye}'")
+                await self.session.say(safe_goodbye, allow_interruptions=False)
 
                 # Margen corto para evitar silencios largos tras despedida.
                 # Si se necesita ajustar, usar AGENT_HANGUP_DELAY_SECONDS en entorno.
-                wait_seconds = float(os.getenv("AGENT_HANGUP_DELAY_SECONDS", "0.35"))
-                wait_seconds = max(0.2, min(wait_seconds, 1.0))
+                wait_seconds = float(os.getenv("AGENT_HANGUP_DELAY_SECONDS", "0.15"))
+                wait_seconds = max(0.1, min(wait_seconds, 1.0))
                 logger.info(f"⏳ Esperando {wait_seconds:.1f}s antes de colgar.")
                 await asyncio.sleep(wait_seconds)
             except Exception as say_err:
