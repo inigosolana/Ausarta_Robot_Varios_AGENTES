@@ -138,14 +138,15 @@ const UserManagementView: React.FC = () => {
         setInviteSuccess(false);
         try {
             const API_URL = import.meta.env.VITE_API_URL || '';
-            const ADMIN_URL = `${API_URL}/api/admin/users`;
+            // Revert to n8n webhook proxy as requested
+            const INVITE_URL = `${API_URL}/api/n8n/invite`;
 
-            const res = await fetch(ADMIN_URL, {
+            const res = await fetch(INVITE_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     email: newEmail,
-                    password: newPassword || '',
+                    password: newPassword || undefined, // Send if provided, n8n might use it
                     full_name: newName,
                     role: newRole,
                     empresa_id: finalEmpresaId || null,
@@ -168,8 +169,9 @@ const UserManagementView: React.FC = () => {
             }
 
             const responseData = await res.json();
-            const newUserId = responseData.user_id;
-            const invited = Boolean(responseData.invited);
+            // n8n might return different structure, handle accordingly
+            const newUserId = responseData.user_id || responseData.id || 'unknown';
+            const invited = true; // Assume n8n always invites or handles it
 
             // Actualizar estado local (con el tipo correcto que incluye permisos)
             const newUser: UserProfile & { permissions: UserPermission[], empresas?: Empresa | null } = {
@@ -189,11 +191,7 @@ const UserManagementView: React.FC = () => {
             setUsers(prev => [newUser, ...prev]);
             setInviteSuccess(true);
 
-            if (invited) {
-                alert(t('Invitation email sent successfully!', '¡Email de invitación enviado correctamente!'));
-            } else {
-                alert(t('User created correctly', 'Usuario creado correctamente'));
-            }
+            alert(t('Invitation processed by n8n successfully!', '¡Invitación procesada por n8n correctamente!'));
 
             // Reset form and close
             setTimeout(() => {

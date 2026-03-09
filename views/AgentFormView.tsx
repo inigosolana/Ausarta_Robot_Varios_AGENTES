@@ -261,442 +261,243 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
             )}
 
             {activeTab === 'config' && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in">
-                    {/* Left Column: Agent Details */}
-                    <div className="md:col-span-2 space-y-6">
-                        {/* General Info */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
+                    {/* Column 1: Identity & Voice */}
+                    <div className="space-y-6">
                         <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                            <div className="flex items-center gap-2 mb-2">
                                 <Bot size={20} className="text-blue-500" />
-                                {t('Agent Identity', 'Identidad del Agente')}
-                            </h3>
+                                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('Identity', 'Identidad')}</h2>
+                            </div>
+                            
+                            <div className="flex flex-col items-center p-6 bg-gray-50 rounded-xl border border-gray-100 mb-4">
+                                <div className="relative group">
+                                    <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-100 to-blue-50 flex items-center justify-center border-4 border-white shadow-sm">
+                                        <Bot size={40} className="text-blue-500" />
+                                    </div>
+                                </div>
+                            </div>
 
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-3">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Agent Name', 'Nombre del Agente')} *</label>
+                                    <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">{t('Agent Name', 'Nombre del Agente')} *</label>
                                     <input
                                         type="text"
                                         value={formData.name}
                                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                        placeholder={t('Example: Dakota, Luna, Carlos...', 'Ej: Dakota, Luna, Carlos...')}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                        placeholder="Support Pro"
+                                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
                                     />
                                 </div>
+
                                 {!isPlatformOwner && (
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">{t('Agent Language', 'Idioma del Agente')}</label>
+                                        <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">{t('Language', 'Idioma')}</label>
                                         <select
                                             value={aiConfig.language || 'es'}
                                             onChange={(e) => setAiConfig({ ...aiConfig, language: e.target.value })}
-                                            className="w-full px-3 py-2 border rounded-lg bg-white"
+                                            className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
                                         >
-                                            <option value="es">{t('Spanish', 'Español')} (es)</option>
-                                            <option value="en">{t('English', 'Inglés')} (en)</option>
-                                            <option value="eu">{t('Basque', 'Euskera')} (eu)</option>
-                                            <option value="gl">{t('Galician', 'Gallego')} (gl)</option>
+                                            <option value="es">🇪🇸 {t('Spanish', 'Español')}</option>
+                                            <option value="en">🇺🇸 {t('English', 'Inglés')}</option>
+                                            <option value="eu">🏴 {t('Basque', 'Euskera')}</option>
+                                            <option value="gl">🏴 {t('Galician', 'Gallego')}</option>
                                         </select>
                                     </div>
                                 )}
-                                {isPlatformOwner ? (
+
+                                {isPlatformOwner && (
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Company / Project', 'Empresa / Proyecto')} *</label>
+                                        <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">{t('Company', 'Empresa')} *</label>
                                         <select
                                             value={formData.empresa_id || ''}
                                             onChange={(e) => setFormData({ ...formData, empresa_id: e.target.value ? Number(e.target.value) : null })}
-                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none bg-white"
+                                            className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
                                         >
-                                            <option value="" disabled>-- {t('Select Company', 'Selecciona Empresa')} --</option>
+                                            <option value="" disabled>-- {t('Select', 'Seleccionar')} --</option>
                                             {empresas.map(emp => (
                                                 <option key={emp.id} value={emp.id}>{emp.nombre}</option>
                                             ))}
                                         </select>
                                     </div>
-                                ) : (
-                                    !isRegularUser ? (
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Use Case', 'Caso de Uso')}</label>
-                                            <input
-                                                type="text"
-                                                value={formData.use_case}
-                                                onChange={(e) => setFormData({ ...formData, use_case: e.target.value })}
-                                                placeholder={t('Example: Satisfaction Survey', 'Ej: Encuesta de satisfacción')}
-                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                            />
-                                        </div>
-                                    ) : null
                                 )}
                             </div>
-
-                            {isPlatformOwner && (
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Use Case', 'Caso de Uso')}</label>
-                                    <input
-                                        type="text"
-                                        value={formData.use_case}
-                                        onChange={(e) => setFormData({ ...formData, use_case: e.target.value })}
-                                        placeholder={t('Example: Satisfaction Survey', 'Ej: Encuesta de satisfacción')}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                    />
-                                </div>
-                            )}
-
-                            {isPlatformOwner && (
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Initial Greeting', 'Saludo Inicial')}</label>
-                                    <input
-                                        type="text"
-                                        value={formData.greeting}
-                                        onChange={(e) => setFormData({ ...formData, greeting: e.target.value })}
-                                        placeholder={t('Hello, I am...', 'Hola, soy...')}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                    />
-                                    <p className="text-xs text-gray-400 mt-1">{t('The first thing the agent will say when answering.', 'Lo primero que dirá el agente al contestar.')}</p>
-                                </div>
-                            )}
-
-                            {isPlatformOwner && (
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Description', 'Descripción')}</label>
-                                    <textarea
-                                        rows={2}
-                                        value={formData.description}
-                                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                        placeholder={t('Brief description of the agent\'s purpose', 'Breve descripción del propósito del agente')}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none resize-none"
-                                    />
-                                </div>
-                            )}
                         </section>
 
-                        {/* Instructions */}
+                        {/* Voice Section moved to Column 1 */}
                         <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                            <div className="flex justify-between items-center">
-                                <div className="flex items-center gap-3">
-                                    <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                                        <Brain size={20} className="text-purple-500" />
-                                        {t('Instructions (Prompt)', 'Instrucciones (Prompt)')}
-                                    </h3>
-                                    {(hasPermission('ai_prompt_generator') || isPlatformOwner) && (
-                                        <button
-                                            onClick={() => setShowAiPromptModal(true)}
-                                            className="flex items-center gap-1.5 px-3 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-full border border-purple-200 transition-colors"
-                                        >
-                                            <Sparkles size={14} />
-                                            {t('Extra AI Wizard', 'Mago IA Extra')}
-                                        </button>
-                                    )}
-                                </div>
-
-                                {!isRegularUser && (
-                                    <div className="flex items-center gap-2">
-                                        <select
-                                            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 max-w-[150px]"
-                                            onChange={(e) => {
-                                                const template = templates.find(t => t.id === Number(e.target.value));
-                                                if (template) {
-                                                    if (confirm(t('Replace current instructions with this template?', '¿Reemplazar las instrucciones actuales con esta plantilla?'))) {
-                                                        setFormData({ ...formData, instructions: template.content });
-                                                    }
-                                                }
-                                            }}
-                                            value=""
-                                        >
-                                            <option value="" disabled>📂 {t('Load Template...', 'Cargar Plantilla...')}</option>
-                                            {templates.map(t => (
-                                                <option key={t.id} value={t.id}>{t.name}</option>
-                                            ))}
-                                        </select>
-
-                                        <button
-                                            onClick={async () => {
-                                                const name = prompt(t('Name for the new template:', 'Nombre para la nueva plantilla:'));
-                                                if (name) {
-                                                    const { error } = await supabase.from('prompt_templates').insert({
-                                                        name,
-                                                        description: 'Creado desde el editor',
-                                                        content: formData.instructions
-                                                    });
-                                                    if (!error) {
-                                                        alert(t('Template saved!', 'Plantilla guardada!'));
-                                                        loadTemplates();
-                                                    } else {
-                                                        alert(t('Error saving template', 'Error al guardar plantilla'));
-                                                    }
-                                                }
-                                            }}
-                                            className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg border border-gray-200 transition-colors"
-                                        >
-                                            💾 {t('Save as Template', 'Guardar como Plantilla')}
-                                        </button>
+                            <div className="flex items-center gap-2 mb-2">
+                                <Speaker size={20} className="text-purple-500" />
+                                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('Voice', 'Voz')}</h2>
+                            </div>
+                            
+                            <div className="p-4 bg-purple-50/50 border border-purple-100 rounded-lg flex items-center justify-between cursor-pointer hover:bg-purple-50 transition-colors">
+                                <div className="flex items-center gap-3 w-full">
+                                    <div className="p-2 bg-white rounded-full shadow-sm">
+                                        <Speaker size={18} className="text-purple-500" />
                                     </div>
-                                )}
+                                    <div className="flex-1">
+                                        <label className="block text-xs font-medium text-purple-700 mb-1">{t('Select Voice', 'Seleccionar Voz')}</label>
+                                        <select
+                                            value={formData.voice_id || aiConfig.tts_voice}
+                                            onChange={(e) => {
+                                                setAiConfig({ ...aiConfig, tts_voice: e.target.value });
+                                                setFormData({ ...formData, voice_id: e.target.value });
+                                            }}
+                                            className="w-full bg-transparent border-none p-0 text-sm font-bold text-gray-800 focus:ring-0 cursor-pointer"
+                                        >
+                                            <optgroup label={t('Spanish', 'Español')}>
+                                                <option value="cefcb124-080b-4655-b31f-932f3ee743de">{t('Female (Castilian)', 'Chica (Castellano)')}</option>
+                                                <option value="3380a516-6acc-4389-97c8-68273b540dd3">{t('Male (Castilian)', 'Chico (Castellano)')}</option>
+                                                <option value="44c5567b-1b68-4873-8231-4e7660f749ad">{t('Female (Ausarta)', 'Chica (Ausarta)')}</option>
+                                            </optgroup>
+                                            <optgroup label={t('Basque', 'Euskera')}>
+                                                <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">{t('Female', 'Chica')}</option>
+                                                <option value="a62209c3-9f0a-4474-9b51-84b191593f49">{t('Male', 'Chico')}</option>
+                                            </optgroup>
+                                            <optgroup label={t('Galician', 'Gallego')}>
+                                                <option value="96eade6e-d863-4f9a-8b08-5d7b74d1643b">{t('Female', 'Chica')}</option>
+                                                <option value="4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2">{t('Male', 'Chico')}</option>
+                                            </optgroup>
+                                            <optgroup label={t('English', 'Inglés')}>
+                                                <option value="62ae83ad-4f6a-430b-af41-a9bede9286ca">{t('Female', 'Chica')}</option>
+                                                <option value="0ad65e7f-006c-47cf-bd31-52279d487913">{t('Male', 'Chico')}</option>
+                                            </optgroup>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+
+                    {/* Column 2: Personality & Context */}
+                    <div className="space-y-6">
+                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Brain size={20} className="text-indigo-500" />
+                                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('Personality', 'Personalidad')}</h2>
                             </div>
 
-                            <textarea
-                                rows={15}
-                                value={formData.instructions}
-                                onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
-                                placeholder={t('Define the agent\'s personality, mission, and rules here...', 'Define aquí la personalidad, misión y reglas del agente...')}
-                                className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500/20 outline-none font-mono text-sm bg-gray-50"
-                            />
-                            <p className="text-xs text-gray-500">{t('Define the agent\'s personality, mission, and rules here.', 'Define aquí la personalidad, misión y reglas del agente.')}</p>
-                        </section>
-
-                        {/* Company Context / Personality */}
-                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                            <h3 className="text-lg font-bold text-gray-800">
-                                {t('Company Context (Knowledge Base)', 'Contexto de la Empresa (Knowledge Base)')}
-                            </h3>
-                            <textarea
-                                rows={8}
-                                value={formData.company_context || ''}
-                                onChange={(e) => setFormData({ ...formData, company_context: e.target.value })}
-                                placeholder={t('Add key facts about the company, products, policies, FAQs and objection handling.', 'Añade datos clave de la empresa, productos, políticas, FAQs y manejo de objeciones.')}
-                                className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm bg-gray-50"
-                            />
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-6 p-4 bg-gray-50 rounded-xl border border-gray-100">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Enthusiasm Level', 'Nivel de Entusiasmo')}</label>
-                                    <select
-                                        value={formData.enthusiasm_level || 'Normal'}
-                                        onChange={(e) => setFormData({ ...formData, enthusiasm_level: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg bg-white"
-                                    >
-                                        <option value="Bajo">{t('Low', 'Bajo')}</option>
-                                        <option value="Normal">{t('Normal', 'Normal')}</option>
-                                        <option value="Alto">{t('High', 'Alto')}</option>
-                                        <option value="Extremo">{t('Extreme', 'Extremo')}</option>
-                                    </select>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-xs font-medium text-gray-600">{t('Enthusiasm', 'Entusiasmo')}</span>
+                                        <span className="text-xs font-bold text-indigo-600">{formData.enthusiasm_level || 'Normal'}</span>
+                                    </div>
+                                    <input 
+                                        type="range" 
+                                        min="0" 
+                                        max="3" 
+                                        step="1"
+                                        value={['Bajo', 'Normal', 'Alto', 'Extremo'].indexOf(formData.enthusiasm_level || 'Normal')}
+                                        onChange={(e) => {
+                                            const levels = ['Bajo', 'Normal', 'Alto', 'Extremo'];
+                                            setFormData({ ...formData, enthusiasm_level: levels[Number(e.target.value)] });
+                                        }}
+                                        className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                                    />
+                                    <div className="flex justify-between mt-1 px-1">
+                                        <span className="text-[10px] text-gray-400">{t('Low', 'Bajo')}</span>
+                                        <span className="text-[10px] text-gray-400">{t('Extreme', 'Extremo')}</span>
+                                    </div>
                                 </div>
+
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">
-                                        {t('Voice Speed', 'Velocidad de Voz')} ({(formData.speaking_speed ?? 1.0).toFixed(2)}x)
-                                    </label>
-                                    <input
-                                        type="range"
-                                        min="0.7"
-                                        max="1.3"
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-xs font-medium text-gray-600">{t('Speed', 'Velocidad')}</span>
+                                        <span className="text-xs font-bold text-indigo-600">{(formData.speaking_speed ?? 1.0).toFixed(2)}x</span>
+                                    </div>
+                                    <input 
+                                        type="range" 
+                                        min="0.7" 
+                                        max="1.3" 
                                         step="0.05"
                                         value={formData.speaking_speed ?? 1.0}
                                         onChange={(e) => setFormData({ ...formData, speaking_speed: Number(e.target.value) })}
-                                        className="w-full"
+                                        className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                                     />
+                                    <div className="flex justify-between mt-1 px-1">
+                                        <span className="text-[10px] text-gray-400">0.7x</span>
+                                        <span className="text-[10px] text-gray-400">1.3x</span>
+                                    </div>
                                 </div>
                             </div>
                         </section>
 
-                        {/* Critical Rules (Only for Admins) */}
-                        {isPlatformOwner && (
-                            <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                                    <X size={20} className="text-red-500" />
-                                    {t('Critical Rules (Non-negotiable)', 'Reglas Críticas (No negociables)')}
-                                </h3>
-                                <textarea
-                                    rows={5}
-                                    value={formData.critical_rules}
-                                    onChange={(e) => setFormData({ ...formData, critical_rules: e.target.value })}
-                                    placeholder={t('Ex: Do not hang up without thanking first. Do not give technical information. Repeat if the client does not understand...', 'Ej: No colgar sin antes agradecer. No dar información técnica. Repetir si el cliente no entiende...')}
-                                    className="w-full px-4 py-3 border border-red-100 rounded-lg focus:ring-2 focus:ring-red-500/20 outline-none font-mono text-sm bg-red-50/20"
-                                />
-                                <p className="text-xs text-gray-500">{t('These rules will be applied with maximum priority over any other instruction.', 'Estas reglas se aplicarán con máxima prioridad sobre cualquier otra instrucción.')}</p>
-                            </section>
-                        )}
-                    </div>
-
-                    {/* Right Column: AI Config */}
-                    <div className="space-y-6">
-                        {/* LLM Config (Only Provider/Model for Admins) */}
-                        {!isRegularUser && (
-                            <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                                <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                                    <Brain size={16} /> {t('Intelligence and Language', 'Inteligencia e Idioma')}
-                                </h3>
-
-                                {isPlatformOwner && (
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
-                                        <select
-                                            value={aiConfig.llm_provider}
-                                            onChange={(e) => {
-                                                const p = e.target.value;
-                                                let m = 'llama-3.3-70b-versatile';
-                                                if (p === 'google') m = 'models/gemini-2.0-flash';
-                                                if (p === 'openai') m = 'gpt-4o';
-                                                if (p === 'deepseek') m = 'deepseek-chat';
-                                                setAiConfig({ ...aiConfig, llm_provider: p, llm_model: m });
-                                            }}
-                                            className="w-full px-3 py-2 border rounded-lg bg-gray-50"
-                                        >
-                                            <option value="openai">OpenAI (GPT-4o)</option>
-                                            <option value="groq">Groq (Llama 3, Mixtral)</option>
-                                            <option value="google">Google Gemini</option>
-                                            <option value="deepseek">DeepSeek (V3, R1)</option>
-                                        </select>
-                                    </div>
-                                )}
-
-                                {isPlatformOwner && (
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">{t('Agent Language', 'Idioma del Agente')}</label>
-                                        <select
-                                            value={aiConfig.language || 'es'}
-                                            onChange={(e) => setAiConfig({ ...aiConfig, language: e.target.value })}
-                                            className="w-full px-3 py-2 border rounded-lg bg-white"
-                                        >
-                                            <option value="es">{t('Spanish', 'Español')} (es)</option>
-                                            <option value="en">{t('English', 'Inglés')} (en)</option>
-                                            <option value="eu">{t('Basque', 'Euskera')} (eu)</option>
-                                            <option value="gl">{t('Galician', 'Gallego')} (gl)</option>
-                                        </select>
-                                    </div>
-                                )}
-
-                                {!isPlatformOwner && (
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">{t('Intelligence Level', 'Nivel de Inteligencia')}</label>
-                                        <select
-                                            value={aiConfig.llm_model}
-                                            onChange={(e) => setAiConfig({ ...aiConfig, llm_model: e.target.value })}
-                                            className="w-full px-3 py-2 border rounded-lg bg-white"
-                                        >
-                                            <option value="gpt-4o">Alta (Recomendado)</option>
-                                            <option value="gpt-4o-mini">Básica (Rápido)</option>
-                                        </select>
-                                    </div>
-                                )}
-
-                                {isPlatformOwner && (
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
-                                        <select
-                                            value={aiConfig.llm_model}
-                                            onChange={(e) => setAiConfig({ ...aiConfig, llm_model: e.target.value })}
-                                            className="w-full px-3 py-2 border rounded-lg bg-white"
-                                        >
-                                            {aiConfig.llm_provider === 'openai' ? (
-                                                <>
-                                                    <option value="gpt-4o">GPT-4o (High Intelligence)</option>
-                                                    <option value="gpt-4o-mini">GPT-4o mini (Fast & Cheap)</option>
-                                                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                                                </>
-                                            ) : aiConfig.llm_provider === 'google' ? (
-                                                <>
-                                                    <option value="models/gemini-2.0-flash">Gemini 2.0 Flash (Fast)</option>
-                                                    <option value="models/gemini-2.0-pro-exp-02-05">Gemini 2.0 Pro (Most Powerful)</option>
-                                                    <option value="models/gemini-2.0-flash-lite">Gemini 2.0 Flash Lite</option>
-                                                    <option value="models/gemini-1.5-pro">Gemini 1.5 Pro</option>
-                                                    <option value="models/gemini-1.5-flash">Gemini 1.5 Flash</option>
-                                                </>
-                                            ) : aiConfig.llm_provider === 'deepseek' ? (
-                                                <>
-                                                    <option value="deepseek-chat">DeepSeek-V3 (Chat)</option>
-                                                    <option value="deepseek-reasoner">DeepSeek-R1 (Reasoning)</option>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
-                                                    <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
-                                                </>
-                                            )}
-                                        </select>
-                                    </div>
-                                )}
-                            </section>
-                        )}
-
-                        {/* TTS Config */}
                         <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                                <Speaker size={16} /> {t('Voice (TTS)', 'Voz (TTS)')}
-                            </h3>
-                            {isPlatformOwner && (
+                            <div className="flex items-center gap-2 mb-2">
+                                <Brain size={20} className="text-green-500" />
+                                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('Knowledge Base', 'Base de Conocimiento')}</h2>
+                            </div>
+                            
+                            <div className="space-y-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
-                                    <select
-                                        value={aiConfig.tts_provider}
-                                        onChange={(e) => setAiConfig({ ...aiConfig, tts_provider: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg bg-gray-50"
-                                    >
-                                        <option value="cartesia">Cartesia (Sonic)</option>
-                                        <option value="openai">OpenAI TTS</option>
-                                        <option value="elevenlabs">ElevenLabs</option>
-                                    </select>
-                                </div>
-                            )}
-                            {isPlatformOwner && (
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
-                                    <input
-                                        type="text"
-                                        value={aiConfig.tts_model}
-                                        onChange={(e) => setAiConfig({ ...aiConfig, tts_model: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg"
+                                    <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">{t('Company Context', 'Contexto de la Empresa')}</label>
+                                    <textarea
+                                        rows={8}
+                                        value={formData.company_context || ''}
+                                        onChange={(e) => setFormData({ ...formData, company_context: e.target.value })}
+                                        placeholder={t('Describe your company services, tone, and main objectives...', 'Describe los servicios, tono y objetivos principales...')}
+                                        className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-green-500/20 outline-none resize-none"
                                     />
                                 </div>
-                            )}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Select Voice', 'Seleccionar Voz')}</label>
-                                <select
-                                    value={formData.voice_id || aiConfig.tts_voice}
-                                    onChange={(e) => {
-                                        setAiConfig({ ...aiConfig, tts_voice: e.target.value });
-                                        setFormData({ ...formData, voice_id: e.target.value });
-                                    }}
-                                    className="w-full px-3 py-2 border rounded-lg font-medium text-sm bg-white"
+                            </div>
+                        </section>
+                    </div>
+
+                    {/* Column 3: System Prompt (Full Height) */}
+                    <div className="space-y-6">
+                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4 h-full flex flex-col">
+                            <div className="flex justify-between items-center mb-2">
+                                <div className="flex items-center gap-2">
+                                    <Sparkles size={20} className="text-amber-500" />
+                                    <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('System Prompt', 'Prompt del Sistema')}</h2>
+                                </div>
+                                <button
+                                    onClick={() => setShowAiPromptModal(true)}
+                                    className="text-xs bg-amber-50 text-amber-600 px-2 py-1 rounded-md font-bold hover:bg-amber-100 transition-colors"
                                 >
-                                    <optgroup label={t('Spanish', 'Español')}>
-                                        <option value="cefcb124-080b-4655-b31f-932f3ee743de">{t('Female (Castilian)', 'Chica (Castellano)')}</option>
-                                        <option value="3380a516-6acc-4389-97c8-68273b540dd3">{t('Male (Castilian)', 'Chico (Castellano)')}</option>
-                                        <option value="44c5567b-1b68-4873-8231-4e7660f749ad">{t('Female (Ausarta)', 'Chica (Ausarta)')}</option>
-                                    </optgroup>
-                                    <optgroup label={t('Basque', 'Euskera')}>
-                                        <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">{t('Female', 'Chica')}</option>
-                                        <option value="a62209c3-9f0a-4474-9b51-84b191593f49">{t('Male', 'Chico')}</option>
-                                    </optgroup>
-                                    <optgroup label={t('Galician', 'Gallego')}>
-                                        <option value="96eade6e-d863-4f9a-8b08-5d7b74d1643b">{t('Female', 'Chica')}</option>
-                                        <option value="4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2">{t('Male', 'Chico')}</option>
-                                    </optgroup>
-                                    <optgroup label={t('English', 'Inglés')}>
-                                        <option value="62ae83ad-4f6a-430b-af41-a9bede9286ca">{t('Female', 'Chica')}</option>
-                                        <option value="0ad65e7f-006c-47cf-bd31-52279d487913">{t('Male', 'Chico')}</option>
-                                    </optgroup>
-                                    {isPlatformOwner && !["cefcb124-080b-4655-b31f-932f3ee743de", "3380a516-6acc-4389-97c8-68273b540dd3", "44c5567b-1b68-4873-8231-4e7660f749ad", "a62209c3-9f0a-4474-9b51-84b191593f49", "99543693-cf6e-4e1d-9259-2e5cc9a0f76b", "4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2", "96eade6e-d863-4f9a-8b08-5d7b74d1643b", "62ae83ad-4f6a-430b-af41-a9bede9286ca", "0ad65e7f-006c-47cf-bd31-52279d487913"].includes(aiConfig.tts_voice) && (
-                                        <option value={aiConfig.tts_voice}>{t('Custom', 'Personalizado')}: {aiConfig.tts_voice}</option>
-                                    )}
+                                    ✨ {t('AI Wizard', 'Mago IA')}
+                                </button>
+                            </div>
+
+                            <div className="flex-1 relative bg-[#1e1e1e] border border-gray-800 rounded-xl overflow-hidden flex flex-col shadow-inner">
+                                <div className="flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-[#333]">
+                                    <div className="flex gap-1.5">
+                                        <div className="w-2.5 h-2.5 rounded-full bg-red-500/80"></div>
+                                        <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80"></div>
+                                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80"></div>
+                                    </div>
+                                    <span className="text-[10px] font-mono text-gray-500">instructions.prompt</span>
+                                </div>
+                                <textarea
+                                    value={formData.instructions}
+                                    onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
+                                    placeholder={t('Define the agent\'s personality, mission, and rules here...', 'Define aquí la personalidad, misión y reglas del agente...')}
+                                    className="flex-1 w-full p-4 bg-transparent text-emerald-400 font-mono text-xs focus:ring-0 border-0 resize-none leading-relaxed outline-none"
+                                    spellCheck={false}
+                                />
+                            </div>
+
+                            {/* Templates Dropdown */}
+                            <div className="mt-2 flex gap-2">
+                                <select
+                                    className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50"
+                                    onChange={(e) => {
+                                        const template = templates.find(t => t.id === Number(e.target.value));
+                                        if (template && confirm(t('Replace instructions?', '¿Reemplazar instrucciones?'))) {
+                                            setFormData({ ...formData, instructions: template.content });
+                                        }
+                                    }}
+                                    value=""
+                                >
+                                    <option value="" disabled>📂 {t('Load Template...', 'Cargar Plantilla...')}</option>
+                                    {templates.map(t => (
+                                        <option key={t.id} value={t.id}>{t.name}</option>
+                                    ))}
                                 </select>
                             </div>
                         </section>
-
-                        {/* STT Config (Only if Platform Owner) */}
-                        {isPlatformOwner && (
-                            <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
-                                <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                                    <Mic size={16} /> {t('Transcription (STT)', 'Transcripción (STT)')}
-                                </h3>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Provider', 'Proveedor')}</label>
-                                    <select
-                                        value={aiConfig.stt_provider}
-                                        onChange={(e) => setAiConfig({ ...aiConfig, stt_provider: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg bg-gray-50"
-                                    >
-                                        <option value="deepgram">Deepgram</option>
-                                        <option value="openai">OpenAI Whisper</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Model', 'Modelo')}</label>
-                                    <input
-                                        type="text"
-                                        value={aiConfig.stt_model}
-                                        onChange={(e) => setAiConfig({ ...aiConfig, stt_model: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg"
-                                    />
-                                </div>
-                            </section>
-                        )}
                     </div>
                 </div>
             )}
