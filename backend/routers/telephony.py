@@ -12,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from models.schemas import CallEndRequest, EncuestaData
 from services.supabase_service import supabase
-from services.livekit_service import lkapi
+from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
 from livekit import api
 import aiohttp
 import asyncio
@@ -299,11 +299,12 @@ async def make_outbound_call(request: dict):
         else:
             encuesta_id = random.randint(1000, 9999)
 
-        agent_name_dispatch = os.getenv("AGENT_NAME_DISPATCH", "default_agent")
-        # Formato aislado: empresa + campaña + encuesta_id
-        # Para llamadas ad-hoc (sin campaña), usamos camp_0 como placeholder
+        agent_name_dispatch = os.getenv("AGENT_NAME_DISPATCH", "ausarta_agent")
+        # Formato aislado estricto con prefijo de dominio propio:
+        # llamada_ausarta_empresa_{id}_campana_{id}_contacto_{id}_encuesta_{id}
+        contacto_id = int(lead_id) if lead_id else 0
         camp_id_str = str(campaign_id) if campaign_id else "0"
-        room_name = f"empresa_{emp_id or 0}_camp_{camp_id_str}_call_{encuesta_id}"
+        room_name = f"llamada_ausarta_empresa_{emp_id or 0}_campana_{camp_id_str}_contacto_{contacto_id}_encuesta_{encuesta_id}"
         sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
 
         # Prevención de doble despacho
@@ -312,8 +313,18 @@ async def make_outbound_call(request: dict):
             return {"status": "ok", "message": "Call already initiated", "roomName": room_name}
         _processing_rooms.add(room_name)
 
+        room_metadata = {
+            "empresa_id": int(emp_id or 0),
+            "campaign_id": int(campaign_id or 0),
+            "campana_id": int(campaign_id or 0),
+            "contacto_id": contacto_id,
+            "client_id": contacto_id,
+            "lead_id": contacto_id,
+            "survey_id": int(encuesta_id),
+        }
+
         try:
-            await lkapi.room.create_room(api.CreateRoomRequest(name=room_name))
+            await create_isolated_room(room_name, metadata=room_metadata)
         except Exception as e:
             logger.warning(f"⚠️ Aviso al crear sala {room_name}: {e}")
 
@@ -329,19 +340,12 @@ async def make_outbound_call(request: dict):
             _processing_rooms.discard(room_name)
             raise sip_err
 
-        # Despachar agente explícitamente con Sello Multi-Tenant
+        # Despachar agente explícitamente con metadata de aislamiento
         try:
-            import json
-            metadata_str = json.dumps({
-                "empresa_id": int(emp_id or 0),
-                "survey_id": int(encuesta_id)
-            })
-            await lkapi.agent_dispatch.create_dispatch(
-                api.CreateAgentDispatchRequest(
-                    room_name=room_name,
-                    agent_name=agent_name_dispatch,
-                    metadata=metadata_str
-                )
+            await dispatch_agent_explicit(
+                room_name=room_name,
+                agent_name=agent_name_dispatch,
+                metadata=room_metadata,
             )
             logger.info(f"✅ Agente {agent_name_dispatch} despachado a sala {room_name}")
         except Exception as dispatch_err:
@@ -385,6 +389,7 @@ async def livekit_webhook(request: Request):
     event = body.get("event", "")
     room_info = body.get("room", {})
     room_name = room_info.get("name", "")
+    room_metadata_raw = room_info.get("metadata")
 
     logger.info(f"🔔 [LK Webhook] Evento: {event} | Sala: {room_name}")
 
@@ -392,20 +397,34 @@ async def livekit_webhook(request: Request):
         return {"status": "ignored", "reason": "No room name"}
 
     # Extraer encuesta_id del nombre de sala (formato: {agent_prefix}_encuesta_{id})
+    room_metadata = {}
+    if isinstance(room_metadata_raw, str) and room_metadata_raw.strip():
+        try:
+            import json
+            room_metadata = json.loads(room_metadata_raw)
+        except Exception:
+            logger.warning(f"[LK Webhook] metadata no parseable en sala {room_name}: {room_metadata_raw}")
+
     encuesta_id = _extract_encuesta_id_from_room(room_name)
     if not encuesta_id:
-        logger.info(f"[LK Webhook] No se pudo extraer encuesta_id de sala {room_name}")
-        return {"status": "ignored", "reason": "No encuesta_id in room name"}
+        try:
+            encuesta_id = int(room_metadata.get("survey_id") or 0)
+        except Exception:
+            encuesta_id = 0
+
+    if not encuesta_id:
+        logger.info(f"[LK Webhook] No se pudo extraer encuesta_id de sala {room_name} ni metadata")
+        return {"status": "ignored", "reason": "No encuesta_id in room name/metadata"}
 
     if event == "room_finished":
-        await _handle_room_finished(encuesta_id, room_name)
+        await _handle_room_finished(encuesta_id, room_name, room_metadata)
 
     elif event == "participant_left":
         participant = body.get("participant", {})
         participant_identity = participant.get("identity", "")
         # Solo nos interesa cuando el cliente (no el agente) se va
         if not participant_identity.startswith("agent-"):
-            await _handle_participant_left(encuesta_id, room_name, participant_identity)
+            await _handle_participant_left(encuesta_id, room_name, participant_identity, room_metadata)
 
     return {"status": "ok", "event": event}
 
@@ -413,22 +432,23 @@ async def livekit_webhook(request: Request):
 def _extract_encuesta_id_from_room(room_name: str) -> int | None:
     """
     Extrae el encuesta_id del nombre de sala. Soporta dos formatos:
-      - Nuevo:   empresa_{id}_camp_{id}_call_{encuesta_id}
+      - Nuevo:   llamada_ausarta_empresa_{id}_campana_{id}_contacto_{id}_encuesta_{encuesta_id}
+      - Intermedio: empresa_{id}_camp_{id}_call_{encuesta_id}
       - Legacy:  {prefix}_encuesta_{encuesta_id}  o  encuesta_{encuesta_id}
     Retorna None si no se puede extraer.
     """
     try:
-        # Formato nuevo: empresa_N_camp_N_call_N
-        if "call_" in room_name:
-            after_call = room_name.split("call_")[-1]
-            candidate = after_call.split("_")[0]
-            if candidate.isdigit():
-                return int(candidate)
-
-        # Formato legacy: ..._encuesta_{id}
+        # Formato nuevo estricto: ..._encuesta_{id}
         if "encuesta_" in room_name:
             after_enc = room_name.split("encuesta_")[-1]
             candidate = after_enc.split("_")[0]
+            if candidate.isdigit():
+                return int(candidate)
+
+        # Formato intermedio: empresa_N_camp_N_call_N
+        if "call_" in room_name:
+            after_call = room_name.split("call_")[-1]
+            candidate = after_call.split("_")[0]
             if candidate.isdigit():
                 return int(candidate)
 
@@ -444,7 +464,7 @@ def _extract_encuesta_id_from_room(room_name: str) -> int | None:
 
 
 
-async def _handle_room_finished(encuesta_id: int, room_name: str):
+async def _handle_room_finished(encuesta_id: int, room_name: str, room_metadata: dict | None = None):
     """
     La sala se cerró. Si el estado en BD todavía no es terminal,
     significa que la llamada no se completó normalmente → marcamos 'unreached'.
@@ -467,7 +487,7 @@ async def _handle_room_finished(encuesta_id: int, room_name: str):
 
         if current_status not in _TERMINAL_STATUSES:
             # La sala cerró pero el agente no guardó un status final → no contestó
-            logger.warning(f"📵 [LK Webhook] Sala {room_name} cerrada sin status terminal. Forzando 'unreached'.")
+            logger.warning(f"📵 [LK Webhook] Sala {room_name} cerrada sin status terminal. Forzando 'unreached'. metadata={room_metadata or {}}")
             await asyncio.to_thread(
                 lambda: supabase.table("encuestas").update({"status": "unreached"}).eq("id", encuesta_id).execute()
             )
@@ -479,10 +499,10 @@ async def _handle_room_finished(encuesta_id: int, room_name: str):
         logger.error(f"❌ [LK Webhook] Error en room_finished para encuesta {encuesta_id}: {e}")
 
 
-async def _handle_participant_left(encuesta_id: int, room_name: str, identity: str):
+async def _handle_participant_left(encuesta_id: int, room_name: str, identity: str, room_metadata: dict | None = None):
     """
     Un participante (cliente) salió de la sala.
     No hacemos nada terminante aquí: esperamos el evento room_finished.
     Solo registramos el evento para auditoría.
     """
-    logger.info(f"👤 [LK Webhook] Participante '{identity}' salió de sala {room_name} (encuesta {encuesta_id}). Esperando room_finished.")
+    logger.info(f"👤 [LK Webhook] Participante '{identity}' salió de sala {room_name} (encuesta {encuesta_id}, metadata={room_metadata or {}}). Esperando room_finished.")

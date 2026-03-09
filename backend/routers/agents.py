@@ -51,6 +51,10 @@ async def update_agent(agent_id: str, config: dict):
         if "description" in config: db_config["description"] = config["description"]
         if "useCase" in config or "use_case" in config: 
             db_config["use_case"] = config.get("useCase") or config.get("use_case")
+        if "company_context" in config: db_config["company_context"] = config["company_context"]
+        if "enthusiasm_level" in config: db_config["enthusiasm_level"] = config["enthusiasm_level"]
+        if "voice_id" in config: db_config["voice_id"] = config["voice_id"]
+        if "speaking_speed" in config: db_config["speaking_speed"] = config["speaking_speed"]
         if "empresa_id" in config: db_config["empresa_id"] = config["empresa_id"]
         
         db_config["updated_at"] = datetime.utcnow().isoformat()
@@ -112,6 +116,10 @@ async def create_agent(config: dict):
             "greeting": config.get("greeting", "Buenas, ¿tiene un momento?"),
             "description": config.get("description", ""),
             "use_case": config.get("useCase") or config.get("use_case", ""),
+            "company_context": config.get("company_context", ""),
+            "enthusiasm_level": config.get("enthusiasm_level", "Normal"),
+            "voice_id": config.get("voice_id") or config.get("tts_voice", "cefcb124-080b-4655-b31f-932f3ee743de"),
+            "speaking_speed": config.get("speaking_speed", 1.0),
             "empresa_id": config.get("empresa_id"),
         }
         

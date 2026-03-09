@@ -4,10 +4,18 @@ from datetime import datetime
 
 class VoiceAgentCreate(BaseModel):
     name: str
+    company_context: Optional[str] = None
+    enthusiasm_level: Optional[str] = "Normal"
+    voice_id: Optional[str] = None
+    speaking_speed: Optional[float] = 1.0
 
 class VoiceAgentUpdate(BaseModel):
     instructions: Optional[str] = None
     greeting: Optional[str] = None
+    company_context: Optional[str] = None
+    enthusiasm_level: Optional[str] = None
+    voice_id: Optional[str] = None
+    speaking_speed: Optional[float] = None
     agent_config: Optional[dict] = None # Para guardar configuraciones completas si se necesita
 
 class CampaignCreate(BaseModel):

@@ -15,7 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 from typing import Optional, List
 from services.supabase_service import supabase
-from services.livekit_service import lkapi
+from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
 from livekit import api as lk_api
 from pydantic import BaseModel
 from models.schemas import CampaignModel, CampaignLeadModel
@@ -254,6 +254,9 @@ async def get_agent_config_by_survey(survey_id: int):
                 "instructions": "Eres un asistente.", 
                 "voice_id": "cefcb124-080b-4655-b31f-932f3ee743de", 
                 "llm_model": "llama-3.3-70b-versatile",
+                "company_context": "",
+                "enthusiasm_level": "Normal",
+                "speaking_speed": 1.0,
                 "empresa_id": empresa_id
             }
 
@@ -274,10 +277,13 @@ async def get_agent_config_by_survey(survey_id: int):
             "greeting": greeting,
             "instructions": agent_data.get("instructions", "Eres un asistente"),
             "critical_rules": agent_data.get("critical_rules", ""),
-            "voice_id": ai_data.get("tts_voice") or "cefcb124-080b-4655-b31f-932f3ee743de",
+            "voice_id": agent_data.get("voice_id") or ai_data.get("tts_voice") or "cefcb124-080b-4655-b31f-932f3ee743de",
             "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
             "language": ai_data.get("language") or "es",
             "stt_provider": ai_data.get("stt_provider") or "deepgram",
+            "company_context": agent_data.get("company_context") or "",
+            "enthusiasm_level": agent_data.get("enthusiasm_level") or "Normal",
+            "speaking_speed": agent_data.get("speaking_speed") or 1.0,
             "agent_type": agent_data.get("agent_type") or "ENCUESTA_NUMERICA",
             "empresa_id": empresa_id or agent_empresa_id
         }
@@ -388,11 +394,20 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
             )
             return
 
-        # 2. Nombre de sala aislado por empresa + campaña + encuesta
-        room_name = f"empresa_{empresa_id}_camp_{campaign_id}_call_{encuesta_id}"
+        # 2. Nombre de sala aislado estricto
+        room_name = f"llamada_ausarta_empresa_{empresa_id}_campana_{campaign_id}_contacto_{lead_id}_encuesta_{encuesta_id}"
+        room_metadata = {
+            "empresa_id": int(empresa_id or 0),
+            "campaign_id": int(campaign_id),
+            "campana_id": int(campaign_id),
+            "contacto_id": int(lead_id),
+            "client_id": int(lead_id),
+            "lead_id": int(lead_id),
+            "survey_id": int(encuesta_id),
+        }
 
         try:
-            await lkapi.room.create_room(lk_api.CreateRoomRequest(name=room_name))
+            await create_isolated_room(room_name, metadata=room_metadata)
         except Exception as room_err:
             logger.warning(f"⚠️ [Drip] Aviso creando sala {room_name}: {room_err}")
 
@@ -418,20 +433,12 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
             )
             return
 
-        # 4. Dispatch explícito del agente con Sello Multi-Tenant
+        # 4. Dispatch explícito del agente con metadata multitenant
         try:
-            import json
-            metadata_str = json.dumps({
-                "empresa_id": int(empresa_id),
-                "survey_id": int(encuesta_id),
-                "campaign_id": int(campaign_id)
-            })
-            await lkapi.agent_dispatch.create_dispatch(
-                lk_api.CreateAgentDispatchRequest(
-                    room_name=room_name,
-                    agent_name=agent_name_dispatch,
-                    metadata=metadata_str
-                )
+            await dispatch_agent_explicit(
+                room_name=room_name,
+                agent_name=agent_name_dispatch,
+                metadata=room_metadata,
             )
             logger.info(f"🚀 [Drip] Agente '{agent_name_dispatch}' despachado a {room_name}")
         except Exception as dispatch_err:

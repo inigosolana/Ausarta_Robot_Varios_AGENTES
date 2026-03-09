@@ -1,4 +1,6 @@
 import os
+import json
+import logging
 from dotenv import load_dotenv
 from livekit import api
 
@@ -7,6 +9,9 @@ load_dotenv()
 LIVEKIT_URL = os.getenv('LIVEKIT_URL')
 LIVEKIT_API_KEY = os.getenv('LIVEKIT_API_KEY')
 LIVEKIT_API_SECRET = os.getenv('LIVEKIT_API_SECRET')
+DEFAULT_AGENT_NAME = os.getenv("AGENT_NAME_DISPATCH", "ausarta_agent")
+
+logger = logging.getLogger("api-backend")
 
 class LazyLiveKitAPI:
     def __init__(self, url, api_key, api_secret):
@@ -37,3 +42,31 @@ class LazyLiveKitAPI:
         return getattr(inst, item)
 
 lkapi = LazyLiveKitAPI(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+
+
+async def create_isolated_room(room_name: str, metadata: dict | None = None):
+    """
+    Crea sala LiveKit con aislamiento estricto:
+    - max_participants=2 (SIP + 1 agente)
+    - metadata JSON serializada para trazabilidad de campaña/contacto
+    """
+    meta_str = json.dumps(metadata or {}, ensure_ascii=True)
+    req = api.CreateRoomRequest(
+        name=room_name,
+        max_participants=2,
+        metadata=meta_str,
+    )
+    return await lkapi.room.create_room(req)
+
+
+async def dispatch_agent_explicit(room_name: str, metadata: dict | None = None, agent_name: str | None = None):
+    """
+    Dispatch explícito del agente. Evita colisiones con workers no deseados.
+    """
+    meta_str = json.dumps(metadata or {}, ensure_ascii=True)
+    req = api.CreateAgentDispatchRequest(
+        room=room_name,
+        agent_name=agent_name or DEFAULT_AGENT_NAME,
+        metadata=meta_str,
+    )
+    return await lkapi.agent_dispatch.create_dispatch(req)

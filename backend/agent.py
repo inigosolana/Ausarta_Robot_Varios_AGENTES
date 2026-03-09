@@ -49,6 +49,8 @@ logging.basicConfig(
 logger = logging.getLogger("agent-dynamic")
 load_dotenv()
 
+ROOM_PREFIX = os.getenv("LIVEKIT_ROOM_PREFIX", "llamada_ausarta_")
+
 # ============================================================================
 # INSTRUCCIONES BASE - Se combinan con las instrucciones específicas del agente
 # ============================================================================
@@ -77,6 +79,46 @@ EXCEPCIÓN INTERRUPCIÓN/COLGAR:
 NOTA FINAL: UNA VEZ LLAMES A 'finalizar_llamada', LA CONVERSACIÓN HA TERMINADO. NO RESPONDAS A NADA MÁS.
 """
 
+ENTHUSIASM_INSTRUCTIONS = {
+    "Bajo": "Mantén un tono calmado, pausado y profesional. Evita sonar efusivo.",
+    "Normal": "Mantén un tono cercano, claro y profesional con energía equilibrada.",
+    "Alto": "Habla con energía positiva y dinamismo, sin perder claridad ni profesionalidad.",
+    "Extremo": "Usa un tono muy entusiasta y motivador, con mucha energía y amabilidad.",
+}
+
+
+def _resolve_enthusiasm_instruction(level: str) -> str:
+    if level in ENTHUSIASM_INSTRUCTIONS:
+        return ENTHUSIASM_INSTRUCTIONS[level]
+    return ENTHUSIASM_INSTRUCTIONS["Normal"]
+
+
+def _build_tts_plugin(voice_id: str, language: str, speaking_speed: float):
+    """
+    Crea el plugin TTS aplicando voz + velocidad.
+    Si el SDK no soporta el parámetro speed en la versión actual, hace fallback seguro.
+    """
+    safe_speed = 1.0
+    try:
+        safe_speed = float(speaking_speed or 1.0)
+    except Exception:
+        safe_speed = 1.0
+
+    try:
+        return cartesia.TTS(
+            model="sonic-multilingual",
+            voice=voice_id,
+            language=language,
+            speed=safe_speed,
+        )
+    except TypeError:
+        logger.warning("⚠️ cartesia.TTS no soporta 'speed' en esta versión. Usando fallback sin speed.")
+        return cartesia.TTS(
+            model="sonic-multilingual",
+            voice=voice_id,
+            language=language,
+        )
+
 
 class DynamicAgent(Agent):
     """Agente dinámico que carga sus instrucciones desde Supabase."""
@@ -93,6 +135,10 @@ class DynamicAgent(Agent):
         self.room_name = room_name
         self.agent_config = agent_config
         self.greeting = agent_config.get("greeting", "Buenas, ¿tiene un momento?")
+        self.company_context = agent_config.get("company_context", "") or ""
+        self.enthusiasm_level = agent_config.get("enthusiasm_level", "Normal") or "Normal"
+        self.voice_id = agent_config.get("voice_id", "") or ""
+        self.speaking_speed = agent_config.get("speaking_speed", 1.0)
         
         try:
             # Soportamos formatos:
@@ -152,7 +198,12 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         
         # Construcción del Prompt Final: Reglas -> Datos -> GUION (EL GUION ES LO MÁS IMPORTANTE)
         full_instructions = f"{base_rules_to_use}\n\n"
-        full_instructions += f"DATOS DEL AGENTE:\n- NOMBRE: {agent_name}\n- EMPRESA: Ausarta\n\n"
+        full_instructions += f"DATOS DEL AGENTE:\n- NOMBRE: {agent_name}\n- EMPRESA: Ausarta\n"
+        full_instructions += f"- NIVEL DE ENTUSIASMO: {self.enthusiasm_level}\n"
+        full_instructions += f"- VELOCIDAD DE VOZ OBJETIVO: {self.speaking_speed}\n\n"
+        full_instructions += "CONTEXTO DE EMPRESA (Knowledge Base):\n"
+        full_instructions += f"{self.company_context if self.company_context else 'No disponible.'}\n\n"
+        full_instructions += f"ESTILO DE ENTREGA: {_resolve_enthusiasm_instruction(self.enthusiasm_level)}\n\n"
         full_instructions += "SIGUE ESTE GUION AL PIE DE LA LETRA:\n"
         full_instructions += f"{agent_instructions}\n"
 
@@ -338,21 +389,44 @@ async def entrypoint(ctx: JobContext):
             logger.error(f"⚠️ ERROR DEL AGENTE (Job {job_id}): {error}")
             asyncio.create_task(notify_n8n_alert("Error en Agente LiveKit", {"job_id": job_id, "error": msg}))
 
-    # --- PASO 1: Extraer survey_id y empresa_id (Sello Multi-Tenant) ---
+    async def _safe_reject(reason: str):
+        logger.error(f"🚫 [{job_id}] Job rechazado: {reason}")
+        try:
+            maybe = ctx.reject()
+            if asyncio.iscoroutine(maybe):
+                await maybe
+        except Exception as rej_err:
+            logger.error(f"[{job_id}] Error rechazando job: {rej_err}")
+
+    # --- PASO 1: Filtro estricto de sala + metadata ---
+    if not room_name.startswith(ROOM_PREFIX):
+        await _safe_reject(f"Sala fuera de prefijo permitido '{ROOM_PREFIX}': {room_name}")
+        return
+
+    metadata_str = getattr(ctx.job, 'metadata', '')
+    if not metadata_str:
+        await _safe_reject("metadata vacía")
+        return
+
+    try:
+        meta_data = json.loads(metadata_str)
+    except Exception as e:
+        await _safe_reject(f"metadata no JSON válido: {e}")
+        return
+
+    if "campana_id" not in meta_data and "client_id" not in meta_data:
+        await _safe_reject("metadata sin campana_id/client_id")
+        return
+
+    # --- PASO 2: Extraer survey_id y empresa_id (Sello Multi-Tenant) ---
     survey_id = "0"
     empresa_id = "0"
-    
-    # 1. Intentar obtener de metadatos inyectados vía dispatch
-    metadata_str = getattr(ctx.job, 'metadata', '')
-    if metadata_str:
-        try:
-            import json
-            meta_data = json.loads(metadata_str)
-            survey_id = str(meta_data.get("survey_id", "0"))
-            empresa_id = str(meta_data.get("empresa_id", "0"))
-            logger.info(f"🔑 [{job_id}] Metadatos parseados: empresa={empresa_id}, survey={survey_id}")
-        except Exception as e:
-            logger.warning(f"⚠️ [{job_id}] No se pudo parsear metadata JSON: {e}")
+    try:
+        survey_id = str(meta_data.get("survey_id", "0"))
+        empresa_id = str(meta_data.get("empresa_id", "0"))
+        logger.info(f"🔑 [{job_id}] Metadatos parseados: empresa={empresa_id}, survey={survey_id}, campana_id={meta_data.get('campana_id')}, client_id={meta_data.get('client_id')}")
+    except Exception as e:
+        logger.warning(f"⚠️ [{job_id}] Error extrayendo campos de metadata: {e}")
             
     # 2. Fallback: intentar extraer del room_name
     if survey_id == "0":
@@ -370,8 +444,7 @@ async def entrypoint(ctx: JobContext):
 
     # 3. Validación de Identidad Temprana Crítica
     if not str(survey_id).isdigit() or str(survey_id) == "0":
-        logger.error(f"🚨🚨🚨 [{job_id}] Identidad inválida o corrupta: survey_id='{survey_id}'. Abortando worker.")
-        ctx.reject()
+        await _safe_reject(f"Identidad inválida o corrupta: survey_id='{survey_id}'")
         return
 
     # --- PASO 1.5: Validar Sello Multi-Tenant ANTES de conectar ---
@@ -380,8 +453,7 @@ async def entrypoint(ctx: JobContext):
         agent_config = await fetch_agent_config(survey_id, expected_empresa_id=empresa_id)
     except Exception as e:
         if "Violación de seguridad" in str(e):
-            logger.error(f"🚨🚨🚨 [{job_id}] {e} - RECHAZANDO JOB.")
-            ctx.reject() # Intercepta el job y evita que el agente entre a la sala equívoca
+            await _safe_reject(str(e))
             return
         else:
             logger.warning(f"⚠️ [{job_id}] Error cargando config previa: {e}")
@@ -413,8 +485,9 @@ async def entrypoint(ctx: JobContext):
         voice_id = agent_config.get("voice_id", "cefcb124-080b-4655-b31f-932f3ee743de")
         language = agent_config.get("language", "es")
         stt_provider = agent_config.get("stt_provider", "deepgram")
+        speaking_speed = agent_config.get("speaking_speed", 1.0)
         
-        logger.info(f"🤖 [{job_id}] Config: LLM='{llm_model}', Voice='{voice_id}', Lang='{language}', STT='{stt_provider}'")
+        logger.info(f"🤖 [{job_id}] Config: LLM='{llm_model}', Voice='{voice_id}', Lang='{language}', STT='{stt_provider}', Speed='{speaking_speed}'")
 
         if language in ["eu", "gl"] or stt_provider == "openai":
             stt_plugin = openai.STT(language=language)
@@ -448,11 +521,7 @@ async def entrypoint(ctx: JobContext):
             vad=vad_model,
             stt=stt_plugin,
             llm=final_llm,
-            tts=cartesia.TTS(
-                model="sonic-multilingual",
-                voice=voice_id,
-                language=language
-            ),
+            tts=_build_tts_plugin(voice_id=voice_id, language=language, speaking_speed=speaking_speed),
         )
 
         # La sesión se asocia automáticamente al arrancar
@@ -468,6 +537,36 @@ async def entrypoint(ctx: JobContext):
         
         # --- EVENTOS ---
         finished = asyncio.Event()
+        stop_guard = asyncio.Event()
+
+        async def ghost_kicker_loop():
+            """
+            Vigila participantes remotos y expulsa cualquier "agente fantasma" o intruso.
+            Permitidos: participante SIP/cliente (user_/sip_).
+            """
+            allowed_prefixes = ("user_", "sip_")
+            while not stop_guard.is_set():
+                try:
+                    for p in list(ctx.room.remote_participants.values()):
+                        identity = getattr(p, "identity", "") or ""
+                        if identity.startswith(allowed_prefixes):
+                            continue
+
+                        # Cualquier otro participante remoto se considera intruso.
+                        logger.warning(f"👻 [{job_id}] Intruso detectado en sala {room_name}: '{identity}'. Expulsando...")
+                        try:
+                            await lkapi.room.remove_participant(
+                                api.RoomParticipantIdentity(room=room_name, identity=identity)
+                            )
+                            logger.info(f"✅ [{job_id}] Intruso '{identity}' expulsado de {room_name}")
+                        except Exception as kick_err:
+                            logger.error(f"❌ [{job_id}] Error expulsando intruso '{identity}': {kick_err}")
+                except Exception as guard_err:
+                    logger.error(f"⚠️ [{job_id}] Error en ghost kicker: {guard_err}")
+
+                await asyncio.sleep(2)
+
+        ghost_guard_task = asyncio.create_task(ghost_kicker_loop())
 
         @ctx.room.on("disconnected")
         def on_disconnect():
@@ -508,6 +607,14 @@ async def entrypoint(ctx: JobContext):
         handle_error(e)
     
     finally:
+        try:
+            if 'stop_guard' in locals():
+                stop_guard.set()
+            if 'ghost_guard_task' in locals():
+                ghost_guard_task.cancel()
+        except Exception:
+            pass
+
         if not is_duplicate:
             logger.info(f"--- 🏁 FIN DE SESIÓN AGENTE (Job: {job_id}, Room: {room_name}, Survey: {survey_id}) ---")
             agent_instance_exists = 'agent_instance' in locals()

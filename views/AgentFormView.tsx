@@ -41,6 +41,10 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
         instructions: agent?.instructions || '',
         critical_rules: agent?.critical_rules || '',
         greeting: agent?.greeting || '',
+        company_context: agent?.company_context || '',
+        enthusiasm_level: agent?.enthusiasm_level || 'Normal',
+        voice_id: agent?.voice_id || '',
+        speaking_speed: agent?.speaking_speed ?? 1.0,
         empresa_id: agent?.empresa_id || null,
     });
 
@@ -112,7 +116,9 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                     ...formData,
                     ...aiConfig,
                     use_case: formData.use_case, // ensuring correct mapping
-                    tts_voice: aiConfig.tts_voice,
+                    voice_id: formData.voice_id || aiConfig.tts_voice,
+                    speaking_speed: formData.speaking_speed ?? 1.0,
+                    tts_voice: formData.voice_id || aiConfig.tts_voice,
                 })
             });
 
@@ -436,6 +442,49 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                             <p className="text-xs text-gray-500">{t('Define the agent\'s personality, mission, and rules here.', 'Define aquí la personalidad, misión y reglas del agente.')}</p>
                         </section>
 
+                        {/* Company Context / Personality */}
+                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                            <h3 className="text-lg font-bold text-gray-800">
+                                {t('Company Context (Knowledge Base)', 'Contexto de la Empresa (Knowledge Base)')}
+                            </h3>
+                            <textarea
+                                rows={8}
+                                value={formData.company_context || ''}
+                                onChange={(e) => setFormData({ ...formData, company_context: e.target.value })}
+                                placeholder={t('Add key facts about the company, products, policies, FAQs and objection handling.', 'Añade datos clave de la empresa, productos, políticas, FAQs y manejo de objeciones.')}
+                                className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm bg-gray-50"
+                            />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">{t('Enthusiasm Level', 'Nivel de Entusiasmo')}</label>
+                                    <select
+                                        value={formData.enthusiasm_level || 'Normal'}
+                                        onChange={(e) => setFormData({ ...formData, enthusiasm_level: e.target.value })}
+                                        className="w-full px-3 py-2 border rounded-lg bg-white"
+                                    >
+                                        <option value="Bajo">{t('Low', 'Bajo')}</option>
+                                        <option value="Normal">{t('Normal', 'Normal')}</option>
+                                        <option value="Alto">{t('High', 'Alto')}</option>
+                                        <option value="Extremo">{t('Extreme', 'Extremo')}</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                        {t('Voice Speed', 'Velocidad de Voz')} ({(formData.speaking_speed ?? 1.0).toFixed(2)}x)
+                                    </label>
+                                    <input
+                                        type="range"
+                                        min="0.7"
+                                        max="1.3"
+                                        step="0.05"
+                                        value={formData.speaking_speed ?? 1.0}
+                                        onChange={(e) => setFormData({ ...formData, speaking_speed: Number(e.target.value) })}
+                                        className="w-full"
+                                    />
+                                </div>
+                            </div>
+                        </section>
+
                         {/* Critical Rules (Only for Admins) */}
                         {isPlatformOwner && (
                             <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
@@ -589,8 +638,11 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">{t('Select Voice', 'Seleccionar Voz')}</label>
                                 <select
-                                    value={aiConfig.tts_voice}
-                                    onChange={(e) => setAiConfig({ ...aiConfig, tts_voice: e.target.value })}
+                                    value={formData.voice_id || aiConfig.tts_voice}
+                                    onChange={(e) => {
+                                        setAiConfig({ ...aiConfig, tts_voice: e.target.value });
+                                        setFormData({ ...formData, voice_id: e.target.value });
+                                    }}
                                     className="w-full px-3 py-2 border rounded-lg font-medium text-sm bg-white"
                                 >
                                     <optgroup label={t('Spanish', 'Español')}>
