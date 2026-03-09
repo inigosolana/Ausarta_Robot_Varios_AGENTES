@@ -484,8 +484,8 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
 
                 # Margen corto para evitar silencios largos tras despedida.
                 # Si se necesita ajustar, usar AGENT_HANGUP_DELAY_SECONDS en entorno.
-                wait_seconds = float(os.getenv("AGENT_HANGUP_DELAY_SECONDS", "0.8"))
-                wait_seconds = max(0.3, min(wait_seconds, 1.5))
+                wait_seconds = float(os.getenv("AGENT_HANGUP_DELAY_SECONDS", "0.45"))
+                wait_seconds = max(0.3, min(wait_seconds, 1.2))
                 logger.info(f"⏳ Esperando {wait_seconds:.1f}s antes de colgar.")
                 await asyncio.sleep(wait_seconds)
             except Exception as say_err:
@@ -947,7 +947,7 @@ async def entrypoint(ctx: JobContext):
 
         # ---------- LOOP DE SILENCIO / REPROMPT ----------
         # Híbrido: eventos de conversación + watchdog por tiempo.
-        SILENCE_REPROMPT_DELAY = float(os.getenv("AGENT_SILENCE_REPROMPT_SECONDS", "1.0"))
+        SILENCE_REPROMPT_DELAY = float(os.getenv("AGENT_SILENCE_REPROMPT_SECONDS", "2.5"))
         reprompt_phrases = [
             "¿Sigue ahí?",
             "Perdone, ¿me escucha?",
