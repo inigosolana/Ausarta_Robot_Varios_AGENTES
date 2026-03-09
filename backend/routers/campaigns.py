@@ -30,6 +30,10 @@ DEFAULT_AUSARTA_VOICE_ID = "a2f12ebd-80df-4de7-83f3-809599135b1d"
 
 router = APIRouter(prefix="/api", tags=["campaigns"])
 
+
+class ScheduleRetryRequest(BaseModel):
+    retry_at: str
+
 # ──────────────────────────────────────────────
 # DRIP LOCK MULTITENANT
 #
@@ -364,6 +368,33 @@ async def retry_lead(lead_id: int):
         logger.error(f"Error retrying lead {lead_id}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+
+@router.post("/campaigns/{campaign_id}/schedule-retry")
+async def schedule_campaign_retry(campaign_id: int, payload: ScheduleRetryRequest):
+    """
+    Programa reintento manual para leads no exitosos de una campaña
+    en una fecha/hora concreta (ISO).
+    """
+    if not supabase:
+        return {"error": "No DB"}
+    try:
+        retry_at_dt = datetime.fromisoformat(payload.retry_at.replace("Z", "+00:00"))
+        retry_at_iso = retry_at_dt.astimezone(timezone.utc).isoformat()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "retry_at inválido. Usa ISO datetime."})
+
+    try:
+        res = supabase.table("campaign_leads").update({
+            "status": "pending",
+            "error_msg": None,
+            "next_retry_at": retry_at_iso,
+        }).eq("campaign_id", campaign_id).in_("status", ["failed", "unreached", "incomplete"]).execute()
+        supabase.table("campaigns").update({"status": "active"}).eq("id", campaign_id).execute()
+        return {"status": "success", "scheduled_count": len(res.data or []), "retry_at": retry_at_iso}
+    except Exception as e:
+        logger.error(f"Error scheduling retry for campaign {campaign_id}: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 @router.post("/campaigns/{campaign_id}/stop")
 async def stop_campaign(campaign_id: int):
     if not supabase: return {"error": "No DB"}
@@ -489,10 +520,13 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
             return
 
         # 5. Polling ligero hasta status terminal (el webhook también actuará en paralelo)
+        # Requisito negocio: máximo 30s para que descuelgue; si no, fallida reintentable.
         TERMINAL = {"completed", "failed", "unreached", "incomplete", "rejected_opt_out"}
         MAX_WAIT_SECONDS = 300   # 5 minutos como techo
-        POLL_INTERVAL_S  = 15   # chequeamos cada 15s
+        ANSWER_TIMEOUT_SECONDS = int(os.getenv("DRIP_ANSWER_TIMEOUT_SECONDS", "30"))
+        POLL_INTERVAL_S  = 2
         waited = 0
+        answer_timeout_applied = False
         while waited < MAX_WAIT_SECONDS:
             await asyncio.sleep(POLL_INTERVAL_S)
             waited += POLL_INTERVAL_S
@@ -505,8 +539,23 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
                 if current in TERMINAL:
                     logger.info(f"✅ [Drip] Encuesta {encuesta_id} terminal ('{current}') tras {waited}s de espera")
                     break
+                if waited >= ANSWER_TIMEOUT_SECONDS and current in (None, "", "initiated", "calling", "pending"):
+                    answer_timeout_applied = True
+                    logger.warning(f"⏱️ [Drip] Timeout {ANSWER_TIMEOUT_SECONDS}s sin respuesta (encuesta {encuesta_id}). Marcando failed y cerrando sala.")
+                    try:
+                        await lkapi.room.delete_room(lk_api.DeleteRoomRequest(room=room_name))
+                    except Exception:
+                        pass
+                    await asyncio.to_thread(
+                        lambda: supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute()
+                    )
+                    await _apply_retry_after_failure(lead_id=lead_id, campaign=campaign)
+                    break
             except Exception as poll_err:
                 logger.warning(f"[Drip] Error en poll de estado encuesta {encuesta_id}: {poll_err}")
+
+        if answer_timeout_applied:
+            logger.info(f"📵 [Drip] Lead {lead_id} marcado fallido por no contestar en tiempo.")
 
         # 6. Cooldown obligatorio antes de liberar el lock
         cooldown = random.randint(_COOLDOWN_MIN, _COOLDOWN_MAX)
@@ -516,6 +565,33 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
     finally:
         _empresas_en_llamada.discard(empresa_id)
         logger.info(f"🔓 [Drip] Lock liberado para empresa {empresa_id}")
+
+
+async def _apply_retry_after_failure(lead_id: int, campaign: dict) -> None:
+    """
+    Programa el siguiente reintento para fallos/no respuesta según la campaña.
+    """
+    retry_seconds = int(campaign.get("retry_interval") or 3600)
+    max_retries = int(campaign.get("retries_count") or 3)
+    try:
+        lr = await asyncio.to_thread(
+            lambda: supabase.table("campaign_leads").select("retries_attempted").eq("id", lead_id).limit(1).execute()
+        )
+        current_retries = (lr.data[0].get("retries_attempted") if lr.data else 0) or 0
+    except Exception:
+        current_retries = 0
+
+    new_retries = current_retries + 1
+    lead_update = {"status": "failed", "retries_attempted": new_retries}
+    if new_retries < max_retries:
+        lead_update["status"] = "pending"
+        lead_update["next_retry_at"] = (datetime.utcnow() + timedelta(seconds=retry_seconds)).isoformat()
+    try:
+        await asyncio.to_thread(
+            lambda: supabase.table("campaign_leads").update(lead_update).eq("id", lead_id).execute()
+        )
+    except Exception as e:
+        logger.error(f"[Drip] Error programando reintento lead {lead_id}: {e}")
 
 
 async def _check_campaign_completion(campaign_id: int) -> bool:

@@ -265,7 +265,8 @@ async def guardar_encuesta(datos: FinEncuesta):
             "completed": "completed", "failed": "failed", "incomplete": "incomplete",
             "unreached": "unreached", "rejected_opt_out": "rejected_opt_out",
             "rejected": "rejected_opt_out", "completada": "completed", "fallida": "failed",
-            "parcial": "incomplete", "no_contesta": "unreached", "rechazada": "rejected_opt_out",
+            "parcial": "incomplete", "no_contesta": "failed", "rechazada": "rejected_opt_out",
+            "busy": "failed", "ocupado": "failed", "voicemail": "failed", "buzon": "failed", "buzón": "failed",
         }
         normalized_status = _STATUS_MAP_PRE.get(raw_status) or datos.status
         updates["status"] = normalized_status

@@ -58,7 +58,10 @@ _STATUS_MAP = {
     "called": "called",
     # Legacy ES
     "completada": "completed", "fallida": "failed", "parcial": "incomplete",
-    "no_contesta": "unreached", "rechazada": "rejected_opt_out",
+    "no_contesta": "failed", "rechazada": "rejected_opt_out",
+    # Señales típicas SIP/telefonía que deben computar como fallida reintentable
+    "busy": "failed", "ocupado": "failed",
+    "voicemail": "failed", "buzon": "failed", "buzón": "failed",
 }
 
 # Estados que deben disparar la propagación a campaign_leads
@@ -475,7 +478,7 @@ def _extract_encuesta_id_from_room(room_name: str) -> int | None:
 async def _handle_room_finished(encuesta_id: int, room_name: str, room_metadata: dict | None = None):
     """
     La sala se cerró. Si el estado en BD todavía no es terminal,
-    significa que la llamada no se completó normalmente → marcamos 'unreached'.
+    significa que la llamada no se completó normalmente → marcamos 'failed'.
     """
     if not supabase:
         return
@@ -494,13 +497,13 @@ async def _handle_room_finished(encuesta_id: int, room_name: str, room_metadata:
         current_status = enc.get("status") or ""
 
         if current_status not in _TERMINAL_STATUSES:
-            # La sala cerró pero el agente no guardó un status final → no contestó
-            logger.warning(f"📵 [LK Webhook] Sala {room_name} cerrada sin status terminal. Forzando 'unreached'. metadata={room_metadata or {}}")
+            # La sala cerró pero el agente no guardó un status final → fallida reintentable
+            logger.warning(f"📵 [LK Webhook] Sala {room_name} cerrada sin status terminal. Forzando 'failed'. metadata={room_metadata or {}}")
             await asyncio.to_thread(
-                lambda: supabase.table("encuestas").update({"status": "unreached"}).eq("id", encuesta_id).execute()
+                lambda: supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute()
             )
             # Propagar a campaign_leads
-            await _propagate_to_lead(encuesta_id, "unreached", enc)
+            await _propagate_to_lead(encuesta_id, "failed", enc)
         else:
             logger.info(f"[LK Webhook] Sala {room_name} cerrada con status terminal: {current_status}. Sin acción.")
     except Exception as e:
