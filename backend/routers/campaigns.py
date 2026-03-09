@@ -128,7 +128,19 @@ async def list_campaigns(empresa_id: Optional[int] = None):
         if empresa_id:
             query = query.eq("empresa_id", empresa_id)
         res = query.order("created_at", desc=True).limit(100).execute()
-        return res.data
+        campaigns = res.data or []
+        for c in campaigns:
+            try:
+                total_r = supabase.table("campaign_leads").select("id", count="exact").eq("campaign_id", c["id"]).execute()
+                total_leads = total_r.count if total_r.count is not None else 0
+                c["total_leads"] = total_leads
+                pending_r = supabase.table("campaign_leads").select("id", count="exact").eq("campaign_id", c["id"]).in_("status", ["pending", "calling"]).execute()
+                pending_calling = pending_r.count if pending_r.count is not None else 0
+                c["called_leads"] = max(0, total_leads - pending_calling)
+            except Exception:
+                c["total_leads"] = 0
+                c["called_leads"] = 0
+        return campaigns
     except Exception as e:
         logger.error(f"Error listing campaigns: {e}")
         return []

@@ -365,8 +365,8 @@ class DynamicAgent(Agent):
             base_rules_to_use += """
 REGLA ESPECIAL PARA ENCUESTAS MIXTAS (numéricas + condicionales/abiertas):
 - Obtén las puntuaciones numéricas y usa 'nota_comercial', 'nota_instalador', 'nota_rapidez' según corresponda.
-- Si hay preguntas condicionales o abiertas (ej: "detalle del problema", "motivo de contratación"), inclúyelas en 'datos_extra' con claves claras (detalle_problema, motivo_contratacion, experiencia_general, etc).
-- Llama a guardar_encuesta con todos los datos: notas numéricas + datos_extra.
+- Si hay preguntas condicionales o abiertas, pasa 'datos_extra' como cadena JSON, ej: '{"detalle_problema":"...","motivo_contratacion":"comercial","experiencia_general":4}'.
+- Llama a guardar_encuesta con notas numéricas y datos_extra (string JSON).
 """
         elif is_numeric:
             base_rules_to_use += """
@@ -471,13 +471,13 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         nota_rapidez: Optional[int] = None, 
         comentarios: Optional[str] = None,
         status: Optional[str] = None,
-        datos_extra: Optional[dict] = None
+        datos_extra: Optional[str] = None
     ) -> str | None:
         """
         Guarda los datos de la encuesta/llamada. 
         - Si la encuesta es NUMÉRICA, usa 'nota_comercial', 'nota_instalador', 'nota_rapidez' (1-10).
         - Si la encuesta es ABIERTA o hay feedback extra, usa 'comentarios'.
-        - Para ENCUESTA_MIXTA (numéricas + pregunta abierta/condicional), usa 'datos_extra' con claves como: experiencia_general (1-5), detalle_problema (texto si nota<4), nota_comercial, nota_tecnico, motivo_contratacion.
+        - Para ENCUESTA_MIXTA, pasa 'datos_extra' como JSON string, ej: '{"experiencia_general":4,"detalle_problema":"...","motivo_contratacion":"comercial"}'.
         - 'status': 'completed', 'failed', 'incomplete' o 'rejected_opt_out'.
         """
         self.data_saved = True
@@ -496,15 +496,12 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
             "comentarios": comentarios,
             "status": status
         }
-        if datos_extra:
-            if isinstance(datos_extra, dict):
-                payload["datos_extra"] = datos_extra
-            elif isinstance(datos_extra, str):
-                try:
-                    import json
-                    payload["datos_extra"] = json.loads(datos_extra)
-                except Exception:
-                    payload["datos_extra"] = {"raw": datos_extra}
+        if datos_extra and isinstance(datos_extra, str):
+            try:
+                import json
+                payload["datos_extra"] = json.loads(datos_extra)
+            except Exception:
+                payload["datos_extra"] = {"raw": datos_extra}
         
         # IMPORTANTE: Await directo en vez de fire-and-forget para asegurar que se guarda
         try:
