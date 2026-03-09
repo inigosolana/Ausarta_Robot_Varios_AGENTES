@@ -877,6 +877,114 @@ async def entrypoint(ctx: JobContext):
 
         backchannel_task = asyncio.create_task(backchanneling_loop())
 
+        # ---------- SNAPSHOT DE TRANSCRIPCIÓN ----------
+        # Guardamos el snapshot en cuanto el cliente cuelga para no depender
+        # del chat_ctx que LiveKit puede limpiar antes del bloque finally.
+        transcript_snapshot: dict = {"transcript": "", "raw": []}
+
+        async def _save_transcript_snapshot(reason: str = "auto"):
+            """Extrae y persiste la transcripción actual en Supabase."""
+            try:
+                raw, t = _extract_transcript_from_session(session)
+                logger.info(f"📝 [{job_id}] Snapshot transcripción ({reason}): {len(t)} chars, {len(raw)} mensajes")
+                if t:
+                    transcript_snapshot["transcript"] = t
+                    transcript_snapshot["raw"] = raw
+                    _internal = (
+                        getattr(agent_instance, "server_url", None)
+                        or os.getenv("BRIDGE_SERVER_URL_INTERNAL")
+                        or os.getenv("BRIDGE_SERVER_URL")
+                        or "http://127.0.0.1:8001"
+                    ).rstrip("/")
+                    async with aiohttp.ClientSession() as _http:
+                        _resp = await _http.post(
+                            f"{_internal}/guardar-encuesta",
+                            json={"id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
+                                  "transcription": t},
+                            timeout=8,
+                        )
+                        logger.info(f"✅ [{job_id}] Transcripción snapshot guardada ({reason}): HTTP {_resp.status}")
+            except Exception as _e:
+                logger.warning(f"⚠️ [{job_id}] Error guardando snapshot transcripción ({reason}): {_e}")
+
+        async def transcript_autosave_loop():
+            """Guarda la transcripción parcial cada 40s durante la llamada."""
+            await asyncio.sleep(30)
+            while not stop_guard.is_set():
+                await _save_transcript_snapshot("autosave-30s")
+                await asyncio.sleep(40)
+
+        transcript_autosave_task = asyncio.create_task(transcript_autosave_loop())
+
+        # ---------- LOOP DE SILENCIO / REPROMPT ----------
+        # Si el agente acaba de hablar y el usuario lleva >1.5s sin responder,
+        # lanza una frase de reconducción para que la llamada no muera en silencio.
+        SILENCE_REPROMPT_DELAY = float(os.getenv("AGENT_SILENCE_REPROMPT_SECONDS", "1.5"))
+        reprompt_phrases = [
+            "¿Sigue ahí?",
+            "Perdone, ¿me escucha?",
+            "Disculpe, ¿puede responderme?",
+            "¿Está usted disponible?",
+            "No le oigo bien, ¿puede hablar un poco más alto?",
+        ]
+
+        async def silence_reprompt_loop():
+            loop_obj = asyncio.get_running_loop()
+            last_agent_time: float = loop_obj.time()
+            last_user_time: float = loop_obj.time()
+            last_agent_msg_idx: int = -1
+            reprompt_count: int = 0  # máximo 2 reprompts consecutivos
+
+            while not stop_guard.is_set():
+                await asyncio.sleep(0.4)
+                try:
+                    chat_ctx = getattr(session, "chat_ctx", getattr(session, "chat_context", None))
+                    if not chat_ctx:
+                        continue
+                    msgs = list(getattr(chat_ctx, "messages", []))
+                    if not msgs:
+                        continue
+
+                    now = loop_obj.time()
+                    # Iterar desde el final para encontrar el último mensaje relevante
+                    last_role = ""
+                    for m in reversed(msgs):
+                        role = getattr(m, "role", "")
+                        if role in ("user", "assistant"):
+                            last_role = role
+                            break
+
+                    curr_idx = len(msgs) - 1
+                    if last_role == "assistant" and curr_idx != last_agent_msg_idx:
+                        last_agent_msg_idx = curr_idx
+                        last_agent_time = now
+                        reprompt_count = 0
+
+                    if last_role == "user":
+                        last_user_time = now
+                        reprompt_count = 0
+
+                    # El agente habló y el usuario lleva demasiado tiempo sin responder
+                    agent_spoke_ago = now - last_agent_time
+                    user_silent_for = now - last_user_time
+                    waiting_for_user = last_role == "assistant" and last_agent_msg_idx >= 0
+
+                    if (waiting_for_user
+                            and agent_spoke_ago >= SILENCE_REPROMPT_DELAY
+                            and user_silent_for >= SILENCE_REPROMPT_DELAY
+                            and reprompt_count < 2):
+                        reprompt_count += 1
+                        last_agent_time = now  # reset para no volver a disparar inmediatamente
+                        try:
+                            await session.say(random.choice(reprompt_phrases), allow_interruptions=True)
+                            logger.debug(f"[{job_id}] Reprompt por silencio (#{reprompt_count})")
+                        except Exception as _re:
+                            logger.debug(f"[{job_id}] Reprompt no enviado: {_re}")
+                except Exception as _e:
+                    logger.debug(f"[{job_id}] Error en silence_reprompt_loop: {_e}")
+
+        silence_reprompt_task = asyncio.create_task(silence_reprompt_loop())
+
         @ctx.room.on("disconnected")
         def on_disconnect():
             logger.info(f"🔌 [{job_id}] Desconectado.")
@@ -885,14 +993,18 @@ async def entrypoint(ctx: JobContext):
         @ctx.room.on("participant_disconnected")
         def on_participant_disconnected(participant: rtc.RemoteParticipant):
             if not participant.identity.startswith("agent-"):
-                logger.info(f"[{job_id}] Cliente se desconectó. Terminando sala.")
-                async def force_hangup_room():
+                logger.info(f"[{job_id}] Cliente se desconectó. Guardando transcripción y terminando sala.")
+                async def disconnect_tasks():
+                    # 1. Guardar transcripción ANTES de que LiveKit limpie la sesión
+                    await _save_transcript_snapshot("client-hangup")
+                    # 2. Colgar la sala
                     url = f"{agent_instance.server_url}/colgar"
                     try:
-                         async with aiohttp.ClientSession() as http_sess:
-                             await http_sess.post(url, timeout=5, json={"nombre_sala": room_name})
-                    except: pass
-                asyncio.create_task(force_hangup_room())
+                        async with aiohttp.ClientSession() as http_sess:
+                            await http_sess.post(url, timeout=5, json={"nombre_sala": room_name})
+                    except:
+                        pass
+                asyncio.create_task(disconnect_tasks())
 
         # Kill switch: si la sala no se cierra en 10 minutos, forzamos la desconexión
         # para evitar workers zombi que consumen recursos indefinidamente.
@@ -923,6 +1035,10 @@ async def entrypoint(ctx: JobContext):
                 ghost_guard_task.cancel()
             if 'backchannel_task' in locals():
                 backchannel_task.cancel()
+            if 'transcript_autosave_task' in locals():
+                transcript_autosave_task.cancel()
+            if 'silence_reprompt_task' in locals():
+                silence_reprompt_task.cancel()
         except Exception:
             pass
 
@@ -943,11 +1059,22 @@ async def entrypoint(ctx: JobContext):
                 raw_messages = []
                 transcript = ""
                 try:
+                    # Intentar extraer transcripción fresca; si session ya está limpia,
+                    # usar el snapshot guardado en on_participant_disconnected.
                     if 'session' in locals():
-                        # Extraemos transcripción robusta aunque LiveKit cambie formato de message.content
                         raw_messages, transcript = _extract_transcript_from_session(session)
+                        logger.info(f"📝 [{job_id}] Transcripción extraída en finally: {len(transcript)} chars")
+
+                    # Fallback al snapshot si no se obtuvo nada
+                    if not transcript and 'transcript_snapshot' in locals() and transcript_snapshot.get("transcript"):
+                        transcript = transcript_snapshot["transcript"]
+                        raw_messages = transcript_snapshot.get("raw", [])
+                        logger.info(f"📝 [{job_id}] Usando snapshot de transcripción: {len(transcript)} chars")
                 except Exception as ex:
                     logger.error(f"Error procesando historia para transcripción local: {ex}")
+                    if 'transcript_snapshot' in locals() and transcript_snapshot.get("transcript"):
+                        transcript = transcript_snapshot["transcript"]
+                        raw_messages = transcript_snapshot.get("raw", [])
                 
                 # SIEMPRE guardar transcripción y datos finales en Supabase
                 url_guardar = f"{internal_api_url}/guardar-encuesta"
