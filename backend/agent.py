@@ -5,6 +5,7 @@ import aiohttp
 import asyncio
 import sys
 import json
+import re
 from dotenv import load_dotenv
 load_dotenv() # Cargar antes de cualquier otra cosa para que los decoradores lo vean
 
@@ -50,6 +51,7 @@ logger = logging.getLogger("agent-dynamic")
 load_dotenv()
 
 ROOM_PREFIX = os.getenv("LIVEKIT_ROOM_PREFIX", "llamada_ausarta_")
+DEFAULT_CARTESIA_VOICE = "cefcb124-080b-4655-b31f-932f3ee743de"
 
 # ============================================================================
 # INSTRUCCIONES BASE - Se combinan con las instrucciones específicas del agente
@@ -93,6 +95,17 @@ def _resolve_enthusiasm_instruction(level: str) -> str:
     return ENTHUSIASM_INSTRUCTIONS["Normal"]
 
 
+def _is_uuid_like(value: str) -> bool:
+    if not value:
+        return False
+    return bool(
+        re.fullmatch(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+            value.strip(),
+        )
+    )
+
+
 def _build_tts_plugin(voice_id: str, language: str, speaking_speed: float):
     """
     Crea el plugin TTS aplicando voz + velocidad.
@@ -104,10 +117,17 @@ def _build_tts_plugin(voice_id: str, language: str, speaking_speed: float):
     except Exception:
         safe_speed = 1.0
 
+    safe_voice = (voice_id or "").strip()
+    if not _is_uuid_like(safe_voice):
+        logger.warning(
+            f"⚠️ voice_id inválida para Cartesia ('{voice_id}'). Usando voz por defecto."
+        )
+        safe_voice = DEFAULT_CARTESIA_VOICE
+
     try:
         return cartesia.TTS(
             model="sonic-multilingual",
-            voice=voice_id,
+            voice=safe_voice,
             language=language,
             speed=safe_speed,
         )
@@ -115,7 +135,7 @@ def _build_tts_plugin(voice_id: str, language: str, speaking_speed: float):
         logger.warning("⚠️ cartesia.TTS no soporta 'speed' en esta versión. Usando fallback sin speed.")
         return cartesia.TTS(
             model="sonic-multilingual",
-            voice=voice_id,
+            voice=safe_voice,
             language=language,
         )
 
@@ -391,12 +411,20 @@ async def entrypoint(ctx: JobContext):
 
     async def _safe_reject(reason: str):
         logger.error(f"🚫 [{job_id}] Job rechazado: {reason}")
+        # En esta versión de LiveKit no existe ctx.reject(); cerramos de forma segura.
         try:
-            maybe = ctx.reject()
-            if asyncio.iscoroutine(maybe):
-                await maybe
+            shutdown_fn = getattr(ctx, "shutdown", None)
+            if callable(shutdown_fn):
+                try:
+                    maybe = shutdown_fn(reason=reason)
+                except TypeError:
+                    maybe = shutdown_fn()
+                if asyncio.iscoroutine(maybe):
+                    await maybe
+                return
+            logger.warning(f"[{job_id}] No hay método reject/shutdown disponible en JobContext.")
         except Exception as rej_err:
-            logger.error(f"[{job_id}] Error rechazando job: {rej_err}")
+            logger.error(f"[{job_id}] Error cerrando job rechazado: {rej_err}")
 
     # --- PASO 1: Filtro estricto de sala + metadata ---
     if not room_name.startswith(ROOM_PREFIX):
