@@ -225,19 +225,24 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     };
 
     const openTranscript = async (row: SurveyResult) => {
-        if (!row.transcription) {
-            try {
-                const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
-                const res = await fetch(`${API_URL}/api/results/${row.id}/transcription`);
-                if (res.ok) {
-                    const data = await res.json();
-                    row.transcription = data.transcription;
+        // Siempre cargamos la transcripción fresca desde la API para mostrar incluso
+        // las parciales (llamadas incompletas, cortes, etc.)
+        let freshTranscription = row.transcription ?? null;
+        try {
+            const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+            const res = await fetch(`${API_URL}/api/results/${row.id}/transcription`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.transcription) {
+                    freshTranscription = data.transcription;
+                    // Actualizar en el estado global para que no se pierda al reabrir
+                    setResults(prev => prev.map(r => r.id === row.id ? { ...r, transcription: freshTranscription } : r));
                 }
-            } catch (e) {
-                console.error("Error fetching transcript", e);
             }
+        } catch (e) {
+            console.error("Error fetching transcript", e);
         }
-        setViewingTranscript({ ...row });
+        setViewingTranscript({ ...row, transcription: freshTranscription });
     };
 
     return (

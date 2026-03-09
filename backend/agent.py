@@ -392,8 +392,8 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
             return
 
         logger.info(f"🎙️ Saludando en sala: {self.room_name} con: {self.greeting}")
-        # Pequeña pausa natural como si cogieras el teléfono (0.15 → 1.5s configurable)
-        greeting_delay = float(os.getenv("AGENT_GREETING_DELAY_SECONDS", "1.5"))
+        # Pausa natural al descolgar (casi inmediato por defecto)
+        greeting_delay = float(os.getenv("AGENT_GREETING_DELAY_SECONDS", "0.15"))
         greeting_delay = max(0.1, min(greeting_delay, 3.0))
         await asyncio.sleep(greeting_delay)
         try:
@@ -732,12 +732,20 @@ async def entrypoint(ctx: JobContext):
         # Usar FallbackAdapter transparente al cliente
         final_llm = FallbackAdapter([main_llm, fallback_llm], attempt_timeout=10.0)
 
-        # --- Crear sesión del agente (AgentSession, compatible con versión instalada) ---
+        # --- Crear sesión del agente ---
+        # min_endpointing_delay: segundos de espera mínima tras silencio VAD antes de procesar
+        # max_endpointing_delay: tope máximo de espera (por defecto 3s → usuario lo notaba como pausa larga)
+        # preemptive_generation: empieza a generar respuesta mientras el usuario habla → menos latencia percibida
+        endpointing_min = float(os.getenv("AGENT_ENDPOINTING_MIN", "0.3"))
+        endpointing_max = float(os.getenv("AGENT_ENDPOINTING_MAX", "1.5"))
         session = AgentSession(
             vad=vad_model,
             stt=stt_plugin,
             llm=final_llm,
             tts=_build_tts_plugin(voice_id=voice_id, language=language, speaking_speed=speaking_speed),
+            min_endpointing_delay=endpointing_min,
+            max_endpointing_delay=endpointing_max,
+            preemptive_generation=True,
         )
 
         await session.start(
