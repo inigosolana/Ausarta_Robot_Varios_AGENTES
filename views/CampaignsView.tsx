@@ -75,7 +75,7 @@ export function CampaignsView() {
   const [viewingTranscriptLead, setViewingTranscriptLead] = useState<SurveyResult | null>(null);
 
   function getScoreColor(score: number | null): string {
-    if (score === null) return 'bg-gray-50 text-gray-400 border border-gray-100';
+    if (score === null || Number.isNaN(score)) return 'bg-gray-50 text-gray-400 border border-gray-100';
     if (score >= 9) return 'bg-green-100 text-green-700 border border-green-200';
     if (score >= 7) return 'bg-blue-100 text-blue-700 border border-blue-200';
     if (score >= 5) return 'bg-yellow-100 text-yellow-700 border border-yellow-200';
@@ -774,7 +774,7 @@ export function CampaignsView() {
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600">
                           {/* Columnas de Resultados Profesionales */}
-                          {lead.status === 'completed' ? (
+                          {(lead.status === 'completed' || lead.status === 'completada') ? (
                             <div className="flex flex-col gap-2">
                               {lead.encuesta?.tipo_resultados === 'CUALIFICACION_LEAD' ? (
                                 <div className="flex items-center gap-1.5">
@@ -800,10 +800,12 @@ export function CampaignsView() {
                               ) : (
                                 <div className="flex gap-1.5">
                                   {['puntuacion_comercial', 'puntuacion_instalador', 'puntuacion_rapidez'].map((key) => {
-                                    const score = (lead.encuesta as any)?.[key];
+                                    const raw = (lead as any)[key] ?? (lead.encuesta as any)?.[key];
+                                    const num = raw != null && raw !== '' ? Number(raw) : null;
+                                    const score = num != null && !Number.isNaN(num) ? num : null;
                                     return (
                                       <div key={key} className={`w-7 h-7 flex items-center justify-center rounded-lg text-xs font-bold shadow-sm transition-transform hover:scale-110 ${getScoreColor(score)}`}>
-                                        {score ?? '-'}
+                                        {score != null ? score : '-'}
                                       </div>
                                     );
                                   })}
@@ -826,7 +828,7 @@ export function CampaignsView() {
                           {/* Botón de transcripción modal reutilizable */}
                           {(() => {
                             const enc = lead.encuesta;
-                            const TERMINAL = ['completed', 'failed', 'unreached', 'incomplete', 'rejected_opt_out'];
+                            const TERMINAL = ['completed', 'completada', 'failed', 'unreached', 'incomplete', 'rejected_opt_out'];
                             if (!TERMINAL.includes(lead.status) || !enc) return null;
                             return (
                               <button

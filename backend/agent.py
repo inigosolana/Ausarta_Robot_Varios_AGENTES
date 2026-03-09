@@ -374,6 +374,7 @@ REGLA ESPECIAL PARA ENCUESTAS NUMÉRICAS:
 - Esta es una encuesta de puntuación del 0 al 10.
 - Debes obtener una nota numérica para cada pregunta. 
 - Si el cliente responde con texto, pídele amablemente una puntuación del 0 al 10.
+- OBLIGATORIO: Tras recibir las 3 notas (comercial, instalador, rapidez), SIEMPRE pregunta por un comentario final antes de terminar (ej: "¿Quiere añadir algún comentario antes de terminar?"). Solo después de la respuesta del cliente, llama a guardar_encuesta con comentarios y status='completed', y luego finalizar_llamada. NUNCA omitas esta pregunta de comentario.
 """
         elif has_preguntas:
             base_rules_to_use += """
@@ -476,6 +477,7 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         """
         Guarda los datos de la encuesta/llamada. 
         - Si la encuesta es NUMÉRICA, usa 'nota_comercial', 'nota_instalador', 'nota_rapidez' (1-10).
+        - IMPORTANTE: Para encuestas numéricas, SIEMPRE pregunta "¿Quiere añadir algún comentario antes de terminar?" ANTES de llamar con status='completed'. El campo 'comentarios' debe reflejar la respuesta real del cliente (o "Sin comentarios" si no añade nada).
         - Si la encuesta es ABIERTA o hay feedback extra, usa 'comentarios'.
         - Para ENCUESTA_MIXTA, pasa 'datos_extra' como JSON string, ej: '{"experiencia_general":4,"detalle_problema":"...","motivo_contratacion":"comercial"}'.
         - 'status': 'completed', 'failed', 'incomplete' o 'rejected_opt_out'.
