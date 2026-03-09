@@ -113,7 +113,7 @@ Reglas para sonar humano:
 1) Usa marcadores discursivos naturales: "A ver...", "Pues mira...", "Eh...", "Vale, entiendo", "Claro que sí", "Perfecto".
 2) NO hagas listas numeradas en la conversación hablada. Habla de forma fluida y natural.
 3) Si el usuario te interrumpe, DETENTE y di "Sí, dígame..." o "Claro, cuénteme" antes de continuar.
-4) Mantén respuestas CORTAS (idealmente menos de 25 palabras) para reducir sensación de robotismo y latencia.
+4) Mantén respuestas ágiles pero completas (normalmente 15-40 palabras). Evita respuestas telegráficas.
 5) Si necesitas tiempo, di "Un momento..." o "A ver, déjeme apuntar eso..." en lugar de silencio.
 6) Si el cliente dice que no tiene tiempo, NO insistas: cierra de forma rápida pero genuinamente cálida.
 7) Antes de finalizar, asegúrate de guardar el estado final con guardar_encuesta.
@@ -181,6 +181,81 @@ def _build_tts_plugin(voice_id: str, language: str, speaking_speed: float):
         )
 
 
+def _normalize_message_text(content) -> str:
+    """
+    Convierte distintos formatos de contenido de LiveKit a texto plano.
+    Soporta str, dict, listas y objetos con atributos text/content.
+    """
+    if content is None:
+        return ""
+
+    if isinstance(content, str):
+        return content.strip()
+
+    if isinstance(content, dict):
+        # Formatos comunes tipo {"text": "..."} o {"content": "..."}
+        text = content.get("text") or content.get("content") or ""
+        return str(text).strip()
+
+    if isinstance(content, list):
+        chunks = []
+        for item in content:
+            if isinstance(item, str):
+                chunks.append(item)
+            elif isinstance(item, dict):
+                chunk = item.get("text") or item.get("content") or ""
+                if chunk:
+                    chunks.append(str(chunk))
+            else:
+                chunk = getattr(item, "text", None) or getattr(item, "content", None)
+                if chunk:
+                    chunks.append(str(chunk))
+        return " ".join(chunks).strip()
+
+    text_attr = getattr(content, "text", None)
+    if text_attr:
+        return str(text_attr).strip()
+
+    content_attr = getattr(content, "content", None)
+    if content_attr:
+        return str(content_attr).strip()
+
+    return str(content).strip()
+
+
+def _extract_transcript_from_session(session_obj) -> tuple[list[dict], str]:
+    """
+    Extrae mensajes user/assistant desde session.chat_ctx/chat_context y
+    devuelve (raw_messages, transcript) en formato:
+      Cliente: ...
+      Agente: ...
+    """
+    raw_messages: list[dict] = []
+    transcript_lines: list[str] = []
+
+    if not session_obj:
+        return raw_messages, ""
+
+    chat_ctx = getattr(session_obj, "chat_ctx", getattr(session_obj, "chat_context", None))
+    if not chat_ctx or not getattr(chat_ctx, "messages", None):
+        return raw_messages, ""
+
+    for m in chat_ctx.messages:
+        role = getattr(m, "role", "")
+        if role not in ("user", "assistant"):
+            continue
+
+        content = _normalize_message_text(getattr(m, "content", None))
+        if not content or len(content) <= 1:
+            continue
+
+        raw_messages.append({"role": role, "content": content})
+        role_label = "Cliente" if role == "user" else "Agente"
+        transcript_lines.append(f"{role_label}: {content}")
+
+    return raw_messages, ("\n".join(transcript_lines).strip() + ("\n" if transcript_lines else ""))
+
+
 class DynamicAgent(Agent):
     """Agente dinámico que carga sus instrucciones desde Supabase."""
     
@@ -200,6 +275,7 @@ class DynamicAgent(Agent):
         self.enthusiasm_level = agent_config.get("enthusiasm_level", "Normal") or "Normal"
         self.voice_id = agent_config.get("voice_id", "") or ""
         self.speaking_speed = agent_config.get("speaking_speed", 1.0)
+        self.hangup_started = False
         
         try:
             # Soportamos formatos:
@@ -391,20 +467,27 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         Herramienta para decir unas últimas palabras y colgar la llamada.
         Debes proporcionar obligatoriamente el mensaje de despedida — debe ser una despedida cálida y completa.
         """
+        # Protección anti-duplicado: evita repetir despedida si el LLM llama dos veces a la tool.
+        if self.hangup_started:
+            logger.info(f"⚠️ [{self.room_name}] finalizar_llamada duplicado detectado. No se repite despedida.")
+            return "Cierre ya en curso."
+
+        self.hangup_started = True
+
         async def process_goodbye_and_hangup():
             try:
-                # Decir despedida sin permitir interrupciones para que no se corte
+                # Decir despedida sin interrupciones y colgar casi al instante al terminar
                 await self.session.say(mensaje_despedida_manual, allow_interruptions=False)
 
-                # Espera dinámica: ~75ms por palabra + 3s de margen de silencio final
-                # Esto evita cortar la voz si la despedida es larga
-                word_count = len(mensaje_despedida_manual.split())
-                wait_seconds = max(4.0, (word_count * 0.075) + 3.0)
-                logger.info(f"⏳ Esperando {wait_seconds:.1f}s antes de colgar (despedida: {word_count} palabras)")
+                # Margen corto para evitar silencios largos tras despedida.
+                # Si se necesita ajustar, usar AGENT_HANGUP_DELAY_SECONDS en entorno.
+                wait_seconds = float(os.getenv("AGENT_HANGUP_DELAY_SECONDS", "0.8"))
+                wait_seconds = max(0.3, min(wait_seconds, 1.5))
+                logger.info(f"⏳ Esperando {wait_seconds:.1f}s antes de colgar.")
                 await asyncio.sleep(wait_seconds)
             except Exception as say_err:
                 logger.error(f"❌ Error diciendo despedida: {say_err}")
-                await asyncio.sleep(3.0)
+                await asyncio.sleep(0.5)
             finally:
                 url = f"{self.server_url}/colgar"
                 payload = {"nombre_sala": self.room_name}
@@ -601,7 +684,9 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"✅ [{job_id}] Conectado a sala {room_name}. Participantes: {len(ctx.room.remote_participants)}")
 
         # --- PASO 3: Cargar configuración VAD ---
-        vad_model = await asyncio.to_thread(silero.VAD.load, min_silence_duration=0.5)
+        min_silence_duration = float(os.getenv("AGENT_MIN_SILENCE_SECONDS", "0.25"))
+        min_silence_duration = max(0.15, min(min_silence_duration, 0.6))
+        vad_model = await asyncio.to_thread(silero.VAD.load, min_silence_duration=min_silence_duration)
         logger.info(f"✅ [{job_id}] VAD y configuración cargados.")
 
         # --- PASO 4: Crear el asistente ---
@@ -629,14 +714,14 @@ async def entrypoint(ctx: JobContext):
             model=llm_model, 
             base_url="https://api.groq.com/openai/v1",
             api_key=os.getenv("GROQ_API_KEY"),
-            temperature=0.1
+            temperature=0.2
         )
         
         # LLM Secundario (OpenAI - gpt-4o-mini)
         fallback_llm = openai.LLM(
             model="gpt-4o-mini",
             api_key=os.getenv("OPENAI_API_KEY"),
-            temperature=0.1
+            temperature=0.2
         )
 
         # Usar FallbackAdapter transparente al cliente
@@ -729,7 +814,7 @@ async def entrypoint(ctx: JobContext):
                     normalized_msgs = []
                     for m in chat_ctx.messages:
                         role = getattr(m, "role", "")
-                        content = (getattr(m, "content", "") or "").strip()
+                        content = _normalize_message_text(getattr(m, "content", None))
                         if role in ("user", "assistant") and content:
                             normalized_msgs.append((role, content))
 
@@ -835,16 +920,8 @@ async def entrypoint(ctx: JobContext):
                 transcript = ""
                 try:
                     if 'session' in locals():
-                        # Intentamos obtener la historia de la sesión o del asistente (varía según versión de livekit-agents)
-                        chat_ctx = getattr(session, 'chat_ctx', getattr(session, 'chat_context', None))
-                        if chat_ctx:
-                            for m in chat_ctx.messages:
-                                content = (m.content or "").strip()
-                                # Filtrar mensajes vacíos o ruidos cortos
-                                if content and len(content) > 1 and m.role in ("user", "assistant"):
-                                    raw_messages.append({"role": m.role, "content": content})
-                                    role_label = "Cliente" if m.role == "user" else "Agente"
-                                    transcript += f"{role_label}: {content}\n"
+                        # Extraemos transcripción robusta aunque LiveKit cambie formato de message.content
+                        raw_messages, transcript = _extract_transcript_from_session(session)
                 except Exception as ex:
                     logger.error(f"Error procesando historia para transcripción local: {ex}")
                 

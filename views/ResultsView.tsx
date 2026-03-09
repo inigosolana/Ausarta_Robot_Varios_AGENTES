@@ -210,6 +210,36 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
         document.body.removeChild(link);
     };
 
+    const handleRetry = (phone: string) => {
+        const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+        fetch(`${API_URL}/api/calls/outbound`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phoneNumber: phone })
+        })
+            .then(res => {
+                if (res.ok) alert(t("Retrying call to {{phone}}...", { phone, defaultValue: `Reintentando llamada a ${phone}...` }));
+                else alert(t("Error retrying", "Error al reintentar"));
+            })
+            .catch(e => console.error(e));
+    };
+
+    const openTranscript = async (row: SurveyResult) => {
+        if (!row.transcription) {
+            try {
+                const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+                const res = await fetch(`${API_URL}/api/results/${row.id}/transcription`);
+                if (res.ok) {
+                    const data = await res.json();
+                    row.transcription = data.transcription;
+                }
+            } catch (e) {
+                console.error("Error fetching transcript", e);
+            }
+        }
+        setViewingTranscript({ ...row });
+    };
+
     return (
         <div className="space-y-6">
             {!hideHeader && (
@@ -300,10 +330,66 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                 )
             }
 
-            {/* Table */}
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            {/* Mobile / Tablet cards */}
+            <div className="lg:hidden space-y-3">
+                {filteredResults.length === 0 ? (
+                    <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-8 text-center text-gray-400 text-sm">
+                        {t('No results found')}
+                    </div>
+                ) : filteredResults.map((row) => (
+                    <div key={row.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <div className="text-xs text-gray-400 font-mono">#{row.id}</div>
+                                <div className="font-semibold text-gray-900">{row.telefono}</div>
+                                <div className="text-[11px] text-blue-600 font-bold uppercase tracking-tight">{row.campaign_name}</div>
+                            </div>
+                            <span className="text-xs text-gray-500 text-right">
+                                {new Date(row.fecha).toLocaleDateString()}<br />
+                                {new Date(row.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2">
+                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold uppercase shadow-sm ${
+                                row.status === 'completada' || row.status === 'completed' ? 'bg-green-500 text-white' :
+                                row.status === 'parcial' || row.status === 'incomplete' ? 'bg-orange-400 text-white' :
+                                row.status === 'rechazada' || row.status === 'rejected_opt_out' || row.status === 'rejected' ? 'bg-red-700 text-white' :
+                                row.status === 'fallida' || row.status === 'failed' ? 'bg-purple-500 text-white' :
+                                row.status === 'no_contesta' || row.status === 'unreached' ? 'bg-amber-400 text-white' :
+                                'bg-gray-400 text-white'
+                            }`}>
+                                {(row.status || 'pendiente').replace('_', ' ')}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                                {row.llm_model?.replace('Google ', '').replace('Groq ', '') || 'Llama 3.3'}
+                            </span>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row gap-2">
+                            {(row.status === 'failed' || row.status === 'incomplete') && (
+                                <button
+                                    onClick={() => handleRetry(row.telefono)}
+                                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-orange-200 text-orange-700 bg-orange-50 rounded-lg text-sm font-medium"
+                                >
+                                    <RefreshCw size={16} /> {t('Retry')}
+                                </button>
+                            )}
+                            <button
+                                onClick={() => openTranscript(row)}
+                                className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-blue-200 text-blue-700 bg-blue-50 rounded-lg text-sm font-semibold"
+                            >
+                                <FileText size={16} /> {t('Transcript')}
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden lg:block bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left text-gray-700">
+                    <table className="w-full min-w-[1100px] text-sm text-left text-gray-700">
                         <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-100">
                             <tr>
                                 <th className="px-6 py-3 w-16">{t('ID')}</th>
@@ -313,7 +399,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                 <th className="px-6 py-3 text-center">{t('Results / Scores')}</th>
                                 <th className="px-6 py-3">{t('Model')}</th>
                                 <th className="px-6 py-3">{t('Comments')}</th>
-                                <th className="px-6 py-3 text-right">{t('More')}</th>
+                                <th className="px-6 py-3 text-right sticky right-0 bg-gray-50">{t('More')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -449,46 +535,20 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                             <span className="text-gray-300 italic text-xs">{t('None')}</span>
                                         )}
                                     </td>
-                                    <td className="px-6 py-4 text-right">
+                                    <td className="px-6 py-4 text-right sticky right-0 bg-white">
                                         <div className="flex justify-end items-center gap-2">
                                             {(row.status === 'failed' || row.status === 'incomplete') && (
                                                 <button
-                                                    onClick={() => {
-                                                        const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
-                                                        fetch(`${API_URL}/api/calls/outbound`, {
-                                                            method: 'POST',
-                                                            headers: { 'Content-Type': 'application/json' },
-                                                            body: JSON.stringify({ phoneNumber: row.telefono })
-                                                        })
-                                                            .then(res => {
-                                                                if (res.ok) alert(t("Retrying call to {{phone}}...", { phone: row.telefono, defaultValue: `Reintentando llamada a ${row.telefono}...` }));
-                                                                else alert(t("Error retrying", "Error al reintentar"));
-                                                            })
-                                                            .catch(e => console.error(e));
-                                                    }}
-                                                    className="p-2 text-orange-600 hover:bg-orange-50 rounded-lg transition-colors flex items-center gap-1 text-xs"
+                                                    onClick={() => handleRetry(row.telefono)}
+                                                    className="px-3 py-2 text-orange-700 bg-orange-50 border border-orange-200 hover:bg-orange-100 rounded-lg transition-colors flex items-center gap-1 text-xs font-medium whitespace-nowrap"
                                                     title="Reintentar llamada ahora"
                                                 >
                                                     <RefreshCw size={16} /> {t('Retry')}
                                                 </button>
                                             )}
                                             <button
-                                                onClick={async () => {
-                                                    if (!row.transcription) {
-                                                        try {
-                                                            const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
-                                                            const res = await fetch(`${API_URL}/api/results/${row.id}/transcription`);
-                                                            if (res.ok) {
-                                                                const data = await res.json();
-                                                                row.transcription = data.transcription;
-                                                            }
-                                                        } catch (e) {
-                                                            console.error("Error fetching transcript", e);
-                                                        }
-                                                    }
-                                                    setViewingTranscript({ ...row });
-                                                }}
-                                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1 text-xs"
+                                                onClick={() => openTranscript(row)}
+                                                className="px-3 py-2 text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg transition-colors flex items-center gap-1 text-xs font-semibold whitespace-nowrap"
                                             >
                                                 <FileText size={16} /> {t('Transcript')}
                                             </button>
