@@ -82,6 +82,17 @@ EXCEPCIÓN INTERRUPCIÓN/COLGAR:
 NOTA FINAL: UNA VEZ LLAMES A 'finalizar_llamada', LA CONVERSACIÓN HA TERMINADO. NO RESPONDAS A NADA MÁS.
 """
 
+HUMAN_STYLE_RULES = """
+ESTILO HUMANO (NATURAL Y CERCANO):
+1. HABLA COMO PERSONA REAL: usa frases cortas, cálidas y naturales, evitando tono de robot.
+2. MICRO-EMPATÍA: valida al cliente con expresiones breves ("entiendo", "perfecto", "gracias por comentarlo").
+3. VARIACIÓN NATURAL: evita repetir siempre la misma estructura; alterna inicios de frase.
+4. UNA PREGUNTA CADA VEZ: no lances bloques largos; pregunta, escucha, confirma y continúa.
+5. ESCUCHA ACTIVA: si el cliente da un dato, refléjalo en una frase corta antes de seguir.
+6. CLARIDAD ORAL: prioriza lenguaje cotidiano, simple y directo.
+7. CIERRE CÁLIDO: despídete con agradecimiento genuino y tono amable.
+"""
+
 ENTHUSIASM_INSTRUCTIONS = {
     "Bajo": "Mantén un tono calmado, pausado y profesional. Evita sonar efusivo.",
     "Normal": "Mantén un tono cercano, claro y profesional con energía equilibrada.",
@@ -224,6 +235,7 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         
         # Construcción del Prompt Final: Reglas -> Datos -> GUION (EL GUION ES LO MÁS IMPORTANTE)
         full_instructions = f"{base_rules_to_use}\n\n"
+        full_instructions += f"{HUMAN_STYLE_RULES}\n\n"
         full_instructions += f"DATOS DEL AGENTE:\n- NOMBRE: {agent_name}\n- EMPRESA: {company_name}\n"
         full_instructions += f"- NIVEL DE ENTUSIASMO: {self.enthusiasm_level}\n"
         full_instructions += f"- VELOCIDAD DE VOZ OBJETIVO: {self.speaking_speed}\n\n"
@@ -238,6 +250,11 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
             "- Mantén respuestas breves, claras y orientadas al negocio de la empresa.\n\n"
         )
         full_instructions += f"ESTILO DE ENTREGA: {_resolve_enthusiasm_instruction(self.enthusiasm_level)}\n\n"
+        full_instructions += (
+            "OBJETIVO DE EXPERIENCIA:\n"
+            "- El cliente debe sentir que habla con una persona profesional, cercana y resolutiva.\n"
+            "- Si dudas entre sonar 'perfecto' o 'humano', prioriza humano siempre sin perder precisión.\n\n"
+        )
         full_instructions += "SIGUE ESTE GUION AL PIE DE LA LETRA:\n"
         full_instructions += f"{agent_instructions}\n"
 
