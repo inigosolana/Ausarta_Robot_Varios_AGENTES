@@ -400,27 +400,46 @@ async def fetch_agent_config(survey_id: str, expected_empresa_id: str = "0") -> 
         or os.getenv("BRIDGE_SERVER_URL")
         or "http://127.0.0.1:8001"
     ).rstrip("/")
-    url = f"{server_url}/api/agent_config_by_survey/{survey_id}"
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=5) as resp:
-                if resp.status == 200:
-                    config = await resp.json()
-                    
-                    # SELLO DE SEGURIDAD MULTI-TENANT
-                    config_empresa_id = str(config.get("empresa_id", "0"))
-                    if expected_empresa_id and expected_empresa_id != "0" and config_empresa_id != "0" and expected_empresa_id != config_empresa_id:
-                        raise Exception(f"Violación de seguridad Multi-Tenant: El ID de la empresa no coincide. Metadata: {expected_empresa_id}, Config: {config_empresa_id}")
-                        
-                    logger.info(f"📋 Config de agente obtenida para survey {survey_id}: nombre='{config.get('name')}', modelo='{config.get('llm_model')}'")
-                    return config
-                else:
-                    logger.warning(f"⚠️ No se pudo obtener config de agente (HTTP {resp.status}). Usando defaults.")
-                    return {}
-    except Exception as e:
-        logger.warning(f"⚠️ Error obteniendo config de agente: {e}. Usando defaults.")
-        return {}
+    # Cache-busting y reintentos cortos para evitar lecturas obsoletas justo después de editar un agente.
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        url = f"{server_url}/api/agent_config_by_survey/{survey_id}?_ts={int(asyncio.get_running_loop().time() * 1000)}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    timeout=5,
+                    headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+                ) as resp:
+                    if resp.status == 200:
+                        config = await resp.json()
+
+                        # SELLO DE SEGURIDAD MULTI-TENANT
+                        config_empresa_id = str(config.get("empresa_id", "0"))
+                        if expected_empresa_id and expected_empresa_id != "0" and config_empresa_id != "0" and expected_empresa_id != config_empresa_id:
+                            raise Exception(f"Violación de seguridad Multi-Tenant: El ID de la empresa no coincide. Metadata: {expected_empresa_id}, Config: {config_empresa_id}")
+
+                        logger.info(
+                            f"📋 Config FRESH obtenida para survey {survey_id} (attempt {attempt}/{max_attempts}): "
+                            f"nombre='{config.get('name')}', modelo='{config.get('llm_model')}', "
+                            f"cfg_updated_at='{config.get('config_updated_at')}'"
+                        )
+                        return config
+                    else:
+                        logger.warning(
+                            f"⚠️ Intento {attempt}/{max_attempts}: no se pudo obtener config (HTTP {resp.status})"
+                        )
+        except Exception as e:
+            logger.warning(
+                f"⚠️ Intento {attempt}/{max_attempts}: error obteniendo config de agente: {e}"
+            )
+
+        # Pequeño backoff para dar tiempo a propagación de update en edge cases
+        if attempt < max_attempts:
+            await asyncio.sleep(0.25 * attempt)
+
+    logger.warning("⚠️ No se pudo obtener config fresca tras reintentos. Usando defaults.")
+    return {}
 
 
 # ============================================================================

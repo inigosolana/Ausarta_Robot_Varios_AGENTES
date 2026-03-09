@@ -273,7 +273,7 @@ async def get_agent_config_by_survey(survey_id: int):
 
         greeting = agent_data.get("greeting", "Buenas, ¿tiene un momento?").replace("{nombre}", nombre_cliente or "Cliente")
 
-        return {
+        payload = {
             "name": agent_data.get("name", "Bot"),
             "greeting": greeting,
             "instructions": agent_data.get("instructions", "Eres un asistente"),
@@ -286,8 +286,18 @@ async def get_agent_config_by_survey(survey_id: int):
             "enthusiasm_level": agent_data.get("enthusiasm_level") or "Normal",
             "speaking_speed": agent_data.get("speaking_speed") or 1.0,
             "agent_type": agent_data.get("agent_type") or "ENCUESTA_NUMERICA",
-            "empresa_id": empresa_id or agent_empresa_id
+            "empresa_id": empresa_id or agent_empresa_id,
+            "config_updated_at": agent_data.get("updated_at") or ai_data.get("updated_at"),
         }
+        # Evita cualquier cache intermedio: tras editar, la siguiente llamada debe leer esto sí o sí.
+        return JSONResponse(
+            status_code=200,
+            content=payload,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+            },
+        )
     except Exception as e:
         logger.error(f"Error agent config by survey: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
