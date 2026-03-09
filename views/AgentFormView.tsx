@@ -53,6 +53,8 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
     const [aiConfig, setAiConfig] = useState<AIConfig>({ ...defaultAIConfig });
     const [isSaving, setIsSaving] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+    const [isLoadingEmpresas, setIsLoadingEmpresas] = useState(false);
+    const [isGeneratingCompanyContext, setIsGeneratingCompanyContext] = useState(false);
     const [templates, setTemplates] = useState<{ id: number; name: string; content: string }[]>([]);
     const [activeTab, setActiveTab] = useState<'config' | 'overview' | 'results'>('config');
 
@@ -79,8 +81,55 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
     }, [isPlatformOwner]);
 
     const loadEmpresas = async () => {
-        const { data } = await supabase.from('empresas').select('*').order('nombre');
-        if (data) setEmpresas(data);
+        setIsLoadingEmpresas(true);
+        try {
+            const API_URL = import.meta.env.VITE_API_URL || '';
+            const resp = await fetch(`${API_URL}/api/empresas`);
+            if (!resp.ok) throw new Error('No se pudo cargar empresas');
+            const data = await resp.json();
+            setEmpresas(Array.isArray(data) ? data : []);
+        } catch (err) {
+            console.error('Error loading empresas:', err);
+            setEmpresas([]);
+        } finally {
+            setIsLoadingEmpresas(false);
+        }
+    };
+
+    const handleGenerateCompanyContext = async () => {
+        const selectedEmpresa = empresas.find(e => Number(e.id) === Number(formData.empresa_id));
+        const companyName = selectedEmpresa?.nombre?.trim() || '';
+
+        if (!companyName && !formData.empresa_id) {
+            alert(t('Select a company first', 'Selecciona una empresa primero'));
+            return;
+        }
+
+        setIsGeneratingCompanyContext(true);
+        try {
+            const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+            const resp = await fetch(`${API_URL}/api/ai/company-context`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    empresa_id: formData.empresa_id || profile?.empresa_id || null,
+                    company_name: companyName || undefined,
+                }),
+            });
+            const result = await resp.json();
+            if (!resp.ok || !result.success) {
+                throw new Error(result.error || t('Unknown error', 'Error desconocido'));
+            }
+            setFormData(prev => ({
+                ...prev,
+                company_context: result.company_context || prev.company_context || '',
+            }));
+        } catch (err: any) {
+            console.error('Error generating company context:', err);
+            alert(`${t('Could not generate company context', 'No se pudo generar el contexto de empresa')}: ${err.message}`);
+        } finally {
+            setIsGeneratingCompanyContext(false);
+        }
     };
 
     const loadAIConfig = async (agentId: number) => {
@@ -327,9 +376,10 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                         <select
                                             value={formData.empresa_id || ''}
                                             onChange={(e) => setFormData({ ...formData, empresa_id: e.target.value ? Number(e.target.value) : null })}
+                                            disabled={isLoadingEmpresas}
                                             className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
                                         >
-                                            <option value="" disabled>-- {t('Select', 'Seleccionar')} --</option>
+                                            <option value="">{isLoadingEmpresas ? t('Loading...', 'Cargando...') : `-- ${t('Select', 'Seleccionar')} --`}</option>
                                             {empresas.map(emp => (
                                                 <option key={emp.id} value={emp.id}>{emp.nombre}</option>
                                             ))}
@@ -447,7 +497,19 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                             
                             <div className="space-y-4">
                                 <div>
-                                    <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">{t('Company Context', 'Contexto de la Empresa')}</label>
+                                    <div className="flex items-center justify-between mb-1 ml-1">
+                                        <label className="block text-xs font-medium text-gray-500">{t('Company Context', 'Contexto de la Empresa')}</label>
+                                        <button
+                                            type="button"
+                                            onClick={handleGenerateCompanyContext}
+                                            disabled={isGeneratingCompanyContext || (!formData.empresa_id && isPlatformOwner)}
+                                            className="text-[11px] px-2 py-1 rounded-md bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 disabled:opacity-50"
+                                        >
+                                            {isGeneratingCompanyContext
+                                                ? t('Generating...', 'Generando...')
+                                                : t('Auto-fill from web', 'Autorrellenar desde web')}
+                                        </button>
+                                    </div>
                                     <textarea
                                         rows={8}
                                         value={formData.company_context || ''}

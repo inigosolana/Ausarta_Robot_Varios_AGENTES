@@ -7,10 +7,155 @@ from datetime import datetime
 import os
 import json
 import logging
+import aiohttp
+import re
+from openai import AsyncOpenAI
 
 logger = logging.getLogger("api-backend")
 
 router = APIRouter(prefix="/api", tags=["settings"])
+
+
+async def _fetch_wikipedia_context(company_name: str) -> str:
+    """Busca un resumen breve en Wikipedia para la empresa."""
+    query_url = "https://es.wikipedia.org/w/api.php"
+    params = {
+        "action": "query",
+        "list": "search",
+        "srsearch": company_name,
+        "format": "json",
+        "utf8": 1,
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(query_url, params=params, timeout=8) as resp:
+                if resp.status != 200:
+                    return ""
+                data = await resp.json()
+                results = (data.get("query") or {}).get("search") or []
+                if not results:
+                    return ""
+                top_title = results[0].get("title")
+                if not top_title:
+                    return ""
+
+            summary_url = f"https://es.wikipedia.org/api/rest_v1/page/summary/{top_title.replace(' ', '_')}"
+            async with session.get(summary_url, timeout=8) as resp2:
+                if resp2.status != 200:
+                    return ""
+                summary_data = await resp2.json()
+                extract = (summary_data.get("extract") or "").strip()
+                return extract
+    except Exception:
+        return ""
+
+
+async def _fetch_duckduckgo_context(company_name: str) -> str:
+    """Obtiene contexto público desde DuckDuckGo Instant Answer API."""
+    url = "https://api.duckduckgo.com/"
+    params = {
+        "q": company_name,
+        "format": "json",
+        "no_redirect": 1,
+        "no_html": 1,
+        "skip_disambig": 1,
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=8) as resp:
+                if resp.status != 200:
+                    return ""
+                data = await resp.json()
+                abstract = (data.get("AbstractText") or "").strip()
+                if abstract:
+                    return abstract
+                related = data.get("RelatedTopics") or []
+                snippets = []
+                for item in related[:5]:
+                    if isinstance(item, dict) and item.get("Text"):
+                        snippets.append(item["Text"].strip())
+                return " ".join(snippets).strip()
+    except Exception:
+        return ""
+
+
+async def _build_company_context_with_ai(company_name: str, web_context: str) -> str:
+    """
+    Convierte información web en contexto accionable para el agente.
+    Siempre devuelve texto útil (aunque la web no aporte datos).
+    """
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if not openai_key:
+        if web_context:
+            return (
+                f"{company_name}: {web_context}\n"
+                "Usa un tono cercano y profesional. Si falta algun dato concreto, dilo con transparencia y no inventes informacion."
+            )
+        return (
+            f"{company_name}: empresa sin contexto publico suficiente en este momento.\n"
+            "Responde de forma general, pide confirmacion cuando falte informacion y no inventes datos."
+        )
+
+    client = AsyncOpenAI(api_key=openai_key)
+    safe_context = (web_context or "").strip()
+    system_prompt = """
+Eres un especialista en configuración de agentes de voz para atención telefónica.
+Debes generar un "Contexto de Empresa" práctico para que un agente responda con seguridad.
+
+Salida:
+- Texto en español, 1 bloque, sin markdown.
+- 6 a 10 líneas máximo.
+- Incluye: qué hace la empresa, público objetivo, propuesta de valor, tono recomendado, y límites (qué NO inventar).
+- Si faltan datos, indícalo de forma explícita y añade una pauta de respuesta segura.
+"""
+    user_prompt = (
+        f"Empresa: {company_name}\n\n"
+        f"Información recopilada de internet:\n{safe_context if safe_context else '(sin datos concluyentes)'}\n\n"
+        "Genera el contexto de empresa para usar en un agente telefónico."
+    )
+    response = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.2,
+        max_tokens=350,
+    )
+    return (response.choices[0].message.content or "").strip()
+
+
+@router.post("/ai/company-context")
+async def generate_company_context(payload: dict):
+    """
+    Genera contexto de empresa usando información pública de internet.
+    """
+    try:
+        empresa_id = payload.get("empresa_id")
+        company_name = (payload.get("company_name") or "").strip()
+
+        if not company_name and empresa_id and supabase:
+            try:
+                emp_res = supabase.table("empresas").select("nombre").eq("id", int(empresa_id)).limit(1).execute()
+                if emp_res.data:
+                    company_name = (emp_res.data[0].get("nombre") or "").strip()
+            except Exception as e_emp:
+                logger.warning(f"No se pudo resolver nombre de empresa para contexto web: {e_emp}")
+
+        if not company_name:
+            return JSONResponse(status_code=400, content={"success": False, "error": "company_name o empresa_id es requerido"})
+
+        # Fuentes públicas sin clave
+        wiki_text = await _fetch_wikipedia_context(company_name)
+        ddg_text = await _fetch_duckduckgo_context(company_name)
+        merged_context = "\n".join([s for s in [wiki_text, ddg_text] if s]).strip()
+        merged_context = re.sub(r"\s+", " ", merged_context).strip()
+
+        ai_context = await _build_company_context_with_ai(company_name, merged_context)
+        return {"success": True, "company_context": ai_context, "company_name": company_name}
+    except Exception as e:
+        logger.error(f"Error generating company context: {e}")
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @router.post("/ai/generate-prompt")
 async def generate_ai_prompt(req: AIPromptRequest):
