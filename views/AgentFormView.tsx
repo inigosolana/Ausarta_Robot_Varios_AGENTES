@@ -362,9 +362,9 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                             className="w-full bg-transparent border-none p-0 text-sm font-bold text-gray-800 focus:ring-0 cursor-pointer"
                                         >
                                             <optgroup label={t('Spanish', 'Español')}>
-                                                <option value="cefcb124-080b-4655-b31f-932f3ee743de">{t('Female (Castilian)', 'Chica (Castellano)')}</option>
+                                                <option value="cefcb124-080b-4655-b31f-932f3ee743de">{t('Female Normal', 'Chica Normal')}</option>
                                                 <option value="3380a516-6acc-4389-97c8-68273b540dd3">{t('Male (Castilian)', 'Chico (Castellano)')}</option>
-                                                <option value={AUSARTA_FEMALE_VOICE_ID}>{t('Female (Ausarta)', 'Chica (Ausarta)')}</option>
+                                                <option value={AUSARTA_FEMALE_VOICE_ID}>{t('Female (Ausarta)', 'Ausarta')}</option>
                                             </optgroup>
                                             <optgroup label={t('Basque', 'Euskera')}>
                                                 <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">{t('Female', 'Chica')}</option>
