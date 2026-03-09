@@ -7,6 +7,8 @@ import type { AgentConfig, AIConfig, Empresa } from '../types';
 import DashboardView from './DashboardView';
 import ResultsView from './ResultsView';
 
+const AUSARTA_FEMALE_VOICE_ID = 'a2f12ebd-80df-4de7-83f3-809599135b1d';
+
 interface Props {
     agent?: AgentConfig;
     onSave: () => void;
@@ -19,7 +21,7 @@ const defaultAIConfig: AIConfig = {
     llm_model: 'llama-3.3-70b-versatile',
     tts_provider: 'cartesia',
     tts_model: 'sonic-multilingual',
-    tts_voice: 'cefcb124-080b-4655-b31f-932f3ee743de',
+    tts_voice: AUSARTA_FEMALE_VOICE_ID,
     stt_provider: 'deepgram',
     stt_model: 'nova-2',
     language: 'es'
@@ -349,7 +351,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                             <optgroup label={t('Spanish', 'Español')}>
                                                 <option value="cefcb124-080b-4655-b31f-932f3ee743de">{t('Female (Castilian)', 'Chica (Castellano)')}</option>
                                                 <option value="3380a516-6acc-4389-97c8-68273b540dd3">{t('Male (Castilian)', 'Chico (Castellano)')}</option>
-                                                <option value="44c5567b-1b68-4873-8231-4e7660f749ad">{t('Female (Ausarta)', 'Chica (Ausarta)')}</option>
+                                                <option value={AUSARTA_FEMALE_VOICE_ID}>{t('Female (Ausarta)', 'Chica (Ausarta)')}</option>
                                             </optgroup>
                                             <optgroup label={t('Basque', 'Euskera')}>
                                                 <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">{t('Female', 'Chica')}</option>
@@ -461,12 +463,12 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                 </button>
                             </div>
 
-                            <div className="flex-1 relative bg-[#1e1e1e] border border-gray-800 rounded-xl overflow-hidden flex flex-col shadow-inner">
-                                <div className="flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-[#333]">
+                            <div className="flex-1 relative bg-gray-50 border border-gray-200 rounded-xl overflow-hidden flex flex-col shadow-inner">
+                                <div className="flex items-center justify-between px-4 py-2 bg-gray-100 border-b border-gray-200">
                                     <div className="flex gap-1.5">
-                                        <div className="w-2.5 h-2.5 rounded-full bg-red-500/80"></div>
-                                        <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80"></div>
-                                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80"></div>
+                                        <div className="w-2.5 h-2.5 rounded-full bg-red-400/80"></div>
+                                        <div className="w-2.5 h-2.5 rounded-full bg-amber-400/80"></div>
+                                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-400/80"></div>
                                     </div>
                                     <span className="text-[10px] font-mono text-gray-500">instructions.prompt</span>
                                 </div>
@@ -474,7 +476,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                     value={formData.instructions}
                                     onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
                                     placeholder={t('Define the agent\'s personality, mission, and rules here...', 'Define aquí la personalidad, misión y reglas del agente...')}
-                                    className="flex-1 w-full p-4 bg-transparent text-emerald-400 font-mono text-xs focus:ring-0 border-0 resize-none leading-relaxed outline-none"
+                                    className="flex-1 w-full p-4 bg-transparent text-gray-800 font-mono text-xs focus:ring-0 border-0 resize-none leading-relaxed outline-none"
                                     spellCheck={false}
                                 />
                             </div>

@@ -7,6 +7,7 @@ from datetime import datetime
 import logging
 
 logger = logging.getLogger("api-backend")
+DEFAULT_AUSARTA_VOICE_ID = "a2f12ebd-80df-4de7-83f3-809599135b1d"
 
 router = APIRouter(prefix="/api", tags=["agents"])
 
@@ -118,7 +119,7 @@ async def create_agent(config: dict):
             "use_case": config.get("useCase") or config.get("use_case", ""),
             "company_context": config.get("company_context", ""),
             "enthusiasm_level": config.get("enthusiasm_level", "Normal"),
-            "voice_id": config.get("voice_id") or config.get("tts_voice", "cefcb124-080b-4655-b31f-932f3ee743de"),
+            "voice_id": config.get("voice_id") or config.get("tts_voice", DEFAULT_AUSARTA_VOICE_ID),
             "speaking_speed": config.get("speaking_speed", 1.0),
             "empresa_id": config.get("empresa_id"),
         }
@@ -134,7 +135,7 @@ async def create_agent(config: dict):
             "llm_model": config.get("llm_model", "llama-3.3-70b-versatile"),
             "tts_provider": config.get("tts_provider", "cartesia"),
             "tts_model": config.get("tts_model", "sonic-multilingual"),
-            "tts_voice": config.get("voice_id") or config.get("tts_voice", "cefcb124-080b-4655-b31f-932f3ee743de"),
+            "tts_voice": config.get("voice_id") or config.get("tts_voice", DEFAULT_AUSARTA_VOICE_ID),
             "stt_provider": config.get("stt_provider", "deepgram"),
             "stt_model": config.get("stt_model", "nova-2"),
             "language": config.get("language", "es")

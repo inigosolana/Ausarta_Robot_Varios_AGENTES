@@ -51,7 +51,7 @@ logger = logging.getLogger("agent-dynamic")
 load_dotenv()
 
 ROOM_PREFIX = os.getenv("LIVEKIT_ROOM_PREFIX", "llamada_ausarta_")
-DEFAULT_CARTESIA_VOICE = "cefcb124-080b-4655-b31f-932f3ee743de"
+DEFAULT_CARTESIA_VOICE = "a2f12ebd-80df-4de7-83f3-809599135b1d"
 DISPATCH_AGENT_NAME = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
 
 # ============================================================================
@@ -179,6 +179,11 @@ class DynamicAgent(Agent):
         # Combinar las instrucciones específicas del agente con las reglas base
         agent_instructions = agent_config.get("instructions", "Eres un asistente virtual.")
         agent_name = agent_config.get("name", "Bot")
+        company_name = (
+            agent_config.get("company_name")
+            or agent_config.get("empresa_nombre")
+            or "Ausarta"
+        )
         
         base_rules_to_use = BASE_RULES
         inst_lower = agent_instructions.lower()
@@ -219,11 +224,19 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         
         # Construcción del Prompt Final: Reglas -> Datos -> GUION (EL GUION ES LO MÁS IMPORTANTE)
         full_instructions = f"{base_rules_to_use}\n\n"
-        full_instructions += f"DATOS DEL AGENTE:\n- NOMBRE: {agent_name}\n- EMPRESA: Ausarta\n"
+        full_instructions += f"DATOS DEL AGENTE:\n- NOMBRE: {agent_name}\n- EMPRESA: {company_name}\n"
         full_instructions += f"- NIVEL DE ENTUSIASMO: {self.enthusiasm_level}\n"
         full_instructions += f"- VELOCIDAD DE VOZ OBJETIVO: {self.speaking_speed}\n\n"
         full_instructions += "CONTEXTO DE EMPRESA (Knowledge Base):\n"
         full_instructions += f"{self.company_context if self.company_context else 'No disponible.'}\n\n"
+        full_instructions += (
+            "REGLAS DE USO DEL CONTEXTO DE EMPRESA:\n"
+            "- Si el cliente pregunta por servicios, productos, precios, horarios, garantías o políticas, "
+            "responde SIEMPRE usando primero el CONTEXTO DE EMPRESA.\n"
+            "- No inventes datos fuera del CONTEXTO DE EMPRESA.\n"
+            "- Si la información no está en el contexto, dilo de forma transparente y ofrece derivar o tomar nota para seguimiento.\n"
+            "- Mantén respuestas breves, claras y orientadas al negocio de la empresa.\n\n"
+        )
         full_instructions += f"ESTILO DE ENTREGA: {_resolve_enthusiasm_instruction(self.enthusiasm_level)}\n\n"
         full_instructions += "SIGUE ESTE GUION AL PIE DE LA LETRA:\n"
         full_instructions += f"{agent_instructions}\n"
