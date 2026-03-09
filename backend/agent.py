@@ -883,11 +883,38 @@ async def entrypoint(ctx: JobContext):
         # Guardamos el snapshot en cuanto el cliente cuelga para no depender
         # del chat_ctx que LiveKit puede limpiar antes del bloque finally.
         transcript_snapshot: dict = {"transcript": "", "raw": []}
+        transcript_event_buffer: list[dict] = []
+
+        def _append_transcript_event(role: str, content: str):
+            text = _normalize_message_text(content)
+            if role not in ("user", "assistant") or not text:
+                return
+            if transcript_event_buffer:
+                last = transcript_event_buffer[-1]
+                if last.get("role") == role and _normalize_message_text(last.get("content")) == text:
+                    return
+            transcript_event_buffer.append({"role": role, "content": text})
+
+        def _build_transcript_from_event_buffer() -> tuple[list[dict], str]:
+            if not transcript_event_buffer:
+                return [], ""
+            lines = []
+            raw = []
+            for item in transcript_event_buffer:
+                role = item.get("role")
+                content = _normalize_message_text(item.get("content"))
+                if role not in ("user", "assistant") or not content:
+                    continue
+                raw.append({"role": role, "content": content})
+                lines.append(f"{'Cliente' if role == 'user' else 'Agente'}: {content}")
+            return raw, ("\n".join(lines).strip() + ("\n" if lines else ""))
 
         async def _save_transcript_snapshot(reason: str = "auto"):
             """Extrae y persiste la transcripción actual en Supabase."""
             try:
                 raw, t = _extract_transcript_from_session(session)
+                if not t:
+                    raw, t = _build_transcript_from_event_buffer()
                 logger.info(f"📝 [{job_id}] Snapshot transcripción ({reason}): {len(t)} chars, {len(raw)} mensajes")
                 if t:
                     transcript_snapshot["transcript"] = t
@@ -919,61 +946,107 @@ async def entrypoint(ctx: JobContext):
         transcript_autosave_task = asyncio.create_task(transcript_autosave_loop())
 
         # ---------- LOOP DE SILENCIO / REPROMPT ----------
-        # Si el agente acaba de hablar y el usuario lleva >1.5s sin responder,
-        # lanza una frase de reconducción para que la llamada no muera en silencio.
+        # Híbrido: eventos de conversación + watchdog por tiempo.
         SILENCE_REPROMPT_DELAY = float(os.getenv("AGENT_SILENCE_REPROMPT_SECONDS", "1.0"))
         reprompt_phrases = [
             "¿Sigue ahí?",
             "Perdone, ¿me escucha?",
             "Disculpe, ¿puede responderme?",
             "¿Está usted disponible?",
-            "No le oigo bien, ¿puede hablar un poco más alto?",
+            "Si le parece, seguimos con la siguiente pregunta.",
         ]
+        reprompt_phrases_lc = {p.lower() for p in reprompt_phrases}
+        reprompt_state = {
+            "last_assistant_at": 0.0,
+            "last_user_at": 0.0,
+            "waiting_user": False,
+            "reprompt_count": 0,
+        }
+        loop_obj = asyncio.get_running_loop()
+
+        @session.on("user_input_transcribed")
+        def _on_user_input_transcribed(ev):
+            try:
+                content = _normalize_message_text(getattr(ev, "transcript", ""))
+                is_final = bool(getattr(ev, "is_final", True))
+                if not content or not is_final:
+                    return
+
+                _append_transcript_event("user", content)
+                now = loop_obj.time()
+                reprompt_state["last_user_at"] = now
+                reprompt_state["waiting_user"] = False
+                reprompt_state["reprompt_count"] = 0
+            except Exception as ev_err:
+                logger.debug(f"[{job_id}] Error evento user_input_transcribed: {ev_err}")
+
+        @session.on("conversation_item_added")
+        def _on_conversation_item_added(ev):
+            try:
+                item = getattr(ev, "item", None)
+                role = getattr(item, "role", "")
+                content = _normalize_message_text(getattr(item, "content", None))
+                if role not in ("user", "assistant") or not content:
+                    return
+
+                now = loop_obj.time()
+                lower = content.strip().lower()
+
+                if role == "assistant":
+                    # Evitar que nuestros reprompts reinicien el ciclo indefinidamente
+                    if lower in reprompt_phrases_lc:
+                        return
+                    _append_transcript_event("assistant", content)
+                    reprompt_state["last_assistant_at"] = now
+                    reprompt_state["waiting_user"] = True
+                    reprompt_state["reprompt_count"] = 0
+                else:
+                    _append_transcript_event("user", content)
+                    reprompt_state["last_user_at"] = now
+                    reprompt_state["waiting_user"] = False
+                    reprompt_state["reprompt_count"] = 0
+            except Exception as ev_err:
+                logger.debug(f"[{job_id}] Error evento conversation_item_added: {ev_err}")
+
+        @session.on("agent_state_changed")
+        def _on_agent_state_changed(ev):
+            try:
+                new_state = str(getattr(ev, "new_state", "")).lower()
+                old_state = str(getattr(ev, "old_state", "")).lower()
+                now = loop_obj.time()
+                # Cuando termina de hablar/pensar y vuelve a escuchar, esperamos respuesta humana.
+                if new_state == "listening" and old_state in ("speaking", "thinking"):
+                    reprompt_state["last_assistant_at"] = now
+                    reprompt_state["waiting_user"] = True
+            except Exception as ev_err:
+                logger.debug(f"[{job_id}] Error evento agent_state_changed: {ev_err}")
 
         async def silence_reprompt_loop():
-            loop_obj = asyncio.get_running_loop()
-            last_assistant_idx: int = -1
-            last_user_idx: int = -1
-            waiting_since: Optional[float] = None
-            reprompt_count: int = 0  # máximo 2 reprompts seguidos sin respuesta humana
+            # Bootstrap: después del saludo inicial, si no hay respuesta humana, reconducir.
+            reprompt_state["last_assistant_at"] = loop_obj.time()
+            reprompt_state["waiting_user"] = True
 
             while not stop_guard.is_set():
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.25)
                 try:
-                    chat_ctx = getattr(session, "chat_ctx", getattr(session, "chat_context", None))
-                    if not chat_ctx:
-                        continue
-
-                    normalized_msgs = []
-                    for m in getattr(chat_ctx, "messages", []):
-                        role = getattr(m, "role", "")
-                        content = _normalize_message_text(getattr(m, "content", None))
-                        if role in ("user", "assistant") and content:
-                            normalized_msgs.append((role, content))
-
-                    if not normalized_msgs:
-                        continue
-
                     now = loop_obj.time()
-                    curr_idx = len(normalized_msgs) - 1
-                    last_role, _last_content = normalized_msgs[curr_idx]
+                    if not reprompt_state["waiting_user"]:
+                        continue
 
-                    if last_role == "assistant" and curr_idx != last_assistant_idx:
-                        last_assistant_idx = curr_idx
-                        waiting_since = now
-                        reprompt_count = 0
+                    assistant_silent_for = now - float(reprompt_state["last_assistant_at"])
+                    user_silent_for = now - float(reprompt_state["last_user_at"])
+                    can_reprompt = reprompt_state["reprompt_count"] < 3
 
-                    if last_role == "user" and curr_idx != last_user_idx:
-                        last_user_idx = curr_idx
-                        waiting_since = None
-                        reprompt_count = 0
-
-                    if waiting_since is not None and (now - waiting_since) >= SILENCE_REPROMPT_DELAY and reprompt_count < 2:
-                        reprompt_count += 1
-                        waiting_since = now
+                    if (
+                        assistant_silent_for >= SILENCE_REPROMPT_DELAY
+                        and user_silent_for >= SILENCE_REPROMPT_DELAY
+                        and can_reprompt
+                    ):
+                        reprompt_state["reprompt_count"] += 1
+                        reprompt_state["last_assistant_at"] = now
                         try:
                             await session.say(random.choice(reprompt_phrases), allow_interruptions=True)
-                            logger.info(f"🔁 [{job_id}] Reprompt por silencio enviado (#{reprompt_count})")
+                            logger.info(f"🔁 [{job_id}] Reprompt por silencio enviado (#{reprompt_state['reprompt_count']})")
                         except Exception as _re:
                             logger.debug(f"[{job_id}] Reprompt no enviado: {_re}")
                 except Exception as _e:
@@ -1061,14 +1134,22 @@ async def entrypoint(ctx: JobContext):
                         raw_messages, transcript = _extract_transcript_from_session(session)
                         logger.info(f"📝 [{job_id}] Transcripción extraída en finally: {len(transcript)} chars")
 
-                    # Fallback al snapshot si no se obtuvo nada
+                    # Fallback 1: buffer de eventos en tiempo real (más fiable en desconexiones bruscas)
+                    if not transcript and 'transcript_event_buffer' in locals():
+                        raw_messages, transcript = _build_transcript_from_event_buffer()
+                        if transcript:
+                            logger.info(f"📝 [{job_id}] Usando buffer de eventos: {len(transcript)} chars")
+
+                    # Fallback 2: snapshot previo en memoria
                     if not transcript and 'transcript_snapshot' in locals() and transcript_snapshot.get("transcript"):
                         transcript = transcript_snapshot["transcript"]
                         raw_messages = transcript_snapshot.get("raw", [])
                         logger.info(f"📝 [{job_id}] Usando snapshot de transcripción: {len(transcript)} chars")
                 except Exception as ex:
                     logger.error(f"Error procesando historia para transcripción local: {ex}")
-                    if 'transcript_snapshot' in locals() and transcript_snapshot.get("transcript"):
+                    if not transcript and 'transcript_event_buffer' in locals():
+                        raw_messages, transcript = _build_transcript_from_event_buffer()
+                    if not transcript and 'transcript_snapshot' in locals() and transcript_snapshot.get("transcript"):
                         transcript = transcript_snapshot["transcript"]
                         raw_messages = transcript_snapshot.get("raw", [])
                 
