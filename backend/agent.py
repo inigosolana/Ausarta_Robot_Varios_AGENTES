@@ -65,8 +65,9 @@ REGLAS DE ORO (¡MUY IMPORTANTE!):
 3. PRONUNCIACIÓN: Di siempre "UNO" (ej: "del UNO al diez"), nunca "un".
 4. PARA COLGAR: Usa SIEMPRE la herramienta 'finalizar_llamada' proporcionando el texto de despedida que quieras decir. La herramienta se encargará de decirlo y colgar. IMPORTANTE: el mensaje de despedida debe ser COMPLETO y sin cortar — incluye cierre cálido, agradecimiento y "adiós" o equivalente al final. 
 5. SI EL CLIENTE NO TE ENTIENDE O DICE "¿CÓMO?", "¿QUÉ?": Repite la última pregunta que hiciste de forma amable y clara.
-6. SI ESCUCHAS RUIDO O UNA PALABRA SIN SENTIDO: Ignóralo o di "Disculpe, no le he escuchado bien, ¿me lo puede repetir?" si persiste.
-7. VALIDACIÓN DE NOTAS: Si el usuario te da un número menor a 1 o mayor a 10 (ej: 0, 11), NO guardes el dato. Di "Disculpe, la nota debe ser entre 1 y 10. ¿Qué nota le daría?" y espera su respuesta.
+6. SI ESCUCHAS RUIDO, SILENCIO O UNA PALABRA SIN SENTIDO: reconduce SIEMPRE la conversación con una pregunta corta de seguimiento en 1-2 segundos ("¿Sigue ahí?", "¿Me escucha bien?", "Si le parece, seguimos con la pregunta...").
+7. SI LA RESPUESTA DEL CLIENTE NO CUMPLE LO PEDIDO (fuera de tema, ambigua o incorrecta), RECONDUCE SIEMPRE con calma y vuelve a pedir exactamente el dato correcto. EXCEPCIÓN: si al principio dice un NO claro para participar, no insistas y finaliza cortésmente.
+8. VALIDACIÓN DE NOTAS: Si el usuario te da un número menor a 1 o mayor a 10 (ej: 0, 11), NO guardes el dato. Di "Disculpe, la nota debe ser entre 1 y 10. ¿Qué nota le daría?" y espera su respuesta.
 
 REGLA CRÍTICA DE DESPEDIDA — LEE ESTO ATENTAMENTE:
 - Cuando vayas a terminar, primero llama a 'guardar_encuesta' con el status final.
@@ -746,6 +747,7 @@ async def entrypoint(ctx: JobContext):
             min_endpointing_delay=endpointing_min,
             max_endpointing_delay=endpointing_max,
             preemptive_generation=True,
+            use_tts_aligned_transcript=True,
         )
 
         await session.start(
@@ -919,7 +921,7 @@ async def entrypoint(ctx: JobContext):
         # ---------- LOOP DE SILENCIO / REPROMPT ----------
         # Si el agente acaba de hablar y el usuario lleva >1.5s sin responder,
         # lanza una frase de reconducción para que la llamada no muera en silencio.
-        SILENCE_REPROMPT_DELAY = float(os.getenv("AGENT_SILENCE_REPROMPT_SECONDS", "1.5"))
+        SILENCE_REPROMPT_DELAY = float(os.getenv("AGENT_SILENCE_REPROMPT_SECONDS", "1.0"))
         reprompt_phrases = [
             "¿Sigue ahí?",
             "Perdone, ¿me escucha?",
@@ -930,54 +932,48 @@ async def entrypoint(ctx: JobContext):
 
         async def silence_reprompt_loop():
             loop_obj = asyncio.get_running_loop()
-            last_agent_time: float = loop_obj.time()
-            last_user_time: float = loop_obj.time()
-            last_agent_msg_idx: int = -1
-            reprompt_count: int = 0  # máximo 2 reprompts consecutivos
+            last_assistant_idx: int = -1
+            last_user_idx: int = -1
+            waiting_since: Optional[float] = None
+            reprompt_count: int = 0  # máximo 2 reprompts seguidos sin respuesta humana
 
             while not stop_guard.is_set():
-                await asyncio.sleep(0.4)
+                await asyncio.sleep(0.3)
                 try:
                     chat_ctx = getattr(session, "chat_ctx", getattr(session, "chat_context", None))
                     if not chat_ctx:
                         continue
-                    msgs = list(getattr(chat_ctx, "messages", []))
-                    if not msgs:
+
+                    normalized_msgs = []
+                    for m in getattr(chat_ctx, "messages", []):
+                        role = getattr(m, "role", "")
+                        content = _normalize_message_text(getattr(m, "content", None))
+                        if role in ("user", "assistant") and content:
+                            normalized_msgs.append((role, content))
+
+                    if not normalized_msgs:
                         continue
 
                     now = loop_obj.time()
-                    # Iterar desde el final para encontrar el último mensaje relevante
-                    last_role = ""
-                    for m in reversed(msgs):
-                        role = getattr(m, "role", "")
-                        if role in ("user", "assistant"):
-                            last_role = role
-                            break
+                    curr_idx = len(normalized_msgs) - 1
+                    last_role, _last_content = normalized_msgs[curr_idx]
 
-                    curr_idx = len(msgs) - 1
-                    if last_role == "assistant" and curr_idx != last_agent_msg_idx:
-                        last_agent_msg_idx = curr_idx
-                        last_agent_time = now
+                    if last_role == "assistant" and curr_idx != last_assistant_idx:
+                        last_assistant_idx = curr_idx
+                        waiting_since = now
                         reprompt_count = 0
 
-                    if last_role == "user":
-                        last_user_time = now
+                    if last_role == "user" and curr_idx != last_user_idx:
+                        last_user_idx = curr_idx
+                        waiting_since = None
                         reprompt_count = 0
 
-                    # El agente habló y el usuario lleva demasiado tiempo sin responder
-                    agent_spoke_ago = now - last_agent_time
-                    user_silent_for = now - last_user_time
-                    waiting_for_user = last_role == "assistant" and last_agent_msg_idx >= 0
-
-                    if (waiting_for_user
-                            and agent_spoke_ago >= SILENCE_REPROMPT_DELAY
-                            and user_silent_for >= SILENCE_REPROMPT_DELAY
-                            and reprompt_count < 2):
+                    if waiting_since is not None and (now - waiting_since) >= SILENCE_REPROMPT_DELAY and reprompt_count < 2:
                         reprompt_count += 1
-                        last_agent_time = now  # reset para no volver a disparar inmediatamente
+                        waiting_since = now
                         try:
                             await session.say(random.choice(reprompt_phrases), allow_interruptions=True)
-                            logger.debug(f"[{job_id}] Reprompt por silencio (#{reprompt_count})")
+                            logger.info(f"🔁 [{job_id}] Reprompt por silencio enviado (#{reprompt_count})")
                         except Exception as _re:
                             logger.debug(f"[{job_id}] Reprompt no enviado: {_re}")
                 except Exception as _e:
