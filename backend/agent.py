@@ -551,9 +551,10 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
             )
             is_identity_question = any(k in latest_user for k in identity_cues)
             has_explicit_reject = any(k in latest_user for k in explicit_reject_cues)
-            is_quick_reject_goodbye = ("no es un buen momento" in goodbye_l) or ("no le quito más tiempo" in goodbye_l)
 
-            if is_identity_question and is_quick_reject_goodbye and not has_explicit_reject:
+            # Si el último mensaje del cliente es de identidad y NO hay rechazo explícito,
+            # nunca permitimos cerrar la llamada en ese turno.
+            if is_identity_question and not has_explicit_reject:
                 logger.info(f"🛡️ [{self.room_name}] Bloqueado finalizar_llamada por pregunta de identidad (sin rechazo explícito).")
                 return "El cliente pidió identificación. Aclara quién eres y continúa la encuesta."
         except Exception as guard_err:
@@ -1333,10 +1334,11 @@ async def entrypoint(ctx: JobContext):
                     if data_saved:
                         # El LLM ya guardó notas numéricas, pero guardamos transcripción + disposición + datos_extra
                         logger.info(f"📝 Guardando transcripción/disposición/datos_extra para encuesta {survey_id} (datos numéricos ya guardados por tool)")
+                        # No sobrescribimos status cuando la tool ya guardó estado/notas.
+                        # Aquí solo persistimos transcripción y extras.
                         transcript_payload = {
                             "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
                             "transcription": transcript,
-                            "status": call_disposition,
                             "datos_extra": datos_extra
                         }
                         try:

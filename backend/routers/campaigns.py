@@ -181,7 +181,19 @@ async def get_campaign_details(campaign_id: int):
                 )
                 surveys_map = {s["id"]: s for s in res_surveys.data}
             except Exception as e:
-                logger.error(f"Error fetching surveys for campaign: {e}")
+                # Compatibilidad con BDs antiguas sin columna tipo_resultados
+                if "tipo_resultados" in str(e):
+                    try:
+                        fallback_cols = "id, status, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, transcription, datos_extra, fecha, llm_model"
+                        res_surveys = await asyncio.to_thread(
+                            lambda: supabase.table("encuestas").select(fallback_cols).in_("id", call_ids).execute()
+                        )
+                        surveys_map = {s["id"]: s for s in res_surveys.data}
+                        logger.warning("encuestas.tipo_resultados no existe; usando select fallback sin esa columna.")
+                    except Exception as fallback_err:
+                        logger.error(f"Error fetching surveys for campaign (fallback): {fallback_err}")
+                else:
+                    logger.error(f"Error fetching surveys for campaign: {e}")
 
         # Agregar datos de encuesta a cada lead y calcular métricas
         sum_com = sum_ins = sum_rap = 0
