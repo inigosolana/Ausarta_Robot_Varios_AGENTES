@@ -13,6 +13,35 @@ DEFAULT_HUMAN_INSTRUCTIONS = (
     "Si te interrumpen, párate y retoma con amabilidad. "
     "Usa el contexto de empresa para responder sin inventar."
 )
+ALLOWED_AGENT_TYPES = {
+    "ENCUESTA_NUMERICA",
+    "ENCUESTA_MIXTA",
+    "PREGUNTAS_ABIERTAS",
+    "CUALIFICACION_LEAD",
+    "AGENDAMIENTO_CITA",
+    "SOPORTE_CLIENTE",
+}
+
+
+def _normalize_agent_type(raw_type: Optional[str], raw_survey_type: Optional[str] = None) -> str:
+    t = (raw_type or "").strip().upper()
+    if t in ALLOWED_AGENT_TYPES:
+        return t
+
+    survey = (raw_survey_type or "").strip().lower()
+    if survey == "mixed":
+        return "ENCUESTA_MIXTA"
+    if survey in ("open_questions", "open"):
+        return "PREGUNTAS_ABIERTAS"
+    return "ENCUESTA_NUMERICA"
+
+
+def _to_legacy_survey_type(agent_type: str) -> str:
+    if agent_type == "ENCUESTA_MIXTA":
+        return "mixed"
+    if agent_type in {"PREGUNTAS_ABIERTAS", "CUALIFICACION_LEAD", "AGENDAMIENTO_CITA", "SOPORTE_CLIENTE"}:
+        return "open_questions"
+    return "numeric"
 
 router = APIRouter(prefix="/api", tags=["agents"])
 
@@ -32,6 +61,26 @@ async def get_agents(empresa_id: Optional[int] = None):
         res = query.execute()
         agents = []
         for agent in (res.data or []):
+            prev_tipo = agent.get("tipo_resultados")
+            prev_agent_type = agent.get("agent_type")
+            prev_survey_type = agent.get("survey_type")
+            effective_type = _normalize_agent_type(prev_tipo or prev_agent_type, prev_survey_type)
+            agent["tipo_resultados"] = effective_type
+            agent["agent_type"] = effective_type
+            if (
+                prev_tipo != effective_type
+                or prev_agent_type != effective_type
+                or not prev_survey_type
+            ):
+                try:
+                    supabase.table("agent_config").update({
+                        "tipo_resultados": effective_type,
+                        "agent_type": effective_type,
+                        "survey_type": _to_legacy_survey_type(effective_type),
+                        "updated_at": datetime.utcnow().isoformat(),
+                    }).eq("id", int(agent["id"])).execute()
+                except Exception as sync_err:
+                    logger.warning(f"No se pudo sincronizar tipo de agente {agent.get('id')}: {sync_err}")
             agent['id'] = str(agent['id'])
             agents.append(agent)
         return agents
@@ -62,7 +111,14 @@ async def update_agent(agent_id: str, config: dict):
         if "voice_id" in config: db_config["voice_id"] = config["voice_id"]
         if "speaking_speed" in config: db_config["speaking_speed"] = config["speaking_speed"]
         if "empresa_id" in config: db_config["empresa_id"] = config["empresa_id"]
-        if "tipo_resultados" in config: db_config["tipo_resultados"] = config["tipo_resultados"]
+        if "tipo_resultados" in config or "agent_type" in config or "survey_type" in config:
+            effective_type = _normalize_agent_type(
+                config.get("tipo_resultados") or config.get("agent_type"),
+                config.get("survey_type"),
+            )
+            db_config["tipo_resultados"] = effective_type
+            db_config["agent_type"] = effective_type
+            db_config["survey_type"] = _to_legacy_survey_type(effective_type)
         
         db_config["updated_at"] = datetime.utcnow().isoformat()
         supabase.table("agent_config").update(db_config).eq("id", int(agent_id)).execute()
@@ -116,6 +172,10 @@ async def update_agent(agent_id: str, config: dict):
 async def create_agent(config: dict):
     if not supabase: return JSONResponse(status_code=500, content={"error": "No DB"})
     try:
+        effective_type = _normalize_agent_type(
+            config.get("tipo_resultados") or config.get("agent_type"),
+            config.get("survey_type"),
+        )
         db_config = {
             "name": config.get("name", "Nuevo Agente"),
             "instructions": config.get("instructions", DEFAULT_HUMAN_INSTRUCTIONS),
@@ -128,7 +188,9 @@ async def create_agent(config: dict):
             "voice_id": config.get("voice_id") or config.get("tts_voice", DEFAULT_AUSARTA_VOICE_ID),
             "speaking_speed": config.get("speaking_speed", 1.0),
             "empresa_id": config.get("empresa_id"),
-            "tipo_resultados": config.get("tipo_resultados"),
+            "tipo_resultados": effective_type,
+            "agent_type": effective_type,
+            "survey_type": _to_legacy_survey_type(effective_type),
         }
         
         res = supabase.table("agent_config").insert(db_config).execute()

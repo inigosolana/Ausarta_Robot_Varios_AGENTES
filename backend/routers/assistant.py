@@ -118,13 +118,17 @@ async def assistant_chat(req: AssistantChatRequest):
                         tool_result = json.dumps({"total_llamadas": 0, "llamadas_completadas": 0})
                         
                 elif function_name == "create_voice_agent":
+                    resolved_type = "ENCUESTA_NUMERICA"
                     insert_data = {
                         "empresa_id": req.empresa_id,
                         "name": function_args.get("name"),
                         "use_case": function_args.get("use_case"),
                         "description": function_args.get("description"),
                         "instructions": function_args.get("instructions"),
-                        "greeting": function_args.get("greeting")
+                        "greeting": function_args.get("greeting"),
+                        "tipo_resultados": resolved_type,
+                        "agent_type": resolved_type,
+                        "survey_type": "numeric",
                     }
                     res = supabase.table("agent_config").insert(insert_data).execute()
                     if res.data:

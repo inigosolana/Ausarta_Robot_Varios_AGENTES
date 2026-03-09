@@ -297,6 +297,12 @@ async def get_agent_config_by_survey(survey_id: int):
 
         greeting = agent_data.get("greeting", "Buenas, ¿tiene un momento?").replace("{nombre}", nombre_cliente or "Cliente")
 
+        resolved_agent_type = (
+            agent_data.get("agent_type")
+            or agent_data.get("tipo_resultados")
+            or "ENCUESTA_NUMERICA"
+        )
+
         payload = {
             "name": agent_data.get("name", "Bot"),
             "greeting": greeting,
@@ -309,7 +315,8 @@ async def get_agent_config_by_survey(survey_id: int):
             "company_context": agent_data.get("company_context") or "",
             "enthusiasm_level": agent_data.get("enthusiasm_level") or "Normal",
             "speaking_speed": agent_data.get("speaking_speed") or 1.0,
-            "agent_type": agent_data.get("agent_type") or "ENCUESTA_NUMERICA",
+            "agent_type": resolved_agent_type,
+            "tipo_resultados": agent_data.get("tipo_resultados") or resolved_agent_type,
             "empresa_id": empresa_id or agent_empresa_id,
             "config_updated_at": agent_data.get("updated_at") or ai_data.get("updated_at"),
         }
