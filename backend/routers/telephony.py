@@ -299,7 +299,7 @@ async def make_outbound_call(request: dict):
         else:
             encuesta_id = random.randint(1000, 9999)
 
-        agent_name_dispatch = os.getenv("AGENT_NAME_DISPATCH", "ausarta_agent")
+        agent_name_dispatch = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
         # Formato aislado estricto con prefijo de dominio propio:
         # llamada_ausarta_empresa_{id}_campana_{id}_contacto_{id}_encuesta_{id}
         contacto_id = int(lead_id) if lead_id else 0

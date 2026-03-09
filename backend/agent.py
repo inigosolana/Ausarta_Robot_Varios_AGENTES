@@ -52,6 +52,7 @@ load_dotenv()
 
 ROOM_PREFIX = os.getenv("LIVEKIT_ROOM_PREFIX", "llamada_ausarta_")
 DEFAULT_CARTESIA_VOICE = "cefcb124-080b-4655-b31f-932f3ee743de"
+DISPATCH_AGENT_NAME = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
 
 # ============================================================================
 # INSTRUCCIONES BASE - Se combinan con las instrucciones específicas del agente
@@ -392,7 +393,7 @@ async def notify_n8n_alert(message: str, details: dict = None):
 # ============================================================================
 server = AgentServer()
 
-@server.rtc_session(agent_name=os.getenv("AGENT_NAME_DISPATCH", "default_agent"))
+@server.rtc_session(agent_name=DISPATCH_AGENT_NAME)
 async def entrypoint(ctx: JobContext):
     # Identificador único para esta instancia/trabajo
     job_id = ctx.job.id if hasattr(ctx, 'job') else "unknown"

@@ -20,24 +20,56 @@ const TestCallView: React.FC = () => {
     }, [profile]);
 
     const loadAgents = async () => {
+        setLoading(true);
         try {
-            let query = supabase
-                .from('agent_config')
-                .select('id, name, use_case, description, instructions, greeting');
-
+            // Prefer backend API (cache-friendly and avoids direct RLS/session edge-cases in this view)
+            let apiUrl = `${API_URL}/agents`;
             if (profile && profile.role !== 'superadmin' && profile.empresa_id) {
-                query = query.eq('empresa_id', profile.empresa_id);
+                apiUrl += `?empresa_id=${profile.empresa_id}`;
             }
 
-            const { data, error } = await query.order('name');
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 12000);
+            let loadedAgents: AgentConfig[] = [];
 
-            if (error) throw error;
-            setAgents(data || []);
-            if (data && data.length > 0) {
-                setSelectedAgentId(String(data[0].id));
+            try {
+                const res = await fetch(apiUrl, { signal: controller.signal });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                loadedAgents = Array.isArray(data) ? data : [];
+            } finally {
+                clearTimeout(timeout);
+            }
+
+            // Fallback to direct Supabase query if API fails/returns empty unexpectedly
+            if (!loadedAgents.length) {
+                let query = supabase
+                    .from('agent_config')
+                    .select('id, name, use_case, description, instructions, greeting');
+
+                if (profile && profile.role !== 'superadmin' && profile.empresa_id) {
+                    query = query.eq('empresa_id', profile.empresa_id);
+                }
+
+                const { data, error } = await query.order('name');
+                if (error) throw error;
+                loadedAgents = (data || []) as AgentConfig[];
+            }
+
+            setAgents(loadedAgents);
+            if (loadedAgents.length > 0) {
+                setSelectedAgentId((prev) =>
+                    prev && loadedAgents.some((a) => String(a.id) === prev)
+                        ? prev
+                        : String(loadedAgents[0].id)
+                );
+            } else {
+                setSelectedAgentId('');
             }
         } catch (err) {
             console.error('Error loading agents:', err);
+            setAgents([]);
+            setSelectedAgentId('');
         } finally {
             setLoading(false);
         }
