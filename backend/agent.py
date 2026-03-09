@@ -392,8 +392,10 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
             return
 
         logger.info(f"🎙️ Saludando en sala: {self.room_name} con: {self.greeting}")
-        # Saludo casi inmediato para que suene natural al descolgar
-        await asyncio.sleep(0.15)
+        # Pequeña pausa natural como si cogieras el teléfono (0.15 → 1.5s configurable)
+        greeting_delay = float(os.getenv("AGENT_GREETING_DELAY_SECONDS", "1.5"))
+        greeting_delay = max(0.1, min(greeting_delay, 3.0))
+        await asyncio.sleep(greeting_delay)
         try:
             # Permitimos interrupción para que no suene rígido si el cliente responde enseguida
             await current_session.say(self.greeting, allow_interruptions=True)
@@ -684,6 +686,9 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"✅ [{job_id}] Conectado a sala {room_name}. Participantes: {len(ctx.room.remote_participants)}")
 
         # --- PASO 3: Cargar configuración VAD ---
+        # min_silence_duration: tiempo mínimo de silencio para detectar fin de turno.
+        # 0.25 → responde muy rápido tras silencio. Si el cliente habla poco o entrecortado,
+        # sube a 0.4-0.5 para no interrumpir antes de que acabe.
         min_silence_duration = float(os.getenv("AGENT_MIN_SILENCE_SECONDS", "0.25"))
         min_silence_duration = max(0.15, min(min_silence_duration, 0.6))
         vad_model = await asyncio.to_thread(silero.VAD.load, min_silence_duration=min_silence_duration)
@@ -735,13 +740,24 @@ async def entrypoint(ctx: JobContext):
             tts=_build_tts_plugin(voice_id=voice_id, language=language, speaking_speed=speaking_speed),
         )
 
-        # La sesión se asocia automáticamente al arrancar
-        # agent_instance.session = session  <- Esto fallaba porque session es property sin setter
-        
         await session.start(
             room=ctx.room,
             agent=agent_instance,
         )
+
+        # --- RUIDO DE FONDO DE OFICINA ---
+        # Hace que el agente suene como si estuviera en una oficina real.
+        # Se puede desactivar con AGENT_OFFICE_NOISE=false en el entorno.
+        if os.getenv("AGENT_OFFICE_NOISE", "true").lower() not in ("false", "0", "no"):
+            try:
+                bg_player = BackgroundAudioPlayer(
+                    ambient_sound=BuiltinAudioClip.OFFICE_AMBIENCE,
+                    thinking_sound=BuiltinAudioClip.KEYBOARD_TYPING,
+                )
+                await bg_player.start(room=ctx.room, agent_session=session)
+                logger.info(f"🎙️ [{job_id}] Ruido de fondo de oficina activado.")
+            except Exception as bg_err:
+                logger.warning(f"⚠️ [{job_id}] No se pudo iniciar ruido de fondo: {bg_err}")
         
         # NOTA: on_enter() del DynamicAgent se encarga del saludo.
         # NO llamamos a say_greeting() por separado para evitar doble saludo.
