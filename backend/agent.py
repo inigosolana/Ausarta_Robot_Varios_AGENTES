@@ -66,9 +66,10 @@ REGLAS DE ORO (¡MUY IMPORTANTE!):
 4. PARA COLGAR: Usa SIEMPRE la herramienta 'finalizar_llamada' proporcionando el texto de despedida que quieras decir. La herramienta se encargará de decirlo y colgar. IMPORTANTE: el mensaje de despedida debe ser COMPLETO y sin cortar — incluye cierre cálido, agradecimiento y "adiós" o equivalente al final. 
 5. SI EL CLIENTE NO TE ENTIENDE O DICE "¿CÓMO?", "¿QUÉ?": Repite la última pregunta que hiciste de forma amable y clara.
 6. SI ESCUCHAS RUIDO, SILENCIO O UNA PALABRA SIN SENTIDO: reconduce SIEMPRE la conversación con una pregunta corta de seguimiento en 1-2 segundos ("¿Sigue ahí?", "¿Me escucha bien?", "Si le parece, seguimos con la pregunta...").
-7. SI LA RESPUESTA DEL CLIENTE NO CUMPLE LO PEDIDO (fuera de tema, ambigua o incorrecta), RECONDUCE SIEMPRE con calma y vuelve a pedir exactamente el dato correcto. EXCEPCIÓN: si al principio dice un NO claro para participar, no insistas y finaliza cortésmente.
-8. SI TE PREGUNTAN "¿QUIÉN ERES?", "¿DE PARTE DE QUIÉN LLAMAS?" O SIMILAR: responde tu identidad en una frase y CONTINÚA la encuesta. NUNCA cuelgues por esa pregunta.
-9. VALIDACIÓN DE NOTAS: Si el usuario te da un número menor a 1 o mayor a 10 (ej: 0, 11), NO guardes el dato. Di "Disculpe, la nota debe ser entre 1 y 10. ¿Qué nota le daría?" y espera su respuesta.
+7. TÉCNICA DE RECONDUCCIÓN ESTRICTA: Eres amable pero tienes una misión. Si el cliente te responde contando una historia larga, quejándose, o hablando de un tema que no tiene nada que ver con tu pregunta, DEBES aplicar la fórmula "VALIDACIÓN CORTA + PREGUNTA ORIGINAL". NUNCA te enredes en conversaciones paralelas que duren más de 1 frase.
+8. RESPUESTAS AMBIGUAS: Si pides una nota del 1 al 10 y el cliente responde 'Bien' o 'Normal', NO LO ACEPTES. Dile: 'Me alegra que haya ido bien, ¿pero qué número del 1 al 10 le pondría?'.
+9. SI TE PREGUNTAN "¿QUIÉN ERES?", "¿DE PARTE DE QUIÉN LLAMAS?" O SIMILAR: responde tu identidad en una frase y CONTINÚA la encuesta. NUNCA cuelgues por esa pregunta.
+10. VALIDACIÓN DE NOTAS: Si el usuario te da un número menor a 1 o mayor a 10 (ej: 0, 11), NO guardes el dato. Di "Disculpe, la nota debe ser entre 1 y 10. ¿Qué nota le daría?" y espera su respuesta.
 
 REGLA CRÍTICA DE DESPEDIDA — LEE ESTO ATENTAMENTE:
 - Cuando vayas a terminar, primero llama a 'guardar_encuesta' con el status final.
@@ -721,8 +722,8 @@ async def entrypoint(ctx: JobContext):
         # min_silence_duration: tiempo mínimo de silencio para detectar fin de turno.
         # 0.25 → responde muy rápido tras silencio. Si el cliente habla poco o entrecortado,
         # sube a 0.4-0.5 para no interrumpir antes de que acabe.
-        min_silence_duration = float(os.getenv("AGENT_MIN_SILENCE_SECONDS", "0.25"))
-        min_silence_duration = max(0.15, min(min_silence_duration, 0.6))
+        min_silence_duration = float(os.getenv("AGENT_MIN_SILENCE_SECONDS", "0.5"))
+        min_silence_duration = max(0.4, min(min_silence_duration, 0.8))
         vad_model = await asyncio.to_thread(silero.VAD.load, min_silence_duration=min_silence_duration)
         logger.info(f"✅ [{job_id}] VAD y configuración cargados.")
 
@@ -751,7 +752,7 @@ async def entrypoint(ctx: JobContext):
             model=llm_model, 
             base_url="https://api.groq.com/openai/v1",
             api_key=os.getenv("GROQ_API_KEY"),
-            temperature=0.2
+            temperature=0.35
         )
         
         # LLM Secundario (OpenAI - gpt-4o-mini)
@@ -768,8 +769,8 @@ async def entrypoint(ctx: JobContext):
         # min_endpointing_delay: segundos de espera mínima tras silencio VAD antes de procesar
         # max_endpointing_delay: tope máximo de espera (por defecto 3s → usuario lo notaba como pausa larga)
         # preemptive_generation: empieza a generar respuesta mientras el usuario habla → menos latencia percibida
-        endpointing_min = float(os.getenv("AGENT_ENDPOINTING_MIN", "0.3"))
-        endpointing_max = float(os.getenv("AGENT_ENDPOINTING_MAX", "0.9"))
+        endpointing_min = float(os.getenv("AGENT_ENDPOINTING_MIN", "0.5"))
+        endpointing_max = float(os.getenv("AGENT_ENDPOINTING_MAX", "1.5"))
         session = AgentSession(
             vad=vad_model,
             stt=stt_plugin,
@@ -978,7 +979,7 @@ async def entrypoint(ctx: JobContext):
 
         # ---------- LOOP DE SILENCIO / REPROMPT ----------
         # Híbrido: eventos de conversación + watchdog por tiempo.
-        SILENCE_REPROMPT_DELAY = float(os.getenv("AGENT_SILENCE_REPROMPT_SECONDS", "2.5"))
+        SILENCE_REPROMPT_DELAY = float(os.getenv("AGENT_SILENCE_REPROMPT_SECONDS", "7.0"))
         reprompt_phrases = [
             "¿Sigue ahí?",
             "Perdone, ¿me escucha?",
