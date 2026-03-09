@@ -26,6 +26,7 @@ import os
 import logging
 
 logger = logging.getLogger("api-backend")
+DEFAULT_AUSARTA_VOICE_ID = "a2f12ebd-80df-4de7-83f3-809599135b1d"
 
 router = APIRouter(prefix="/api", tags=["campaigns"])
 
@@ -252,7 +253,7 @@ async def get_agent_config_by_survey(survey_id: int):
                 "name": "Bot", 
                 "greeting": "Buenas, le llamo...", 
                 "instructions": "Eres un asistente.", 
-                "voice_id": "cefcb124-080b-4655-b31f-932f3ee743de", 
+                "voice_id": DEFAULT_AUSARTA_VOICE_ID, 
                 "llm_model": "llama-3.3-70b-versatile",
                 "company_context": "",
                 "enthusiasm_level": "Normal",
@@ -277,7 +278,7 @@ async def get_agent_config_by_survey(survey_id: int):
             "greeting": greeting,
             "instructions": agent_data.get("instructions", "Eres un asistente"),
             "critical_rules": agent_data.get("critical_rules", ""),
-            "voice_id": agent_data.get("voice_id") or ai_data.get("tts_voice") or "cefcb124-080b-4655-b31f-932f3ee743de",
+            "voice_id": agent_data.get("voice_id") or ai_data.get("tts_voice") or DEFAULT_AUSARTA_VOICE_ID,
             "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
             "language": ai_data.get("language") or "es",
             "stt_provider": ai_data.get("stt_provider") or "deepgram",

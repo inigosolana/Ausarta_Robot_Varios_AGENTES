@@ -6,6 +6,7 @@ import asyncio
 import sys
 import json
 import re
+import random
 from dotenv import load_dotenv
 load_dotenv() # Cargar antes de cualquier otra cosa para que los decoradores lo vean
 
@@ -93,6 +94,19 @@ ESTILO HUMANO (NATURAL Y CERCANO):
 7. CIERRE CÁLIDO: despídete con agradecimiento genuino y tono amable.
 8. MENOS FRIALDAD: evita sonar corporativo o distante; usa un tono conversacional amable.
 9. ARRANQUE NATURAL: al iniciar la llamada, saluda de forma ágil y humana, sin pausas largas.
+"""
+
+HUMANIZATION_PROMPT = """
+Actúa como un humano en una llamada telefónica.
+Reglas críticas:
+1) Usa marcadores discursivos naturales como "A ver...", "Pues mira...", "Eh...", "Vale, entiendo".
+2) No hagas listas numeradas en la conversación hablada.
+3) Si el usuario te interrumpe, detente y reconoce la interrupción con naturalidad.
+4) Mantén respuestas cortas (idealmente menos de 20 palabras cuando sea posible) para reducir latencia.
+5) Si necesitas pensar, di "Dame un segundo..." en lugar de quedarte en silencio.
+6) Si el cliente dice que no tiene tiempo o quiere terminar, cierra amable y rápido.
+7) Antes de finalizar, asegúrate de guardar el estado final con guardar_encuesta.
+8) En cuestionarios abiertos, continúa con la siguiente pregunta salvo rechazo explícito.
 """
 
 ENTHUSIASM_INSTRUCTIONS = {
@@ -238,6 +252,7 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         # Construcción del Prompt Final: Reglas -> Datos -> GUION (EL GUION ES LO MÁS IMPORTANTE)
         full_instructions = f"{base_rules_to_use}\n\n"
         full_instructions += f"{HUMAN_STYLE_RULES}\n\n"
+        full_instructions += f"{HUMANIZATION_PROMPT}\n\n"
         full_instructions += f"DATOS DEL AGENTE:\n- NOMBRE: {agent_name}\n- EMPRESA: {company_name}\n"
         full_instructions += f"- NIVEL DE ENTUSIASMO: {self.enthusiasm_level}\n"
         full_instructions += f"- VELOCIDAD DE VOZ OBJETIVO: {self.speaking_speed}\n\n"
@@ -631,6 +646,70 @@ async def entrypoint(ctx: JobContext):
 
         ghost_guard_task = asyncio.create_task(ghost_kicker_loop())
 
+        async def backchanneling_loop():
+            """
+            Backchanneling simple:
+            - Si la última intervención es del usuario y pasan >5s sin respuesta del agente,
+              inserta una señal breve tipo "Mhm" / "Claro, te escucho".
+            - Evita spam con cooldown.
+            """
+            pending_user_idx = None
+            pending_since = None
+            last_backchannel_at = 0.0
+            cooldown_seconds = 12.0
+            trigger_seconds = 5.0
+            loop = asyncio.get_running_loop()
+            fillers = ["Mhm.", "Claro, te escucho.", "Ajá, te sigo."]
+
+            while not stop_guard.is_set():
+                try:
+                    chat_ctx = getattr(session, "chat_ctx", getattr(session, "chat_context", None))
+                    if not chat_ctx or not getattr(chat_ctx, "messages", None):
+                        await asyncio.sleep(0.7)
+                        continue
+
+                    normalized_msgs = []
+                    for m in chat_ctx.messages:
+                        role = getattr(m, "role", "")
+                        content = (getattr(m, "content", "") or "").strip()
+                        if role in ("user", "assistant") and content:
+                            normalized_msgs.append((role, content))
+
+                    if not normalized_msgs:
+                        await asyncio.sleep(0.7)
+                        continue
+
+                    last_idx = len(normalized_msgs) - 1
+                    last_role, last_content = normalized_msgs[last_idx]
+                    now = loop.time()
+
+                    if last_role == "user" and len(last_content) >= 25:
+                        if pending_user_idx != last_idx:
+                            pending_user_idx = last_idx
+                            pending_since = now
+
+                        if (
+                            pending_since is not None
+                            and (now - pending_since) >= trigger_seconds
+                            and (now - last_backchannel_at) >= cooldown_seconds
+                        ):
+                            try:
+                                await session.say(random.choice(fillers), allow_interruptions=True)
+                                last_backchannel_at = now
+                            except Exception as be:
+                                logger.debug(f"[{job_id}] Backchannel no enviado: {be}")
+                            finally:
+                                pending_since = None
+                    else:
+                        pending_user_idx = None
+                        pending_since = None
+                except Exception as e:
+                    logger.debug(f"[{job_id}] Error en backchannel loop: {e}")
+
+                await asyncio.sleep(0.7)
+
+        backchannel_task = asyncio.create_task(backchanneling_loop())
+
         @ctx.room.on("disconnected")
         def on_disconnect():
             logger.info(f"🔌 [{job_id}] Desconectado.")
@@ -675,6 +754,8 @@ async def entrypoint(ctx: JobContext):
                 stop_guard.set()
             if 'ghost_guard_task' in locals():
                 ghost_guard_task.cancel()
+            if 'backchannel_task' in locals():
+                backchannel_task.cancel()
         except Exception:
             pass
 

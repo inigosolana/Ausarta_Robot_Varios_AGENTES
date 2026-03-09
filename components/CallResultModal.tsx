@@ -28,6 +28,22 @@ export function CallResultModal({ result, onClose }: CallResultModalProps) {
         }
     };
 
+    const parseTranscriptLine = (rawLine: string): { speaker: 'agent' | 'customer'; text: string } => {
+        const line = rawLine.trim();
+        const lower = line.toLowerCase();
+        const agentPrefixes = ['agente:', 'assistant:', 'ai:', 'bot:', 'ausarta robot:'];
+        const customerPrefixes = ['cliente:', 'customer:', 'user:', 'you:', 'usuario:'];
+
+        const aPrefix = agentPrefixes.find((p) => lower.startsWith(p));
+        if (aPrefix) return { speaker: 'agent', text: line.slice(aPrefix.length).trim() };
+
+        const cPrefix = customerPrefixes.find((p) => lower.startsWith(p));
+        if (cPrefix) return { speaker: 'customer', text: line.slice(cPrefix.length).trim() };
+
+        // Fallback por seguridad: si no hay prefijo, lo tratamos como cliente.
+        return { speaker: 'customer', text: line };
+    };
+
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
             <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
@@ -113,7 +129,8 @@ export function CallResultModal({ result, onClose }: CallResultModalProps) {
                 <div className="p-6 overflow-y-auto space-y-6 bg-gray-50/20 flex-1">
                     {result.transcription ? (
                         result.transcription.split('\n').filter(l => l.trim()).map((line, i) => {
-                            const isAgente = line.startsWith('Agente:');
+                            const parsed = parseTranscriptLine(line);
+                            const isAgente = parsed.speaker === 'agent';
                             return (
                                 <div key={i} className={`flex ${isAgente ? 'justify-start' : 'justify-end'}`}>
                                     <div className="flex gap-3 max-w-[85%]">
@@ -130,7 +147,7 @@ export function CallResultModal({ result, onClose }: CallResultModalProps) {
                                                 {isAgente ? 'Ausarta Robot' : t('Customer', 'Cliente')}
                                             </p>
                                             <p className="leading-relaxed whitespace-pre-wrap">
-                                                {line.replace(/^(Agente|Cliente): /, '')}
+                                                {parsed.text}
                                             </p>
                                             <TimeStr basetime={result.fecha || new Date().toISOString()} offset={i} />
                                         </div>

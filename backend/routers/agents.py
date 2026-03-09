@@ -8,6 +8,11 @@ import logging
 
 logger = logging.getLogger("api-backend")
 DEFAULT_AUSARTA_VOICE_ID = "a2f12ebd-80df-4de7-83f3-809599135b1d"
+DEFAULT_HUMAN_INSTRUCTIONS = (
+    "Habla como una persona real en llamada: tono cercano, frases cortas y naturales. "
+    "Si te interrumpen, párate y retoma con amabilidad. "
+    "Usa el contexto de empresa para responder sin inventar."
+)
 
 router = APIRouter(prefix="/api", tags=["agents"])
 
@@ -112,7 +117,7 @@ async def create_agent(config: dict):
     try:
         db_config = {
             "name": config.get("name", "Nuevo Agente"),
-            "instructions": config.get("instructions", "Eres un asistente virtual."),
+            "instructions": config.get("instructions", DEFAULT_HUMAN_INSTRUCTIONS),
             "critical_rules": config.get("critical_rules", ""),
             "greeting": config.get("greeting", "Buenas, ¿tiene un momento?"),
             "description": config.get("description", ""),
