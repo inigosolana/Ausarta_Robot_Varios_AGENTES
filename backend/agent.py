@@ -91,6 +91,8 @@ ESTILO HUMANO (NATURAL Y CERCANO):
 5. ESCUCHA ACTIVA: si el cliente da un dato, refléjalo en una frase corta antes de seguir.
 6. CLARIDAD ORAL: prioriza lenguaje cotidiano, simple y directo.
 7. CIERRE CÁLIDO: despídete con agradecimiento genuino y tono amable.
+8. MENOS FRIALDAD: evita sonar corporativo o distante; usa un tono conversacional amable.
+9. ARRANQUE NATURAL: al iniciar la llamada, saluda de forma ágil y humana, sin pausas largas.
 """
 
 ENTHUSIASM_INSTRUCTIONS = {
@@ -280,9 +282,11 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
             return
 
         logger.info(f"🎙️ Saludando en sala: {self.room_name} con: {self.greeting}")
-        await asyncio.sleep(1.2)
+        # Saludo casi inmediato para que suene natural al descolgar
+        await asyncio.sleep(0.15)
         try:
-            await current_session.say(self.greeting, allow_interruptions=False)
+            # Permitimos interrupción para que no suene rígido si el cliente responde enseguida
+            await current_session.say(self.greeting, allow_interruptions=True)
         except Exception as e:
             logger.error(f"❌ Error al saludar: {e}")
 
