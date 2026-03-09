@@ -383,8 +383,12 @@ const ClientDashboard: React.FC<Props> = ({ empresaId }) => {
                                                     return <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-[10px] font-extrabold uppercase">{t('Success', 'Éxito')}</span>;
                                                 if (status === 'parcial')
                                                     return <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full text-[10px] font-extrabold uppercase">{t('Partial', 'Parcial')}</span>;
-                                                if (status === 'rechazada' || status === 'rejected')
+                                                if (status === 'rechazada' || status === 'rejected' || status === 'rejected_opt_out')
                                                     return <span className="px-3 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-full text-[10px] font-extrabold uppercase">{t('Rejected', 'Rechazada')}</span>;
+                                                if (status === 'no_contesta' || status === 'unreached')
+                                                    return <span className="px-3 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full text-[10px] font-extrabold uppercase">{t('No Answer', 'No Contesta')}</span>;
+                                                if (status === 'fallida' || status === 'failed')
+                                                    return <span className="px-3 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full text-[10px] font-extrabold uppercase">{t('Failed', 'Fallida')}</span>;
                                                 return <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-500 rounded-full text-[10px] font-extrabold uppercase">{call.status}</span>;
                                             })()}
                                         </td>

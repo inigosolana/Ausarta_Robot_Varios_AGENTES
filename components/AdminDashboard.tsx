@@ -321,12 +321,40 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                 {new Date(call.date).toLocaleString()}
                                             </td>
                                             <td className="py-4">
-                                                <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${call.status === 'completada' ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300' :
-                                                        call.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' :
-                                                            'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
-                                                    }`}>
-                                                    {call.status.toUpperCase()}
-                                                </span>
+                                                {(() => {
+                                                    const s = (call.status || '').toLowerCase();
+                                                    const isCompleted = s === 'completada' || s === 'completed';
+                                                    const isPartial = s === 'parcial' || s === 'incomplete';
+                                                    const isRejected = s === 'rechazada' || s === 'rejected' || s === 'rejected_opt_out';
+                                                    const isNoAnswer = s === 'no_contesta' || s === 'unreached';
+                                                    const isFailed = s === 'fallida' || s === 'failed';
+
+                                                    const cls = isCompleted
+                                                        ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                                                        : isPartial
+                                                            ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300'
+                                                            : isRejected
+                                                                ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                                                                : isNoAnswer
+                                                                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                                                                    : isFailed
+                                                                        ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+                                                                        : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300';
+
+                                                    const label = isCompleted
+                                                        ? t('Completed', 'Completada')
+                                                        : isPartial
+                                                            ? t('Partial', 'Parcial')
+                                                            : isRejected
+                                                                ? t('Rejected', 'Rechazada')
+                                                                : isNoAnswer
+                                                                    ? t('No Answer', 'No Contesta')
+                                                                    : isFailed
+                                                                        ? t('Failed', 'Fallida')
+                                                                        : t('Pending', 'Pendiente');
+
+                                                    return <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${cls}`}>{label}</span>;
+                                                })()}
                                             </td>
                                             {!stats?.is_question_based && (
                                                 <td className="py-4">

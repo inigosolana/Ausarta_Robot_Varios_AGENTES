@@ -67,7 +67,8 @@ REGLAS DE ORO (¡MUY IMPORTANTE!):
 5. SI EL CLIENTE NO TE ENTIENDE O DICE "¿CÓMO?", "¿QUÉ?": Repite la última pregunta que hiciste de forma amable y clara.
 6. SI ESCUCHAS RUIDO, SILENCIO O UNA PALABRA SIN SENTIDO: reconduce SIEMPRE la conversación con una pregunta corta de seguimiento en 1-2 segundos ("¿Sigue ahí?", "¿Me escucha bien?", "Si le parece, seguimos con la pregunta...").
 7. SI LA RESPUESTA DEL CLIENTE NO CUMPLE LO PEDIDO (fuera de tema, ambigua o incorrecta), RECONDUCE SIEMPRE con calma y vuelve a pedir exactamente el dato correcto. EXCEPCIÓN: si al principio dice un NO claro para participar, no insistas y finaliza cortésmente.
-8. VALIDACIÓN DE NOTAS: Si el usuario te da un número menor a 1 o mayor a 10 (ej: 0, 11), NO guardes el dato. Di "Disculpe, la nota debe ser entre 1 y 10. ¿Qué nota le daría?" y espera su respuesta.
+8. SI TE PREGUNTAN "¿QUIÉN ERES?", "¿DE PARTE DE QUIÉN LLAMAS?" O SIMILAR: responde tu identidad en una frase y CONTINÚA la encuesta. NUNCA cuelgues por esa pregunta.
+9. VALIDACIÓN DE NOTAS: Si el usuario te da un número menor a 1 o mayor a 10 (ej: 0, 11), NO guardes el dato. Di "Disculpe, la nota debe ser entre 1 y 10. ¿Qué nota le daría?" y espera su respuesta.
 
 REGLA CRÍTICA DE DESPEDIDA — LEE ESTO ATENTAMENTE:
 - Cuando vayas a terminar, primero llama a 'guardar_encuesta' con el status final.
@@ -475,6 +476,36 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
             logger.info(f"⚠️ [{self.room_name}] finalizar_llamada duplicado detectado. No se repite despedida.")
             return "Cierre ya en curso."
 
+        # Guardrail: no permitir colgar por una simple pregunta de identidad.
+        # Solo aceptamos este cierre "rápido por no buen momento" cuando hay rechazo explícito.
+        try:
+            latest_user = ""
+            chat_ctx = getattr(self.session, "chat_ctx", getattr(self.session, "chat_context", None))
+            if chat_ctx and getattr(chat_ctx, "messages", None):
+                for m in reversed(chat_ctx.messages):
+                    if getattr(m, "role", "") == "user":
+                        latest_user = _normalize_message_text(getattr(m, "content", None)).lower()
+                        if latest_user:
+                            break
+
+            goodbye_l = (mensaje_despedida_manual or "").lower()
+            identity_cues = (
+                "quien eres", "quién eres", "de parte de", "quien llama", "quién llama", "de donde", "de dónde"
+            )
+            explicit_reject_cues = (
+                "no me interesa", "no tengo tiempo", "no quiero", "no deseo",
+                "no llames", "dejadme", "adios", "adiós", "cuelgo"
+            )
+            is_identity_question = any(k in latest_user for k in identity_cues)
+            has_explicit_reject = any(k in latest_user for k in explicit_reject_cues)
+            is_quick_reject_goodbye = ("no es un buen momento" in goodbye_l) or ("no le quito más tiempo" in goodbye_l)
+
+            if is_identity_question and is_quick_reject_goodbye and not has_explicit_reject:
+                logger.info(f"🛡️ [{self.room_name}] Bloqueado finalizar_llamada por pregunta de identidad (sin rechazo explícito).")
+                return "El cliente pidió identificación. Aclara quién eres y continúa la encuesta."
+        except Exception as guard_err:
+            logger.debug(f"[{self.room_name}] Guardrail de finalizar_llamada no aplicado: {guard_err}")
+
         self.hangup_started = True
 
         async def process_goodbye_and_hangup():
@@ -738,7 +769,7 @@ async def entrypoint(ctx: JobContext):
         # max_endpointing_delay: tope máximo de espera (por defecto 3s → usuario lo notaba como pausa larga)
         # preemptive_generation: empieza a generar respuesta mientras el usuario habla → menos latencia percibida
         endpointing_min = float(os.getenv("AGENT_ENDPOINTING_MIN", "0.3"))
-        endpointing_max = float(os.getenv("AGENT_ENDPOINTING_MAX", "1.5"))
+        endpointing_max = float(os.getenv("AGENT_ENDPOINTING_MAX", "0.9"))
         session = AgentSession(
             vad=vad_model,
             stt=stt_plugin,
