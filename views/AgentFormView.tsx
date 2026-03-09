@@ -64,14 +64,19 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
     useEffect(() => {
         if (isEditing && agent?.id) {
-            loadAIConfig(agent.id);
+            loadAIConfig(Number(agent.id));
         }
-        loadTemplates();
+    }, [isEditing, agent?.id]);
 
+    useEffect(() => {
+        loadTemplates();
+    }, []);
+
+    useEffect(() => {
         if (isPlatformOwner) {
             loadEmpresas();
         }
-    }, [isEditing, agent?.id, profile, isPlatformOwner]);
+    }, [isPlatformOwner]);
 
     const loadEmpresas = async () => {
         const { data } = await supabase.from('empresas').select('*').order('nombre');
@@ -81,12 +86,17 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
     const loadAIConfig = async (agentId: number) => {
         setIsLoading(true);
         try {
-            const { data } = await supabase
-                .from('ai_config')
-                .select('*')
-                .eq('agent_id', agentId)
-                .maybeSingle();
-            if (data) setAiConfig(data as AIConfig);
+            const result = await Promise.race([
+                supabase
+                    .from('ai_config')
+                    .select('*')
+                    .eq('agent_id', agentId)
+                    .maybeSingle(),
+                new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error('Timeout loading AI config')), 10000)
+                ),
+            ]) as { data: AIConfig | null };
+            if (result?.data) setAiConfig(result.data as AIConfig);
         } catch (err) {
             console.error('Error loading AI config:', err);
         } finally {
@@ -192,10 +202,13 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
         }
     };
 
-    if (isLoading) return <div className="p-8 text-center text-gray-500">{t('Loading configuration...', 'Cargando configuración...')}</div>;
-
     return (
         <div className="space-y-6 max-w-4xl mx-auto pb-20">
+            {isLoading && (
+                <div className="text-center text-xs text-gray-500">
+                    {t('Loading configuration...', 'Cargando configuración...')}
+                </div>
+            )}
             {/* Header */}
             <header className="flex justify-between items-center bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
                 <div className="flex items-center gap-4">
