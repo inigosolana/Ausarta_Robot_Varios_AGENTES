@@ -71,13 +71,13 @@ REGLAS DE ORO (¡MUY IMPORTANTE!):
 
 REGLA CRÍTICA DE DESPEDIDA — LEE ESTO ATENTAMENTE:
 - Cuando vayas a terminar, primero llama a 'guardar_encuesta' con el status final.
-- Luego llama a 'finalizar_llamada' con un mensaje de despedida CÁLIDO, NATURAL y COMPLETO.
-- El mensaje debe incluir: agradecimiento sincero + deseo de buen día/tarde/fin de semana + "hasta luego" o "adiós" explícito al final.
-- Ejemplos de BUENAS despedidas:
-    * "Perfecto, pues muchas gracias por su tiempo, de verdad. Le deseo un buen día y que todo le vaya fenomenal. ¡Hasta luego!"
-    * "Estupendo, pues ya está todo. Muchas gracias por atendernos, ha sido un placer. Que tenga muy buena tarde. ¡Adiós!"
-    * "Muchas gracias por su colaboración, se lo agradecemos mucho. Pase un estupendo día. ¡Hasta pronto!"
-- NUNCA uses despedidas cortadas como "Adiós." a secas — siempre acompáñalas de al menos una frase de agradecimiento.
+- Luego llama a 'finalizar_llamada' con un mensaje de despedida CÁLIDO pero BREVE (1 frase, 2-4 segundos de habla).
+- IMPORTANTE: La despedida debe ser CORTA para que la llamada cuelgue rápido. Una sola frase con gracias + hasta luego.
+- Ejemplos de despedidas correctas (cortas):
+    * "Muchas gracias por su tiempo, hasta luego."
+    * "Perfecto, gracias. Que tenga buen día. ¡Adiós!"
+    * "Gracias por atendernos. Hasta pronto."
+- NO uses despedidas largas de varias frases (eso retrasa el colgado y el cliente espera en vano).
 - NO digas la despedida antes de llamar a la herramienta; deja que la herramienta la diga para que no se corte.
 
 EXCEPCIÓN - BUZÓN DE VOZ / FUERA DE COBERTURA:
@@ -87,7 +87,7 @@ EXCEPCIÓN - BUZÓN DE VOZ / FUERA DE COBERTURA:
 
 EXCEPCIÓN INTERRUPCIÓN/COLGAR:
 - Usa 'guardar_encuesta' (status='incomplete').
-- Usa 'finalizar_llamada' (mensaje_despedida_manual="Entiendo perfectamente, no le quito más tiempo. Que tenga un muy buen día. ¡Hasta luego!").
+- Usa 'finalizar_llamada' (mensaje_despedida_manual="Entendido, que tenga buen día. ¡Hasta luego!").
 
 NOTA FINAL: UNA VEZ LLAMES A 'finalizar_llamada', LA CONVERSACIÓN HA TERMINADO. NO RESPONDAS A NADA MÁS.
 """
@@ -484,8 +484,8 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
 
                 # Margen corto para evitar silencios largos tras despedida.
                 # Si se necesita ajustar, usar AGENT_HANGUP_DELAY_SECONDS en entorno.
-                wait_seconds = float(os.getenv("AGENT_HANGUP_DELAY_SECONDS", "0.45"))
-                wait_seconds = max(0.3, min(wait_seconds, 1.2))
+                wait_seconds = float(os.getenv("AGENT_HANGUP_DELAY_SECONDS", "0.35"))
+                wait_seconds = max(0.2, min(wait_seconds, 1.0))
                 logger.info(f"⏳ Esperando {wait_seconds:.1f}s antes de colgar.")
                 await asyncio.sleep(wait_seconds)
             except Exception as say_err:
