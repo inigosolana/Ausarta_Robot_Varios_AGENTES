@@ -442,7 +442,6 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
               >
                 <option value="cartesia">Cartesia (Sonic)</option>
                 <option value="openai">OpenAI TTS</option>
-                <option value="elevenlabs">ElevenLabs</option>
               </select>
             </div>
             <div>
