@@ -69,8 +69,8 @@ const App: React.FC = () => {
   const isRootUser = realProfile?.email === 'admin@ausarta.net' ||
     realProfile?.email === 'inigo2.solana@ausarta.net' ||
     realProfile?.email === 'inigosolana@gmail.com';
-  const isAusartaAdmin = realProfile?.empresas?.nombre === 'Ausarta' && realProfile?.role === 'admin';
-  const canSimulation = (realProfile?.role === 'superadmin' || isRootUser || isAusartaAdmin) && (realProfile?.empresas?.nombre === 'Ausarta' || isRootUser);
+  const isAusartaAdmin = realProfile?.empresas?.nombre?.toLowerCase() === 'ausarta' && realProfile?.role === 'admin';
+  const canSimulation = realProfile?.role === 'superadmin' || isRootUser || isAusartaAdmin;
 
   // Auto-redirect if role change makes current view inaccessible
   useEffect(() => {

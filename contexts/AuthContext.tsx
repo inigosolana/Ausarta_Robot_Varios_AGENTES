@@ -92,8 +92,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return;
         }
 
-        const isActuallyAusarta = realProfile.empresas?.nombre === 'Ausarta' || realProfile.email === 'admin@ausarta.net';
-        const canSpoof = (realProfile.role === 'superadmin' || realProfile.role === 'admin' || realProfile.email === 'admin@ausarta.net') && isActuallyAusarta;
+        const isActuallyAusarta = realProfile.empresas?.nombre?.toLowerCase() === 'ausarta' || realProfile.email === 'admin@ausarta.net';
+        const canSpoof = realProfile.role === 'superadmin' || ((realProfile.role === 'admin' || realProfile.email === 'admin@ausarta.net') && isActuallyAusarta);
 
         if (canSpoof && (spoofedRole || spoofedEmpresa)) {
             // Need to fetch company data if spoofedEmpresa is set
@@ -207,7 +207,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     // Centralised Platform Management Check
-    const isPlatformOwner = !!profile && profile.empresas?.nombre === 'Ausarta' && (profile.role === 'superadmin' || profile.role === 'admin');
+    const isPlatformOwner = !!profile && (profile.empresas?.nombre?.toLowerCase() === 'ausarta' || profile.role === 'superadmin') && (profile.role === 'superadmin' || profile.role === 'admin');
 
     return (
         <AuthContext.Provider value={{
