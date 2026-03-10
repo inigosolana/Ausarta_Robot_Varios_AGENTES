@@ -70,6 +70,7 @@ REGLAS DE ORO (¡MUY IMPORTANTE!):
 8. RESPUESTAS AMBIGUAS: Si pides una nota del 1 al 10 y el cliente responde 'Bien' o 'Normal', NO LO ACEPTES. Dile: 'Me alegra que haya ido bien, ¿pero qué número del 1 al 10 le pondría?'.
 9. SI TE PREGUNTAN "¿QUIÉN ERES?", "¿DE PARTE DE QUIÉN LLAMAS?" O SIMILAR: responde tu identidad en una frase y CONTINÚA la encuesta. NUNCA cuelgues por esa pregunta.
 10. VALIDACIÓN DE NOTAS: Si el usuario te da un número menor a 1 o mayor a 10 (ej: 0, 11), NO guardes el dato. Di "Disculpe, la nota debe ser entre 1 y 10. ¿Qué nota le daría?" y espera su respuesta.
+11. PROHIBIDO INVENTAR CONVERSACIÓN: NUNCA digas frases como "dime algo", "no te oigo nada" o similares de forma brusca. Si hay audio incomprensible, usa: "Perdona, se ha cortado un poco, ¿qué decías?".
 
 REGLA CRÍTICA DE DESPEDIDA — LEE ESTO ATENTAMENTE:
 - Cuando vayas a terminar, primero llama a 'guardar_encuesta' con el status final.
@@ -123,6 +124,9 @@ Reglas para sonar humano:
 8) En cuestionarios abiertos, continúa con la siguiente pregunta salvo rechazo explícito.
 9) DESPEDIDA NATURAL: cuando llegue el momento de despedirte, usa una sola frase corta (4-8 palabras). Ejemplo: "Muchas gracias. Hasta luego."
 10) NUNCA SUENES FRÍO: si el cliente fue amable, devuelve esa amabilidad. Si fue escueto, sé respetuoso y directo. Adáptate al tono del cliente.
+11) DISFLUENCIAS CONTROLADAS: en frases largas, introduce de forma ocasional un inicio natural ("eh...", "mmm...", "a ver...") para sonar humano.
+12) AUTO-CORRECCIÓN NATURAL: al menos una vez por llamada, haz una micro auto-corrección ("perdón, mejor dicho...") sin exagerar.
+13) ANTE AUDIO CORTADO O INCOMPRENSIBLE: usa una frase breve y natural ("Perdona, se ha cortado un poco, ¿qué decías?"). NUNCA uses "dime algo".
 """
 
 ENTHUSIASM_INSTRUCTIONS = {
@@ -253,6 +257,52 @@ def _normalize_goodbye_message(message: str) -> str:
         else:
             text = f"{text}. Hasta luego."
     return text
+
+
+def _count_words(text: str) -> int:
+    if not text:
+        return 0
+    return len([w for w in re.split(r"\s+", text.strip()) if w])
+
+
+def _is_likely_noise_transcript(text: str) -> bool:
+    """
+    Filtra micro-transcripciones típicas de ruido, respiración o backchannel corto.
+    """
+    t = _normalize_message_text(text).lower()
+    if not t:
+        return True
+
+    t = re.sub(r"^[\W_]+|[\W_]+$", "", t).strip()
+    if not t:
+        return True
+
+    short_noise = {
+        "eh", "ehh", "mmm", "mhm", "ajá", "aja", "uh", "hum",
+        "ok", "vale", "si", "sí", "hola", "hello", "hmm", "mm",
+    }
+    if _count_words(t) <= 2 and t in short_noise:
+        return True
+
+    alpha = re.sub(r"[^a-záéíóúüñ]", "", t)
+    if len(alpha) <= 1:
+        return True
+
+    return False
+
+
+def _estimate_thinking_complexity(user_text: str) -> tuple[float, int]:
+    """
+    Devuelve (volumen_teclado_extra, ráfagas) según longitud/complejidad percibida.
+    """
+    words = _count_words(user_text)
+    if words >= 22:
+        return 0.95, 3
+    if words >= 12:
+        return 0.8, 2
+    if words >= 6:
+        return 0.65, 1
+    return 0.5, 1
 
 
 def _extract_transcript_from_session(session_obj) -> tuple[list[dict], str]:
@@ -778,8 +828,8 @@ async def entrypoint(ctx: JobContext):
         # min_silence_duration: tiempo mínimo de silencio para detectar fin de turno.
         # 0.25 → responde muy rápido tras silencio. Si el cliente habla poco o entrecortado,
         # sube a 0.4-0.5 para no interrumpir antes de que acabe.
-        min_silence_duration = float(os.getenv("AGENT_MIN_SILENCE_SECONDS", "0.5"))
-        min_silence_duration = max(0.4, min(min_silence_duration, 0.8))
+        min_silence_duration = float(os.getenv("AGENT_MIN_SILENCE_SECONDS", "0.65"))
+        min_silence_duration = max(0.55, min(min_silence_duration, 1.0))
         vad_model = await asyncio.to_thread(silero.VAD.load, min_silence_duration=min_silence_duration)
         logger.info(f"✅ [{job_id}] VAD y configuración cargados.")
 
@@ -825,8 +875,10 @@ async def entrypoint(ctx: JobContext):
         # min_endpointing_delay: segundos de espera mínima tras silencio VAD antes de procesar
         # max_endpointing_delay: tope máximo de espera (por defecto 3s → usuario lo notaba como pausa larga)
         # preemptive_generation: empieza a generar respuesta mientras el usuario habla → menos latencia percibida
-        endpointing_min = float(os.getenv("AGENT_ENDPOINTING_MIN", "0.5"))
-        endpointing_max = float(os.getenv("AGENT_ENDPOINTING_MAX", "1.5"))
+        endpointing_min = float(os.getenv("AGENT_ENDPOINTING_MIN", "0.7"))
+        endpointing_max = float(os.getenv("AGENT_ENDPOINTING_MAX", "1.8"))
+        endpointing_min = max(0.6, min(endpointing_min, 1.2))
+        endpointing_max = max(endpointing_min + 0.2, min(endpointing_max, 2.5))
         session = AgentSession(
             vad=vad_model,
             stt=stt_plugin,
@@ -848,10 +900,10 @@ async def entrypoint(ctx: JobContext):
         # Se puede desactivar con AGENT_OFFICE_NOISE=false en el entorno.
         if os.getenv("AGENT_OFFICE_NOISE", "true").lower() not in ("false", "0", "no"):
             try:
-                # Office noise at all times without keyboard interference
+                # Ruido de oficina continuo; teclado base suave + ráfagas dinámicas en thinking
                 bg_player = BackgroundAudioPlayer(
-                    ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.8),
-                    thinking_sound=AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.6),
+                    ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.85),
+                    thinking_sound=AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.45),
                 )
                 await bg_player.start(room=ctx.room, agent_session=session)
                 logger.info(f"🎙️ [{job_id}] Ruido de fondo de oficina activado.")
@@ -1051,7 +1103,16 @@ async def entrypoint(ctx: JobContext):
             "waiting_user": False,
             "reprompt_count": 0,
         }
+        runtime_state = {
+            "agent_state": "listening",
+            "last_user_text": "",
+            "last_filler_at": 0.0,
+            "last_interrupt_ack_at": 0.0,
+        }
         loop_obj = asyncio.get_running_loop()
+        latency_fillers = ["Mmm...", "A ver...", "Vale..."]
+        interruption_acks = ["Uy, perdona, dime.", "Sí, dime."]
+        max_short_interrupt_words = int(os.getenv("AGENT_INTERRUPT_MIN_WORDS", "3"))
 
         @session.on("user_input_transcribed")
         def _on_user_input_transcribed(ev):
@@ -1061,8 +1122,32 @@ async def entrypoint(ctx: JobContext):
                 if not content or not is_final:
                     return
 
-                _append_transcript_event("user", content)
+                # Filtro anti-basura por ruido o falsas detecciones del STT
+                if _is_likely_noise_transcript(content):
+                    logger.info(f"🔇 [{job_id}] Transcripción descartada como ruido: '{content}'")
+                    return
+
+                word_count = _count_words(content)
+                runtime_state["last_user_text"] = content
+
+                # Anti-falsas interrupciones: no considerar interrupción real si son muy pocas palabras.
+                if runtime_state["agent_state"] in ("speaking", "thinking") and word_count < max_short_interrupt_words:
+                    logger.info(f"🛡️ [{job_id}] Interrupción corta ignorada ({word_count} palabras): '{content}'")
+                    return
+
+                # Interrupción real: acknowledge instantáneo para sonar humano.
                 now = loop_obj.time()
+                if runtime_state["agent_state"] in ("speaking", "thinking") and word_count >= max_short_interrupt_words:
+                    if (now - float(runtime_state["last_interrupt_ack_at"])) > 1.2:
+                        runtime_state["last_interrupt_ack_at"] = now
+                        async def _say_interrupt_ack():
+                            try:
+                                await session.say(random.choice(interruption_acks), allow_interruptions=True)
+                            except Exception as ack_err:
+                                logger.debug(f"[{job_id}] Ack de interrupción no enviado: {ack_err}")
+                        asyncio.create_task(_say_interrupt_ack())
+
+                _append_transcript_event("user", content)
                 reprompt_state["last_user_at"] = now
                 reprompt_state["waiting_user"] = False
                 reprompt_state["reprompt_count"] = 0
@@ -1103,10 +1188,31 @@ async def entrypoint(ctx: JobContext):
                 new_state = str(getattr(ev, "new_state", "")).lower()
                 old_state = str(getattr(ev, "old_state", "")).lower()
                 now = loop_obj.time()
+                runtime_state["agent_state"] = new_state
                 # Cuando termina de hablar/pensar y vuelve a escuchar, esperamos respuesta humana.
                 if new_state == "listening" and old_state in ("speaking", "thinking"):
                     reprompt_state["last_assistant_at"] = now
                     reprompt_state["waiting_user"] = True
+
+                if new_state == "thinking":
+                    # 1) Latency hiding: filler inmediato antes de respuesta del LLM
+                    if (now - float(runtime_state["last_filler_at"])) > 1.0:
+                        runtime_state["last_filler_at"] = now
+                        async def _say_latency_filler():
+                            try:
+                                await session.say(random.choice(latency_fillers), allow_interruptions=True)
+                            except Exception as fill_err:
+                                logger.debug(f"[{job_id}] Filler de latencia no enviado: {fill_err}")
+                        asyncio.create_task(_say_latency_filler())
+
+                    # 2) Teclado dinámico: ráfagas extra según complejidad de la intervención previa
+                    try:
+                        if 'bg_player' in locals():
+                            dyn_volume, bursts = _estimate_thinking_complexity(runtime_state.get("last_user_text", ""))
+                            for _ in range(bursts):
+                                bg_player.play(AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=dyn_volume), loop=False)
+                    except Exception as k_err:
+                        logger.debug(f"[{job_id}] No se pudo aplicar teclado dinámico: {k_err}")
             except Exception as ev_err:
                 logger.debug(f"[{job_id}] Error evento agent_state_changed: {ev_err}")
 
