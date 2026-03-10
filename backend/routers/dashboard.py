@@ -148,7 +148,7 @@ async def get_recent_calls(
 ):
     if not supabase: return []
     try:
-        cols = "id, telefono, campaign_name, nombre_cliente, fecha, status, llm_model, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez"
+        cols = "id, telefono, campaign_name, campaign_id, nombre_cliente, fecha, status, llm_model, empresa_id, agent_id"
         query = supabase.table("encuestas").select(cols)
         if empresa_id: query = query.eq("empresa_id", empresa_id)
         if agent_id: query = query.eq("agent_id", agent_id)
@@ -156,35 +156,119 @@ async def get_recent_calls(
         if start_date: query = query.gte("fecha", start_date)
         if end_date: query = query.lte("fecha", end_date)
         response = query.order("fecha", desc=True).limit(50).execute()
+
+        # Lookup de empresas y agentes para enriquecer
+        empresas_map = {}
+        agent_types_map = {}
+        try:
+            emp_res = supabase.table("empresas").select("id, nombre").execute()
+            empresas_map = {e["id"]: e.get("nombre", "—") for e in (emp_res.data or [])}
+        except: pass
+        try:
+            agents_res = supabase.table("agent_config").select("id, tipo_resultados, name").execute()
+            agent_types_map = {str(a["id"]): {"tipo": a.get("tipo_resultados"), "name": a.get("name")} for a in (agents_res.data or [])}
+        except: pass
+
         mapped = []
         for r in (response.data or []):
+            aid = str(r.get("agent_id") or "")
+            camp_id = r.get("campaign_id")
+            emp_id = r.get("empresa_id")
+            is_test = not camp_id or camp_id == 0
+            agent_info = agent_types_map.get(aid, {})
+
             mapped.append({
                 "id": r.get("id"),
                 "phone": r.get("telefono", ""),
                 "campaign": r.get("campaign_name", r.get("nombre_cliente", "—")),
+                "campaign_id": camp_id,
                 "date": r.get("fecha", ""),
                 "status": r.get("status", "pending"),
                 "llm_model": r.get("llm_model"),
-                "agent_id": r.get("agent_id"),
-                "scores": {
-                    "comercial": r.get("puntuacion_comercial"),
-                    "instalador": r.get("puntuacion_instalador"),
-                    "rapidez": r.get("puntuacion_rapidez")
-                }
+                "empresa_id": emp_id,
+                "empresa_name": empresas_map.get(emp_id, "—") if emp_id else "—",
+                "tipo_resultados": agent_info.get("tipo"),
+                "agent_name": agent_info.get("name"),
+                "is_test": is_test,
             })
-        
-        try:
-            agents_res = supabase.table("agent_config").select("id, tipo_resultados").execute()
-            t_map = {str(a["id"]): a.get("tipo_resultados") for a in (agents_res.data or [])}
-            for m in mapped:
-                aid = str(m.get("agent_id"))
-                m["tipo_resultados"] = t_map.get(aid)
-        except: pass
-        
+
         return mapped
     except Exception as e:
         logger.error(f"Error recent calls: {e}")
         return []
+
+@router.get("/dashboard/top-performers")
+async def get_top_performers(
+    empresa_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """Devuelve la campaña y agente más exitosos por tasa de completadas."""
+    if not supabase:
+        return {"top_campaign": None, "top_agent": None}
+    try:
+        cols = "campaign_id, campaign_name, agent_id, status"
+        q = supabase.table("encuestas").select(cols)
+        if empresa_id:
+            q = q.eq("empresa_id", empresa_id)
+        if start_date:
+            q = q.gte("fecha", start_date)
+        if end_date:
+            q = q.lte("fecha", end_date)
+        q = q.not_.is_("campaign_id", "null")
+        res = q.execute()
+        rows = res.data or []
+
+        if not rows:
+            return {"top_campaign": None, "top_agent": None}
+
+        from collections import defaultdict
+        campaign_stats = defaultdict(lambda: {"total": 0, "completed": 0, "name": ""})
+        agent_stats = defaultdict(lambda: {"total": 0, "completed": 0})
+
+        for r in rows:
+            cid = r.get("campaign_id")
+            aid = r.get("agent_id")
+            st = (r.get("status") or "").lower()
+            is_completed = 1 if st in ("completada", "completed") else 0
+
+            if cid:
+                campaign_stats[cid]["total"] += 1
+                campaign_stats[cid]["completed"] += is_completed
+                campaign_stats[cid]["name"] = r.get("campaign_name") or ""
+            if aid:
+                agent_stats[aid]["total"] += 1
+                agent_stats[aid]["completed"] += is_completed
+
+        top_campaign = None
+        best_rate = -1
+        for cid, s in campaign_stats.items():
+            if s["total"] >= 2:
+                rate = s["completed"] / s["total"]
+                if rate > best_rate:
+                    best_rate = rate
+                    top_campaign = {"id": cid, "name": s["name"], "completed": s["completed"], "total": s["total"], "rate": round(rate * 100, 1)}
+
+        top_agent = None
+        best_agent_rate = -1
+        agent_names = {}
+        try:
+            ag_res = supabase.table("agent_config").select("id, name").execute()
+            agent_names = {a["id"]: a.get("name", "") for a in (ag_res.data or [])}
+        except:
+            pass
+
+        for aid, s in agent_stats.items():
+            if s["total"] >= 2:
+                rate = s["completed"] / s["total"]
+                if rate > best_agent_rate:
+                    best_agent_rate = rate
+                    top_agent = {"id": aid, "name": agent_names.get(aid, f"Agente #{aid}"), "completed": s["completed"], "total": s["total"], "rate": round(rate * 100, 1)}
+
+        return {"top_campaign": top_campaign, "top_agent": top_agent}
+    except Exception as e:
+        logger.error(f"Error top performers: {e}")
+        return {"top_campaign": None, "top_agent": None}
 
 @router.get("/results")
 async def get_all_results(
