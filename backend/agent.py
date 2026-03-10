@@ -72,6 +72,13 @@ REGLAS DE ORO (¡MUY IMPORTANTE!):
 10. VALIDACIÓN DE NOTAS: Si el usuario te da un número menor a 1 o mayor a 10 (ej: 0, 11), NO guardes el dato. Di "Disculpe, la nota debe ser entre 1 y 10. ¿Qué nota le daría?" y espera su respuesta.
 11. PROHIBIDO INVENTAR CONVERSACIÓN: NUNCA digas frases como "dime algo", "no te oigo nada" o similares de forma brusca. Si hay audio incomprensible, usa: "Perdona, se ha cortado un poco, ¿qué decías?".
 
+REGLA UNIVERSAL DE GUARDADO (guardar_encuesta):
+- Tu herramienta 'guardar_encuesta' es súper flexible. Adáptate al guion que se te ha dado.
+- Si en tu guion haces preguntas de notas numéricas (ej. comercial, instalador, rapidez), guarda esos números del 1 al 10 en 'nota_comercial', 'nota_instalador' y/o 'nota_rapidez'.
+- Si en tu guion hay preguntas abiertas, condicionales (ej. "si responde mal, pregunta por qué") o cualquier dato que NO sea numérico, OBLIGATORIAMENTE crea un JSON y pásalo como string en 'datos_extra'. Ejemplo: '{"motivo_queja":"tardaron mucho","interesado":true}'.
+- Si el guion es solo texto, guarda un resumen en 'comentarios' o en 'datos_extra'.
+- OBLIGATORIO: Siempre llama a 'guardar_encuesta' antes de despedirte.
+
 REGLA CRÍTICA DE DESPEDIDA — LEE ESTO ATENTAMENTE:
 - Cuando vayas a terminar, primero llama a 'guardar_encuesta' con el status final.
 - Luego llama a 'finalizar_llamada' con un mensaje de despedida CÁLIDO pero ULTRA-BREVE.
@@ -384,54 +391,6 @@ class DynamicAgent(Agent):
         )
         
         base_rules_to_use = BASE_RULES
-        inst_lower = agent_instructions.lower()
-        # Detección de tipo de agente (Campo explícito 'tipo_resultados' o fallback)
-        tipo_res = agent_config.get("tipo_resultados")
-        
-        is_numeric = (tipo_res in ['ENCUESTA_NUMERICA', 'ENCUESTA_MIXTA'])
-        has_preguntas = (tipo_res in ['PREGUNTAS_ABIERTAS', 'CUALIFICACION_LEAD', 'AGENDAMIENTO_CITA', 'SOPORTE_CLIENTE'])
-        is_mixed = (tipo_res == 'ENCUESTA_MIXTA')
-        
-        # Fallback para agentes antiguos o si n8n aún no lo clasificó
-        if tipo_res is None:
-            survey_type_legacy = agent_config.get("survey_type")
-            is_numeric = (survey_type_legacy == 'numeric')
-            has_preguntas = (survey_type_legacy in ['open_questions', 'mixed'])
-            
-            if survey_type_legacy is None:
-                numeric_keywords = ["1 al 10", "0 al 10", "del uno al diez", "numérica", "puntuación", "uno al 10", "uno al diez", "1 al 5"]
-                is_numeric = any(kw in inst_lower for kw in numeric_keywords) or "dakota" in agent_name.lower()
-                has_preguntas = any(p in inst_lower for p in ["pregunta 1", "pregunta 2", "pregunta:"])
-                # Detectar encuesta mixta: tiene numéricas + condicionales o "SI ... pregunta"
-                condicional_markers = ["si la nota", "condicional", "si responde", "si dice", "si fue 1", "si fue 2", "si fue 3"]
-                is_mixed = is_numeric and any(m in inst_lower for m in condicional_markers)
-            
-            if survey_type_legacy == 'mixed':
-                is_numeric = True
-                has_preguntas = True
-                is_mixed = True
-        
-        if is_mixed:
-            base_rules_to_use += """
-REGLA ESPECIAL PARA ENCUESTAS MIXTAS (numéricas + condicionales/abiertas):
-- Obtén las puntuaciones numéricas y usa 'nota_comercial', 'nota_instalador', 'nota_rapidez' según corresponda.
-- Si hay preguntas condicionales o abiertas, pasa 'datos_extra' como cadena JSON, ej: '{"detalle_problema":"...","motivo_contratacion":"comercial","experiencia_general":4}'.
-- Llama a guardar_encuesta con notas numéricas y datos_extra (string JSON).
-"""
-        elif is_numeric:
-            base_rules_to_use += """
-REGLA ESPECIAL PARA ENCUESTAS NUMÉRICAS:
-- Esta es una encuesta de puntuación del 0 al 10.
-- Debes obtener una nota numérica para cada pregunta. 
-- Si el cliente responde con texto, pídele amablemente una puntuación del 0 al 10.
-- OBLIGATORIO: Tras recibir las 3 notas (comercial, instalador, rapidez), SIEMPRE pregunta por un comentario final antes de terminar (ej: "¿Quiere añadir algún comentario antes de terminar?"). Solo después de la respuesta del cliente, llama a guardar_encuesta con comentarios y status='completed', y luego finalizar_llamada. NUNCA omitas esta pregunta de comentario.
-"""
-        elif has_preguntas:
-            base_rules_to_use += """
-REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
-- Como este es un cuestionario de preguntas abiertas, USA el campo 'comentarios' de la herramienta 'guardar_encuesta' para guardar todas las respuestas de las preguntas planteadas recopiladas en forma de texto descriptivo.
-- IGNORA la regla estructurada de "Validación de notas de 1 al 10" si no aplica a tus preguntas.
-"""
         
         # Construcción del Prompt Final: Reglas -> Datos -> GUION (EL GUION ES LO MÁS IMPORTANTE)
         full_instructions = f"{base_rules_to_use}\n\n"
@@ -525,11 +484,13 @@ REGLA ESPECIAL PARA CUESTIONARIOS ABIERTOS:
         datos_extra: Optional[str] = None
     ) -> str | None:
         """
-        Guarda los datos de la encuesta/llamada. 
-        - Si la encuesta es NUMÉRICA, usa 'nota_comercial', 'nota_instalador', 'nota_rapidez' (1-10).
-        - IMPORTANTE: Para encuestas numéricas, SIEMPRE pregunta "¿Quiere añadir algún comentario antes de terminar?" ANTES de llamar con status='completed'. El campo 'comentarios' debe reflejar la respuesta real del cliente (o "Sin comentarios" si no añade nada).
-        - Si la encuesta es ABIERTA o hay feedback extra, usa 'comentarios'.
-        - Para ENCUESTA_MIXTA, pasa 'datos_extra' como JSON string, ej: '{"experiencia_general":4,"detalle_problema":"...","motivo_contratacion":"comercial"}'.
+        Guarda los datos de la encuesta/llamada de forma flexible según el guion activo.
+        Analiza tu propio guion y adapta los campos:
+        - Si recoges notas numéricas, usa 'nota_comercial', 'nota_instalador' y/o 'nota_rapidez' (1-10).
+        - Si recoges respuestas abiertas, condicionales o cualquier dato no numérico, guarda esa estructura en 'datos_extra' como JSON string.
+          Ejemplo: '{"motivo_queja":"tardaron mucho","interesado":true}'.
+        - Si el guion es principalmente textual, usa 'comentarios' y/o 'datos_extra' para el resumen.
+        - Antes de despedirte, debes haber llamado a esta herramienta al menos una vez.
         - 'status': 'completed', 'failed', 'incomplete' o 'rejected_opt_out'.
         """
         self.data_saved = True
