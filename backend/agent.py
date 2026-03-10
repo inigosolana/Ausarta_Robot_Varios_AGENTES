@@ -851,8 +851,9 @@ async def entrypoint(ctx: JobContext):
                 # Office noise at all times without keyboard interference
                 bg_player = BackgroundAudioPlayer(
                     ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.8),
+                    thinking_sound=AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.6),
                 )
-                await bg_player.start(room=ctx.room)
+                await bg_player.start(room=ctx.room, agent_session=session)
                 logger.info(f"🎙️ [{job_id}] Ruido de fondo de oficina activado.")
             except Exception as bg_err:
                 logger.warning(f"⚠️ [{job_id}] No se pudo iniciar ruido de fondo: {bg_err}")
