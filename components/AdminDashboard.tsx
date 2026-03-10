@@ -204,8 +204,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
 
     const donutData = stats?.status_breakdown
-        ? Object.entries(stats.status_breakdown)
-            .map(([key, value]) => ({ name: STATUS_LABELS[key] || key, value, key }))
+        ? Object.entries(stats.status_breakdown as Record<string, number>)
+            .map(([key, value]) => ({ name: STATUS_LABELS[key] || key, value: value as number, key }))
             .filter(d => d.value > 0)
             .sort((a, b) => b.value - a.value)
         : [];
