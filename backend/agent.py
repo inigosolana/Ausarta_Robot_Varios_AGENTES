@@ -52,7 +52,7 @@ logger = logging.getLogger("agent-dynamic")
 load_dotenv()
 
 ROOM_PREFIX = os.getenv("LIVEKIT_ROOM_PREFIX", "llamada_ausarta_")
-DEFAULT_CARTESIA_VOICE = "a2f12ebd-80df-4de7-83f3-809599135b1d"
+DEFAULT_CARTESIA_VOICE = "b5aa8098-49ef-475d-89b0-c9262ecf33fd"  # Chica castellano Cartesia
 DISPATCH_AGENT_NAME = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
 
 # ============================================================================
@@ -787,7 +787,7 @@ async def entrypoint(ctx: JobContext):
         agent_instance = DynamicAgent(room_name=room_name, agent_config=agent_config)
         
         llm_model = agent_config.get("llm_model", "llama-3.3-70b-versatile")
-        voice_id = agent_config.get("voice_id", "cefcb124-080b-4655-b31f-932f3ee743de")
+        voice_id = agent_config.get("voice_id", "b5aa8098-49ef-475d-89b0-c9262ecf33fd")
         language = agent_config.get("language", "es")
         stt_provider = agent_config.get("stt_provider", "deepgram")
         speaking_speed = agent_config.get("speaking_speed", 1.0)

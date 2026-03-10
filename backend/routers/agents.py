@@ -7,7 +7,7 @@ from datetime import datetime
 import logging
 
 logger = logging.getLogger("api-backend")
-DEFAULT_AUSARTA_VOICE_ID = "a2f12ebd-80df-4de7-83f3-809599135b1d"
+DEFAULT_AUSARTA_VOICE_ID = "b5aa8098-49ef-475d-89b0-c9262ecf33fd"  # Chica castellano Cartesia
 DEFAULT_HUMAN_INSTRUCTIONS = (
     "Habla como una persona real en llamada: tono cercano, frases cortas y naturales. "
     "Si te interrumpen, párate y retoma con amabilidad. "
