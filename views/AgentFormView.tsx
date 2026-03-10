@@ -414,23 +414,24 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                             className="w-full bg-transparent border-none p-0 text-sm font-bold text-gray-800 focus:ring-0 cursor-pointer"
                                         >
                                             <optgroup label={t('Spanish', 'Español')}>
-                                                <option value={AUSARTA_FEMALE_VOICE_ID}>{t('Female (Castilian)', 'Chica Castellano')}</option>
-                                                <option value="cefcb124-080b-4655-b31f-932f3ee743de">{t('Female Normal', 'Chica Normal')}</option>
-                                                <option value="c0c374aa-09be-42d9-9828-4d2d7df86962">{t('Female (Alternative)', 'Chica Alternativa')}</option>
-                                                <option value="3380a516-6acc-4389-97c8-68273b540dd3">{t('Male (Castilian)', 'Chico Castellano')}</option>
-                                                <option value="948196a7-fe02-417b-9b6d-c45ee0803565">{t('Male (Alternative)', 'Chico Alternativo')}</option>
+                                                <option value={AUSARTA_FEMALE_VOICE_ID}>{t('Inés (España - Natural)', 'Inés (España - Natural)')}</option>
+                                                <option value="cefcb124-080b-4655-b31f-932f3ee743de">{t('Raquel (España - Suave)', 'Raquel (España - Suave)')}</option>
+                                                <option value="a2f12ebd-80df-4de7-83f3-809599135b1d">{t('Marta (España - Corporativa)', 'Marta (España - Corporativa)')}</option>
+                                                <option value="948196a7-fe02-417b-9b6d-c45ee0803565">{t('Alba (España - Narrativa)', 'Alba (España - Narrativa)')}</option>
+                                                <option value="64734da2-68c8-47bc-96b6-f0ca3debd279">{t('Javier (España - Hombre)', 'Javier (España - Hombre)')}</option>
+                                                <option value="3380a516-6acc-4389-97c8-68273b540dd3">{t('Carlos (España - Hombre serio)', 'Carlos (España - Hombre serio)')}</option>
                                             </optgroup>
                                             <optgroup label={t('Basque', 'Euskera')}>
-                                                <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">{t('Female', 'Chica')}</option>
-                                                <option value="a62209c3-9f0a-4474-9b51-84b191593f49">{t('Male', 'Chico')}</option>
+                                                <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">{t('Ane (Basque Female)', 'Ane (Chica Euskera)')}</option>
+                                                <option value="a62209c3-9f0a-4474-9b51-84b191593f49">{t('Ion (Basque Male)', 'Ion (Chico Euskera)')}</option>
                                             </optgroup>
                                             <optgroup label={t('Galician', 'Gallego')}>
-                                                <option value="96eade6e-d863-4f9a-8b08-5d7b74d1643b">{t('Female', 'Chica')}</option>
-                                                <option value="4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2">{t('Male', 'Chico')}</option>
+                                                <option value="96eade6e-d863-4f9a-8b08-5d7b74d1643b">{t('Sabela (Galician Female)', 'Sabela (Chica Gallega)')}</option>
+                                                <option value="4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2">{t('Brais (Galician Male)', 'Brais (Chico Gallego)')}</option>
                                             </optgroup>
                                             <optgroup label={t('English', 'Inglés')}>
-                                                <option value="62ae83ad-4f6a-430b-af41-a9bede9286ca">{t('Female', 'Chica')}</option>
-                                                <option value="0ad65e7f-006c-47cf-bd31-52279d487913">{t('Male', 'Chico')}</option>
+                                                <option value="62ae83ad-4f6a-430b-af41-a9bede9286ca">{t('Sarah (English Female)', 'Sarah (Chica Inglés)')}</option>
+                                                <option value="0ad65e7f-006c-47cf-bd31-52279d487913">{t('Mark (English Male)', 'Mark (Chico Inglés)')}</option>
                                             </optgroup>
                                         </select>
                                     </div>
