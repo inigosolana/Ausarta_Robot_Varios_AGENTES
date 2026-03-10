@@ -848,11 +848,11 @@ async def entrypoint(ctx: JobContext):
         # Se puede desactivar con AGENT_OFFICE_NOISE=false en el entorno.
         if os.getenv("AGENT_OFFICE_NOISE", "true").lower() not in ("false", "0", "no"):
             try:
+                # Office noise at all times without keyboard interference
                 bg_player = BackgroundAudioPlayer(
-                    ambient_sound=BuiltinAudioClip.OFFICE_AMBIENCE,
-                    thinking_sound=BuiltinAudioClip.KEYBOARD_TYPING,
+                    ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.8),
                 )
-                await bg_player.start(room=ctx.room, agent_session=session)
+                await bg_player.start(room=ctx.room)
                 logger.info(f"🎙️ [{job_id}] Ruido de fondo de oficina activado.")
             except Exception as bg_err:
                 logger.warning(f"⚠️ [{job_id}] No se pudo iniciar ruido de fondo: {bg_err}")
