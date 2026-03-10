@@ -416,6 +416,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                             <optgroup label={t('Spanish', 'Español')}>
                                                 <option value={AUSARTA_FEMALE_VOICE_ID}>{t('Female (Castilian)', 'Chica Castellano')}</option>
                                                 <option value="cefcb124-080b-4655-b31f-932f3ee743de">{t('Female Normal', 'Chica Normal')}</option>
+                                                <option value="c0c374aa-09be-42d9-9828-4d2d7df86962">{t('Female (Alternative)', 'Chica Alternativa')}</option>
                                                 <option value="3380a516-6acc-4389-97c8-68273b540dd3">{t('Male (Castilian)', 'Chico Castellano')}</option>
                                                 <option value="948196a7-fe02-417b-9b6d-c45ee0803565">{t('Male (Alternative)', 'Chico Alternativo')}</option>
                                             </optgroup>
