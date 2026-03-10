@@ -155,6 +155,7 @@ export interface SurveyResult {
   tipo_resultados?: string | null;
   datos_extra?: Record<string, any> | null;
   customer_name?: string | null;
+  empresa_name?: string | null;
 }
 
 // Mapeo canónico de disposición para gráficos

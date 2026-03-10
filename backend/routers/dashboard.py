@@ -288,8 +288,7 @@ async def get_all_results(
         if start_date: query = query.gte("fecha", start_date)
         if end_date: query = query.lte("fecha", end_date)
         response = query.order("fecha", desc=True).execute()
-        results = response.data
-        
+        results = response.data        
         try:
             agents_res = supabase.table("agent_config").select("id, instructions, critical_rules, survey_type, tipo_resultados").execute()
             qs_agents = set()
@@ -298,9 +297,9 @@ async def get_all_results(
             for a in (agents_res.data or []):
                 aid = str(a["id"])
                 t_res = a.get("tipo_resultados")
-                agent_types[aid] = t_res
                 
                 if t_res:
+                    agent_types[aid] = t_res
                     if t_res in ['PREGUNTAS_ABIERTAS', 'CUALIFICACION_LEAD', 'AGENDAMIENTO_CITA', 'SOPORTE_CLIENTE']:
                         qs_agents.add(aid)
                 else:
@@ -318,11 +317,16 @@ async def get_all_results(
                 
                 if a.get("critical_rules"):
                     agent_critical_rules[aid] = a["critical_rules"]
+                    
+            emp_res = supabase.table("empresas").select("id, nombre").execute()
+            empresas_map = { e["id"]: e.get("nombre", f"Empresa #{e['id']}") for e in (emp_res.data or []) }
+                    
             for res in results:
                 aid_res = str(res.get("agent_id"))
                 res["is_question_based"] = aid_res in qs_agents
                 res["tipo_resultados"] = agent_types.get(aid_res)
                 res["agent_critical_rules"] = agent_critical_rules.get(aid_res)
+                res["empresa_name"] = empresas_map.get(res.get("empresa_id"))
         except Exception as e_agent:
             logger.error(f"Error enriching query based question agents: {e_agent}")
         return results

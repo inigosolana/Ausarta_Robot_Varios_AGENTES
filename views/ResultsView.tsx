@@ -350,6 +350,9 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                 <div className="text-xs text-gray-400 font-mono">#{row.id}</div>
                                 <div className="font-semibold text-gray-900">{row.telefono}</div>
                                 <div className="text-[11px] text-blue-600 font-bold uppercase tracking-tight">{row.campaign_name}</div>
+                                {effectiveEmpresaId === 'all' && isPlatformOwner && (
+                                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">{row.empresa_name || '—'}</div>
+                                )}
                             </div>
                             <span className="text-xs text-gray-500 text-right">
                                 {new Date(row.fecha).toLocaleDateString()}<br />
@@ -401,6 +404,9 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                             <tr>
                                 <th className="px-6 py-3 w-16">{t('ID')}</th>
                                 <th className="px-6 py-3">{t('Phone / Campaign')}</th>
+                                {effectiveEmpresaId === 'all' && isPlatformOwner && (
+                                    <th className="px-6 py-3">{t('Empresa')}</th>
+                                )}
                                 <th className="px-6 py-3">{t('Date')}</th>
                                 <th className="px-6 py-3 text-center">{t('Status')}</th>
                                 <th className="px-6 py-3 text-center">{t('Results / Scores')}</th>
@@ -412,7 +418,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                         <tbody className="divide-y divide-gray-100">
                             {filteredResults.length === 0 ? (
                                 <tr>
-                                    <td colSpan={8} className="px-6 py-12 text-center text-gray-400">
+                                    <td colSpan={effectiveEmpresaId === 'all' && isPlatformOwner ? 9 : 8} className="px-6 py-12 text-center text-gray-400">
                                         {t('No results found')}
                                     </td>
                                 </tr>
@@ -425,6 +431,13 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                             <span className="text-[10px] text-blue-600 font-bold uppercase tracking-tighter">{row.campaign_name}</span>
                                         </div>
                                     </td>
+                                    {effectiveEmpresaId === 'all' && isPlatformOwner && (
+                                        <td className="px-6 py-4">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                                                {row.empresa_name || '—'}
+                                            </span>
+                                        </td>
+                                    )}
                                     <td className="px-6 py-4 text-gray-500">
                                         {new Date(row.fecha).toLocaleDateString()} <span className="text-xs text-gray-400">{new Date(row.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                     </td>
