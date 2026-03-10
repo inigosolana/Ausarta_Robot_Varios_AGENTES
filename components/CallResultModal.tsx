@@ -1,11 +1,39 @@
 import React from 'react';
-import { FileText, Target, ThumbsDown, Calendar, Sparkles, X } from 'lucide-react';
+import { FileText, Target, ThumbsDown, Calendar, Sparkles, X, Database } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { SurveyResult } from '../types';
 
 interface CallResultModalProps {
     result: SurveyResult | null;
     onClose: () => void;
+}
+
+function prettifyKey(raw: string): string {
+    return raw
+        .replace(/_/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatValue(value: any): string {
+    if (value === null || value === undefined) return '—';
+    if (typeof value === 'boolean') return value ? 'Sí' : 'No';
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value.map(v => formatValue(v)).join(', ');
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
+}
+
+function getValueStyle(value: any): string {
+    if (typeof value === 'boolean') {
+        return value
+            ? 'bg-green-50 text-green-700 border-green-200'
+            : 'bg-red-50 text-red-700 border-red-200';
+    }
+    if (typeof value === 'number') return 'bg-blue-50 text-blue-700 border-blue-200';
+    return 'bg-gray-50 text-gray-700 border-gray-200';
 }
 
 export function CallResultModal({ result, onClose }: CallResultModalProps) {
@@ -40,61 +68,44 @@ export function CallResultModal({ result, onClose }: CallResultModalProps) {
         const cPrefix = customerPrefixes.find((p) => lower.startsWith(p));
         if (cPrefix) return { speaker: 'customer', text: line.slice(cPrefix.length).trim() };
 
-        // Fallback por seguridad: si no hay prefijo, lo tratamos como cliente.
         return { speaker: 'customer', text: line };
     };
 
-    const buildMixedSummary = () => {
-        const extra: Record<string, any> = (result.datos_extra && typeof result.datos_extra === 'object') ? result.datos_extra : {};
-        const rows: Array<{ label: string; value: any; type: 'number' | 'choice' | 'text' }> = [];
-        const push = (label: string, value: any, type: 'number' | 'choice' | 'text') => {
-            if (value === null || value === undefined || value === '') return;
-            rows.push({ label, value, type });
-        };
-        const isChoice = (v: any) => {
-            if (typeof v !== 'string') return false;
-            const s = v.toLowerCase().trim();
-            return ['comercial', 'tecnico', 'técnico', 'calidad-precio', 'calidad precio', 'servicio', 'servicio general', 'si', 'sí', 'no'].includes(s);
-        };
+    // Notas numéricas que existen
+    const numericScores = [
+        { label: 'Comercial', value: result.puntuacion_comercial },
+        { label: 'Instalador', value: result.puntuacion_instalador },
+        { label: 'Rapidez', value: result.puntuacion_rapidez },
+    ].filter(s => s.value != null && s.value > 0);
 
-        push('Experiencia general', extra.experiencia_general ?? result.puntuacion_rapidez, 'number');
-        push('Atencion comercial', result.puntuacion_comercial ?? extra.nota_comercial, 'number');
-        push('Atencion tecnica', result.puntuacion_instalador ?? extra.nota_tecnico ?? extra.nota_instalador, 'number');
-        push('Motivo de contratacion', extra.motivo_contratacion, isChoice(extra.motivo_contratacion) ? 'choice' : 'text');
-        push('Detalle del problema', extra.detalle_problema, 'text');
+    // datos_extra como key-value pairs (filtramos arrays/objetos complejos para mostrar aparte)
+    const datosExtra = result.datos_extra && typeof result.datos_extra === 'object' ? result.datos_extra : null;
+    const extraEntries = datosExtra ? Object.entries(datosExtra).filter(([_, v]) => v !== null && v !== undefined && v !== '') : [];
+    const simpleEntries = extraEntries.filter(([_, v]) => typeof v !== 'object' || typeof v === 'boolean');
+    const complexEntries = extraEntries.filter(([_, v]) => typeof v === 'object' && v !== null && typeof v !== 'boolean');
 
-        const candidates = [extra.respuestas, extra.preguntas, extra.answers, extra.questions];
-        for (const arr of candidates) {
-            if (!Array.isArray(arr)) continue;
-            for (const e of arr) {
-                if (!e || typeof e !== 'object') continue;
-                const label = e.label || e.pregunta || e.question || e.name || 'Respuesta';
-                const value = e.value ?? e.respuesta ?? e.answer;
-                const rawType = (e.type || e.tipo || '').toString().toLowerCase();
-                const type: 'number' | 'choice' | 'text' =
-                    rawType.includes('num') ? 'number' : rawType.includes('choice') || rawType.includes('option') ? 'choice' : (typeof value === 'number' ? 'number' : (isChoice(value) ? 'choice' : 'text'));
-                push(label, value, type);
-            }
-        }
-        return rows;
-    };
-    const mixedSummary = result.tipo_resultados === 'ENCUESTA_MIXTA' ? buildMixedSummary() : [];
+    // Detectar estado de interés para header
+    const interes = datosExtra?.interes?.toString().toLowerCase();
+    const headerBg = interes === 'alto' ? 'bg-green-50 border-green-100' :
+                     interes === 'bajo' ? 'bg-red-50 border-red-100' :
+                     'bg-gray-50/50 border-gray-100';
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
-                <div className={`px-6 py-4 border-b flex justify-between items-center ${result.datos_extra?.interes?.toLowerCase() === 'alto' ? 'bg-green-50 border-green-100' : result.datos_extra?.interes?.toLowerCase() === 'bajo' ? 'bg-red-50 border-red-100' : 'bg-gray-50/50 border-gray-100'}`}>
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
+                {/* Header */}
+                <div className={`px-6 py-4 border-b flex justify-between items-center ${headerBg}`}>
                     <div>
                         <div className="flex items-center gap-3">
                             <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                                <FileText size={18} className={result.datos_extra?.interes?.toLowerCase() === 'alto' ? 'text-green-600' : 'text-blue-600'} />
-                                {t("Transcription", "Transcripción")} #{result.id}
+                                <FileText size={18} className={interes === 'alto' ? 'text-green-600' : 'text-blue-600'} />
+                                {t("Detalle Llamada", "Detalle Llamada")} #{result.id}
                             </h3>
-                            {result.datos_extra?.interes?.toLowerCase() === 'alto' && <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold shadow-sm">🔥 Interés Alto</span>}
-                            {result.datos_extra?.interes?.toLowerCase() === 'bajo' && <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold shadow-sm">Interés Bajo</span>}
+                            {interes === 'alto' && <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold shadow-sm">🔥 Interés Alto</span>}
+                            {interes === 'bajo' && <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold shadow-sm">Interés Bajo</span>}
                         </div>
                         <p className="text-xs text-gray-500 mt-0.5">
-                            {(result as any).customer_name ? `${(result as any).customer_name} · ` : ''}
+                            {result.customer_name ? `${result.customer_name} · ` : ''}
                             {result.telefono} • {new Date(result.fecha).toLocaleString()}
                         </p>
                     </div>
@@ -106,82 +117,123 @@ export function CallResultModal({ result, onClose }: CallResultModalProps) {
                     </button>
                 </div>
 
-                {/* Resumen Inteligente */}
-                <div className="px-6 py-4 border-b border-gray-100 bg-indigo-50/30 shrink-0">
-                    <div className="flex items-center gap-2 mb-3">
-                        <Sparkles size={18} className="text-indigo-600" />
-                        <h4 className="font-bold text-indigo-900 text-sm">{t('Resumen de la IA', 'Resumen de la IA')}</h4>
-                    </div>
-                    {(!result.datos_extra || Object.keys(result.datos_extra).length === 0) ? (
-                        <p className="text-sm text-gray-500 italic">{t('El análisis detallado no está disponible para esta llamada.')}</p>
-                    ) : (
-                        <div className="space-y-3">
-                            {result.tipo_resultados === 'CUALIFICACION_LEAD' && (
-                                <div className="flex flex-col gap-2">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs font-semibold text-gray-600">{t('Estado:')}</span>
-                                        {result.datos_extra.lead_cualificado ? (
-                                            <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-md font-bold flex items-center gap-1"><Target size={12} /> Sí, Cualificado</span>
-                                        ) : (
-                                            <span className="bg-red-100 text-red-700 text-xs px-2 py-1 rounded-md font-bold flex items-center gap-1"><ThumbsDown size={12} /> No Cualificado</span>
-                                        )}
+                {/* Panel de Datos Estructurados */}
+                <div className="px-6 py-4 border-b border-gray-100 bg-indigo-50/30 shrink-0 space-y-4">
+                    {/* Notas numéricas (solo si existen) */}
+                    {numericScores.length > 0 && (
+                        <div>
+                            <div className="flex items-center gap-2 mb-2">
+                                <Sparkles size={14} className="text-blue-500" />
+                                <h4 className="font-bold text-gray-800 text-xs uppercase tracking-wider">{t('Puntuaciones')}</h4>
+                            </div>
+                            <div className="flex gap-3">
+                                {numericScores.map((s) => (
+                                    <div key={s.label} className="flex flex-col items-center">
+                                        <span className="text-[10px] text-gray-500 mb-1">{s.label}</span>
+                                        <span className={`w-10 h-10 flex items-center justify-center rounded-xl text-sm font-bold shadow-sm border ${
+                                            s.value! >= 8 ? 'bg-green-100 text-green-700 border-green-200' :
+                                            s.value! >= 5 ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                                            'bg-red-100 text-red-700 border-red-200'
+                                        }`}>
+                                            {s.value}
+                                        </span>
                                     </div>
-                                    {result.datos_extra.motivo_rechazo && (
-                                        <p className="text-sm text-gray-700 bg-white p-2 rounded-lg border border-gray-100">
-                                            <span className="font-semibold text-xs text-gray-500 block mb-1">{t('Motivo:')}</span>
-                                            {result.datos_extra.motivo_rechazo}
-                                        </p>
-                                    )}
-                                </div>
-                            )}
-                            {result.tipo_resultados === 'AGENDAMIENTO_CITA' && result.datos_extra.fecha_cita && (
-                                <div className="bg-white border border-purple-100 p-3 rounded-lg flex items-center gap-3">
-                                    <div className="bg-purple-100 p-2 rounded-full"><Calendar size={16} className="text-purple-700" /></div>
-                                    <div>
-                                        <p className="text-xs font-semibold text-gray-500">{t('Fecha de Cita')}</p>
-                                        <p className="font-bold text-purple-900 text-sm">{result.datos_extra.fecha_cita}</p>
-                                    </div>
-                                </div>
-                            )}
-                            {Array.isArray(result.datos_extra.puntos_clave) && result.datos_extra.puntos_clave.length > 0 && (
-                                <div>
-                                    <span className="text-xs font-semibold text-gray-600 mb-1 block">{t('Puntos Clave:')}</span>
-                                    <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
-                                        {result.datos_extra.puntos_clave.map((pt: string, idx: number) => (
-                                            <li key={idx}>{pt}</li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
-                            {result.tipo_resultados === 'ENCUESTA_MIXTA' && (
-                                <div className="space-y-2">
-                                    {mixedSummary.length === 0 ? (
-                                        <p className="text-sm text-gray-500 italic">{t('Sin respuestas estructuradas')}</p>
-                                    ) : (
-                                        mixedSummary.map((r, idx) => (
-                                            <div key={`${r.label}-${idx}`} className="bg-white p-2 rounded-lg border border-gray-100 text-sm flex items-start gap-2">
-                                                <span className="text-[11px] font-semibold text-gray-500 min-w-[140px]">{r.label}</span>
-                                                {r.type === 'number' ? (
-                                                    <span className="px-2 py-0.5 rounded bg-teal-50 border border-teal-200 text-teal-700 font-bold">{r.value}</span>
-                                                ) : r.type === 'choice' ? (
-                                                    <span className="px-2 py-0.5 rounded bg-purple-50 border border-purple-200 text-purple-700">{String(r.value)}</span>
-                                                ) : (
-                                                    <span className="text-gray-700 italic">{String(r.value)}</span>
-                                                )}
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
-                            )}
-                            {result.tipo_resultados !== 'CUALIFICACION_LEAD' && result.tipo_resultados !== 'AGENDAMIENTO_CITA' && result.tipo_resultados !== 'ENCUESTA_MIXTA' && !result.datos_extra.puntos_clave && (
-                                <div className="text-sm text-gray-700 bg-white p-3 rounded-lg border border-gray-100">
-                                    <pre className="text-xs font-mono whitespace-pre-wrap overflow-hidden">{JSON.stringify(result.datos_extra, null, 2)}</pre>
-                                </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Secciones específicas por tipo */}
+                    {result.tipo_resultados === 'CUALIFICACION_LEAD' && datosExtra && (
+                        <div className="flex flex-col gap-2">
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-semibold text-gray-600">{t('Estado:')}</span>
+                                {datosExtra.lead_cualificado ? (
+                                    <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-md font-bold flex items-center gap-1"><Target size={12} /> Cualificado</span>
+                                ) : (
+                                    <span className="bg-red-100 text-red-700 text-xs px-2 py-1 rounded-md font-bold flex items-center gap-1"><ThumbsDown size={12} /> No Cualificado</span>
+                                )}
+                            </div>
+                            {datosExtra.motivo_rechazo && (
+                                <p className="text-sm text-gray-700 bg-white p-2 rounded-lg border border-gray-100">
+                                    <span className="font-semibold text-xs text-gray-500 block mb-1">{t('Motivo:')}</span>
+                                    {datosExtra.motivo_rechazo}
+                                </p>
                             )}
                         </div>
                     )}
+
+                    {result.tipo_resultados === 'AGENDAMIENTO_CITA' && datosExtra?.fecha_cita && (
+                        <div className="bg-white border border-purple-100 p-3 rounded-lg flex items-center gap-3">
+                            <div className="bg-purple-100 p-2 rounded-full"><Calendar size={16} className="text-purple-700" /></div>
+                            <div>
+                                <p className="text-xs font-semibold text-gray-500">{t('Fecha de Cita')}</p>
+                                <p className="font-bold text-purple-900 text-sm">{datosExtra.fecha_cita}</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Key-Value elegante para datos_extra */}
+                    {simpleEntries.length > 0 && (
+                        <div>
+                            <div className="flex items-center gap-2 mb-2">
+                                <Database size={14} className="text-indigo-500" />
+                                <h4 className="font-bold text-gray-800 text-xs uppercase tracking-wider">{t('Datos Recopilados')}</h4>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {simpleEntries.map(([key, value]) => (
+                                    <div key={key} className="flex items-start gap-2 bg-white p-2.5 rounded-lg border border-gray-100">
+                                        <span className="text-[11px] font-semibold text-gray-500 min-w-[100px] shrink-0 pt-0.5">
+                                            {prettifyKey(key)}
+                                        </span>
+                                        <span className={`px-2 py-0.5 rounded-md text-xs font-medium border ${getValueStyle(value)}`}>
+                                            {formatValue(value)}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Datos complejos (arrays, objetos anidados) */}
+                    {complexEntries.length > 0 && (
+                        <div className="space-y-2">
+                            {complexEntries.map(([key, value]) => (
+                                <div key={key} className="bg-white p-3 rounded-lg border border-gray-100">
+                                    <span className="text-[11px] font-semibold text-gray-500 block mb-1">{prettifyKey(key)}</span>
+                                    {Array.isArray(value) ? (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {value.map((item, idx) => (
+                                                <span key={idx} className="px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-100 text-[10px] text-indigo-700 font-medium">
+                                                    {typeof item === 'object' ? JSON.stringify(item) : String(item)}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <pre className="text-xs font-mono text-gray-600 whitespace-pre-wrap overflow-hidden bg-gray-50 p-2 rounded">
+                                            {JSON.stringify(value, null, 2)}
+                                        </pre>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Comentarios */}
+                    {result.comentarios && result.comentarios !== "Sin comentarios" && (
+                        <div className="bg-yellow-50 border border-yellow-100 p-3 rounded-lg">
+                            <span className="text-[10px] text-yellow-800 font-bold uppercase tracking-wider block mb-1">{t('Comentarios')}</span>
+                            <p className="text-sm text-gray-800 italic">"{result.comentarios}"</p>
+                        </div>
+                    )}
+
+                    {/* Sin datos */}
+                    {numericScores.length === 0 && simpleEntries.length === 0 && complexEntries.length === 0 && !result.comentarios && (
+                        <p className="text-sm text-gray-400 italic">{t('No se recopilaron datos estructurados en esta llamada.')}</p>
+                    )}
                 </div>
 
+                {/* Transcripción */}
                 <div className="p-6 overflow-y-auto space-y-6 bg-gray-50/20 flex-1">
                     {result.transcription ? (
                         result.transcription.split('\n').filter(l => l.trim()).map((line, i) => {

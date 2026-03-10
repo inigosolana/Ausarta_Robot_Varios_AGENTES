@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Download, Search, RefreshCw, FileText, Target, ThumbsDown, Clock, Calendar, Bot, User, Sparkles } from 'lucide-react';
+import { Download, Search, RefreshCw, FileText, Target, ThumbsDown, Clock, Calendar, Database, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -166,9 +166,10 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     const activeAgentType = useMemo(() => {
         if (selectedTipo !== 'all') return selectedTipo;
         if (filteredResults.length > 0 && (selectedAgentId !== 'all' || campaignId)) {
-            return filteredResults[0].tipo_resultados || 'PREGUNTAS_ABIERTAS';
+            return filteredResults[0].tipo_resultados || 'GENERAL';
         }
-        return null;
+        // Fallback: siempre mostrar dashboard genérico con donut de disposición
+        return 'GENERAL';
     }, [filteredResults, selectedTipo, selectedAgentId, campaignId]);
 
     const exportCSV = () => {
@@ -326,7 +327,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
 
             {/* Dashboard Section */}
             {
-                activeAgentType && filteredResults.length > 0 && (
+                filteredResults.length > 0 && (
                     <div className="mb-6">
                         <AnalyticsDashboard
                             tipoResultados={activeAgentType}
@@ -553,9 +554,20 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                                     </div>
                                                 );
                                             } else {
+                                                // Tipo genérico: mostrar badge de tipo + "Ver datos" si hay datos_extra
+                                                const hasExtra = row.datos_extra && typeof row.datos_extra === 'object' && Object.keys(row.datos_extra).length > 0;
                                                 return (
-                                                    <div className="flex justify-center items-center">
+                                                    <div className="flex flex-col items-center gap-1">
                                                         <Badge />
+                                                        {hasExtra && (
+                                                            <button
+                                                                onClick={() => openTranscript(row)}
+                                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 border border-blue-200 text-[10px] text-blue-700 font-medium hover:bg-blue-100 transition-colors"
+                                                            >
+                                                                <Database size={10} />
+                                                                Ver datos
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 );
                                             }

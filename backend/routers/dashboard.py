@@ -196,7 +196,7 @@ async def get_all_results(
 ):
     if not supabase: return []
     try:
-        cols = "id, telefono, fecha, completada, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, campaign_id, campaign_name, agent_id, status, llm_model, seconds_used, empresa_id"
+        cols = "id, telefono, fecha, completada, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, campaign_id, campaign_name, agent_id, status, llm_model, seconds_used, empresa_id, datos_extra"
         query = supabase.table("encuestas").select(cols)
         if empresa_id: query = query.eq("empresa_id", empresa_id)
         if agent_id: query = query.eq("agent_id", agent_id)
@@ -268,6 +268,47 @@ async def get_empresas_list():
         return res.data
     except Exception as e:
         logger.error(f"Error empresas list: {e}")
+        return []
+
+@router.get("/dashboard/insights")
+async def get_recent_insights(
+    empresa_id: Optional[int] = None,
+    agent_id: Optional[int] = None,
+    campaign_id: Optional[int] = None,
+    limit: int = 5
+):
+    """Últimas llamadas con datos_extra no vacío — para la tarjeta de Insights."""
+    if not supabase:
+        return []
+    try:
+        cols = "id, telefono, fecha, status, datos_extra, campaign_name, tipo_resultados"
+        query = supabase.table("encuestas").select(cols).neq("datos_extra", None)
+        if empresa_id:
+            query = query.eq("empresa_id", empresa_id)
+        if agent_id:
+            query = query.eq("agent_id", agent_id)
+        if campaign_id:
+            query = query.eq("campaign_id", campaign_id)
+        response = query.order("fecha", desc=True).limit(limit).execute()
+
+        insights = []
+        for r in (response.data or []):
+            extra = r.get("datos_extra")
+            if not extra or (isinstance(extra, dict) and len(extra) == 0):
+                continue
+            keys_preview = list(extra.keys())[:4] if isinstance(extra, dict) else []
+            insights.append({
+                "id": r.get("id"),
+                "telefono": r.get("telefono"),
+                "fecha": r.get("fecha"),
+                "status": r.get("status"),
+                "campaign_name": r.get("campaign_name"),
+                "keys": keys_preview,
+                "datos_extra": extra,
+            })
+        return insights[:limit]
+    except Exception as e:
+        logger.error(f"Error insights: {e}")
         return []
 
 @router.get("/alerts")

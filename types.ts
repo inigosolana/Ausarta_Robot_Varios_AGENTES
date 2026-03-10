@@ -153,6 +153,20 @@ export interface SurveyResult {
   llm_model: string | null;
   seconds_used?: number | null;
   tipo_resultados?: string | null;
-  datos_extra?: any;
+  datos_extra?: Record<string, any> | null;
   customer_name?: string | null;
 }
+
+// Mapeo canónico de disposición para gráficos
+export type CallDisposition = 'completed' | 'incomplete' | 'rejected' | 'failed' | 'pending';
+
+export function getCallDisposition(status: string | null): CallDisposition {
+  if (!status) return 'pending';
+  const s = status.toLowerCase();
+  if (s === 'completada' || s === 'completed') return 'completed';
+  if (s === 'parcial' || s === 'incomplete') return 'incomplete';
+  if (s === 'rechazada' || s === 'rejected_opt_out' || s === 'rejected') return 'rejected';
+  if (s === 'fallida' || s === 'failed' || s === 'no_contesta' || s === 'unreached') return 'failed';
+  return 'pending';
+}
+
