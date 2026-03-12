@@ -313,6 +313,7 @@ async def get_agent_config_by_survey(survey_id: int):
             "instructions": agent_data.get("instructions", "Eres un asistente"),
             "critical_rules": agent_data.get("critical_rules", ""),
             "voice_id": agent_data.get("voice_id") or ai_data.get("tts_voice") or DEFAULT_AUSARTA_VOICE_ID,
+            "tts_model": ai_data.get("tts_model") or "sonic-multilingual",
             "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
             "language": ai_data.get("language") or "es",
             "stt_provider": ai_data.get("stt_provider") or "deepgram",

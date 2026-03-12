@@ -52,7 +52,7 @@ logger = logging.getLogger("agent-dynamic")
 load_dotenv()
 
 ROOM_PREFIX = os.getenv("LIVEKIT_ROOM_PREFIX", "llamada_ausarta_")
-DEFAULT_CARTESIA_VOICE = "b5aa8098-49ef-475d-89b0-c9262ecf33fd"  # Chica castellano Cartesia
+DEFAULT_CARTESIA_VOICE = os.getenv("VOICE_ID_AUSARTA", "b5aa8098-49ef-475d-89b0-c9262ecf33fd")
 DISPATCH_AGENT_NAME = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
 
 # ============================================================================
@@ -161,9 +161,9 @@ def _is_uuid_like(value: str) -> bool:
     )
 
 
-def _build_tts_plugin(voice_id: str, language: str, speaking_speed: float):
+def _build_tts_plugin(voice_id: str, language: str, speaking_speed: float, tts_model: str = "sonic-multilingual"):
     """
-    Crea el plugin TTS aplicando voz + velocidad.
+    Crea el plugin TTS aplicando voz + velocidad + modelo.
     Si el SDK no soporta el parámetro speed en la versión actual, hace fallback seguro.
     """
     safe_speed = 1.0
@@ -179,17 +179,19 @@ def _build_tts_plugin(voice_id: str, language: str, speaking_speed: float):
         )
         safe_voice = DEFAULT_CARTESIA_VOICE
 
+    safe_model = (tts_model or "sonic-multilingual").strip()
+
     try:
         return cartesia.TTS(
-            model="sonic-multilingual",
+            model=safe_model,
             voice=safe_voice,
             language=language,
             speed=safe_speed,
         )
     except TypeError:
-        logger.warning("⚠️ cartesia.TTS no soporta 'speed' en esta versión. Usando fallback sin speed.")
+        logger.warning(f"⚠️ cartesia.TTS con modelo {safe_model} no soporta 'speed' en esta versión. Usando fallback sin speed.")
         return cartesia.TTS(
-            model="sonic-multilingual",
+            model=safe_model,
             voice=safe_voice,
             language=language,
         )
@@ -363,6 +365,7 @@ class DynamicAgent(Agent):
         self.company_context = agent_config.get("company_context", "") or ""
         self.enthusiasm_level = agent_config.get("enthusiasm_level", "Normal") or "Normal"
         self.voice_id = agent_config.get("voice_id", "") or ""
+        self.tts_model = agent_config.get("tts_model", "sonic-multilingual")
         self.speaking_speed = agent_config.get("speaking_speed", 1.0)
         self.hangup_started = False
         
@@ -798,12 +801,13 @@ async def entrypoint(ctx: JobContext):
         agent_instance = DynamicAgent(room_name=room_name, agent_config=agent_config)
         
         llm_model = agent_config.get("llm_model", "llama-3.3-70b-versatile")
-        voice_id = agent_config.get("voice_id", "b5aa8098-49ef-475d-89b0-c9262ecf33fd")
+        voice_id = agent_config.get("voice_id", os.getenv("VOICE_ID_AUSARTA", "b5aa8098-49ef-475d-89b0-c9262ecf33fd"))
+        tts_model = agent_config.get("tts_model", "sonic-multilingual")
         language = agent_config.get("language", "es")
         stt_provider = agent_config.get("stt_provider", "deepgram")
         speaking_speed = agent_config.get("speaking_speed", 1.0)
         
-        logger.info(f"🤖 [{job_id}] Config: LLM='{llm_model}', Voice='{voice_id}', Lang='{language}', STT='{stt_provider}', Speed='{speaking_speed}'")
+        logger.info(f"🤖 [{job_id}] Config: LLM='{llm_model}', Voice='{voice_id}', Model='{tts_model}', Lang='{language}', STT='{stt_provider}', Speed='{speaking_speed}'")
 
         if language in ["eu", "gl"] or stt_provider == "openai":
             stt_plugin = openai.STT(language=language)
@@ -844,7 +848,12 @@ async def entrypoint(ctx: JobContext):
             vad=vad_model,
             stt=stt_plugin,
             llm=final_llm,
-            tts=_build_tts_plugin(voice_id=voice_id, language=language, speaking_speed=speaking_speed),
+            tts=_build_tts_plugin(
+                voice_id=voice_id, 
+                language=language, 
+                speaking_speed=speaking_speed,
+                tts_model=tts_model
+            ),
             min_endpointing_delay=endpointing_min,
             max_endpointing_delay=endpointing_max,
             preemptive_generation=True,
