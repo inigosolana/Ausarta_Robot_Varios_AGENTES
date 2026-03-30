@@ -31,7 +31,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
     const { isRole, hasPermission, profile, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
 
-    const isRegularUser = isRole('usuario');
+    const isRegularUser = isRole('user');
 
     const isEditing = !!agent?.id;
     const [empresas, setEmpresas] = useState<Empresa[]>([]);

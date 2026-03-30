@@ -138,7 +138,7 @@ async def _fallback_create_user(payload: dict) -> str:
     admin_client = create_client(os.getenv("SUPABASE_URL"), service_role_key)
 
     if not password:
-        options = {"data": {"full_name": full_name, "role": role}}
+        options: dict = {"data": {"full_name": full_name, "role": role}}
         redirect_to = payload.get("redirect_to") or os.getenv("INVITE_REDIRECT_TO") or os.getenv("FRONTEND_URL")
         if redirect_to:
             options["redirect_to"] = redirect_to

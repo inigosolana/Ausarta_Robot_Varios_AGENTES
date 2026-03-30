@@ -154,8 +154,8 @@ async def get_campaign_details(campaign_id: int):
     if not supabase: return {"error": "No DB"}
     try:
         res_camp, res_leads = await asyncio.gather(
-            asyncio.to_thread(lambda: supabase.table("campaigns").select("*").eq("id", campaign_id).execute()),
-            asyncio.to_thread(lambda: supabase.table("campaign_leads").select("*").eq("campaign_id", campaign_id).execute())
+            asyncio.to_thread(lambda: supabase.table("campaigns").select("*").eq("id", campaign_id).execute()), # type: ignore
+            asyncio.to_thread(lambda: supabase.table("campaign_leads").select("*").eq("campaign_id", campaign_id).execute()) # type: ignore
         )
         if not res_camp.data:
             return JSONResponse(status_code=404, content={"error": "Campaign not found"})
@@ -200,8 +200,12 @@ async def get_campaign_details(campaign_id: int):
                     logger.error(f"Error fetching surveys for campaign: {e}")
 
         # Agregar datos de encuesta a cada lead y calcular métricas
-        sum_com = sum_ins = sum_rap = 0
-        count_com = count_ins = count_rap = 0
+        sum_com: float = 0
+        sum_ins: float = 0
+        sum_rap: float = 0
+        count_com: int = 0
+        count_ins: int = 0
+        count_rap: int = 0
         status_counts: dict[str, int] = {}
         enriched_leads = []
 
@@ -218,11 +222,11 @@ async def get_campaign_details(campaign_id: int):
                 l["comentarios"] = survey.get("comentarios")
                 l["transcription_preview"] = survey.get("transcription")
                 if survey.get("puntuacion_comercial") is not None:
-                    sum_com += survey["puntuacion_comercial"]; count_com += 1
+                    sum_com += float(survey["puntuacion_comercial"]); count_com += 1
                 if survey.get("puntuacion_instalador") is not None:
-                    sum_ins += survey["puntuacion_instalador"]; count_ins += 1
+                    sum_ins += float(survey["puntuacion_instalador"]); count_ins += 1
                 if survey.get("puntuacion_rapidez") is not None:
-                    sum_rap += survey["puntuacion_rapidez"]; count_rap += 1
+                    sum_rap += float(survey["puntuacion_rapidez"]); count_rap += 1
             enriched_leads.append(l)
 
         total_leads = len(leads)

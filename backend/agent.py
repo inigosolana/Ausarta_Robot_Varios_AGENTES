@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Optional, Any
 import os
 import aiohttp
 import asyncio
@@ -37,8 +37,10 @@ from livekit.plugins import (
 )
 
 # --- CONFIGURACIÓN DE LOGS ---
-sys.stdout.reconfigure(line_buffering=True)
-sys.stderr.reconfigure(line_buffering=True)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True) # type: ignore
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(line_buffering=True) # type: ignore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -427,7 +429,7 @@ class DynamicAgent(Agent):
         full_instructions += "SIGUE ESTE GUION AL PIE DE LA LETRA:\n"
         full_instructions += f"{agent_instructions}\n"
 
-        super().__init__(instructions=full_instructions)
+        super().__init__(instructions=full_instructions) # type: ignore
         logger.info(f"Agente '{agent_name}' creado (Survey: {self.survey_id})")
 
     async def on_enter(self, *args, **kwargs) -> None:
@@ -504,7 +506,7 @@ class DynamicAgent(Agent):
         if status == 'completed' and not comentarios:
             comentarios = "Sin comentarios"
 
-        payload = {
+        payload: dict[str, Any] = {
             "id_encuesta": real_id,
             "nota_comercial": nota_comercial,
             "nota_instalador": nota_instalador,
@@ -662,7 +664,7 @@ async def fetch_agent_config(survey_id: str, expected_empresa_id: str = "0") -> 
 # ============================================================================
 # FUNCIÓN PARA ENVIAR ALERTAS A N8N
 # ============================================================================
-async def notify_n8n_alert(message: str, details: dict = None):
+async def notify_n8n_alert(message: str, details: Optional[dict] = None):
     webhook_url = os.getenv("N8N_WEBHOOK_URL_ALERTS")
     if not webhook_url:
         return
@@ -780,7 +782,7 @@ async def entrypoint(ctx: JobContext):
         await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
         
         # --- CONTROL DE DUPLICIDAD ---
-        agent_participants = [p for p in ctx.room.remote_participants.values() if getattr(p, 'kind', None) == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT or p.identity.startswith("agent-")]
+        agent_participants = [p for p in ctx.room.remote_participants.values() if getattr(p, 'kind', None) == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT or getattr(p, 'identity', '').startswith("agent-")]
         if len(agent_participants) > 1: # Ya estamos nosotros (1), si hay más (1+) es que hay otro
             logger.warning(f"⚠️ [{job_id}] Ya un agente en la sala {room_name}. Cancelando duplicado.")
             is_duplicate = True
@@ -816,7 +818,7 @@ async def entrypoint(ctx: JobContext):
             stt_plugin = deepgram.STT(model="nova-3", language=language)
             logger.info("🎙️ Usando STT: Deepgram Nova-3")
 
-        from livekit.agents.llm.fallback_adapter import FallbackAdapter
+        from livekit.agents.llm.fallback_adapter import FallbackAdapter  # type: ignore
 
         # LLM Principal (Groq)
         main_llm = openai.LLM(
@@ -903,9 +905,12 @@ async def entrypoint(ctx: JobContext):
                         # Cualquier otro participante remoto se considera intruso.
                         logger.warning(f"👻 [{job_id}] Intruso detectado en sala {room_name}: '{identity}'. Expulsando...")
                         try:
+                            from livekit import api
+                            lkapi = api.LiveKitAPI()
                             await lkapi.room.remove_participant(
                                 api.RoomParticipantIdentity(room=room_name, identity=identity)
                             )
+                            await lkapi.aclose()
                             logger.info(f"✅ [{job_id}] Intruso '{identity}' expulsado de {room_name}")
                         except Exception as kick_err:
                             logger.error(f"❌ [{job_id}] Error expulsando intruso '{identity}': {kick_err}")
@@ -970,8 +975,8 @@ async def entrypoint(ctx: JobContext):
 
                         if (
                             pending_since is not None
-                            and (now - pending_since) >= trigger_seconds
-                            and (now - last_backchannel_at) >= cooldown_seconds
+                            and (float(now) - float(pending_since)) >= trigger_seconds
+                            and (float(now) - float(last_backchannel_at)) >= cooldown_seconds
                         ):
                             try:
                                 await session.say(random.choice(fillers), allow_interruptions=True)
@@ -1178,7 +1183,7 @@ async def entrypoint(ctx: JobContext):
                     # 2) Teclado dinámico: ráfagas extra según complejidad de la intervención previa
                     try:
                         if 'bg_player' in locals():
-                            dyn_volume, bursts = _estimate_thinking_complexity(runtime_state.get("last_user_text", ""))
+                            dyn_volume, bursts = _estimate_thinking_complexity(str(runtime_state.get("last_user_text", "")))
                             for _ in range(bursts):
                                 bg_player.play(AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=dyn_volume), loop=False)
                     except Exception as k_err:
