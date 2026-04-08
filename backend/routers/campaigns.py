@@ -154,8 +154,8 @@ async def get_campaign_details(campaign_id: int):
     if not supabase: return {"error": "No DB"}
     try:
         res_camp, res_leads = await asyncio.gather(
-            asyncio.to_thread(lambda: supabase.table("campaigns").select("*").eq("id", campaign_id).execute()), # type: ignore
-            asyncio.to_thread(lambda: supabase.table("campaign_leads").select("*").eq("campaign_id", campaign_id).execute()) # type: ignore
+            asyncio.to_thread(supabase.table("campaigns").select("*").eq("id", campaign_id).execute), # type: ignore
+            asyncio.to_thread(supabase.table("campaign_leads").select("*").eq("campaign_id", campaign_id).execute) # type: ignore
         )
         if not res_camp.data:
             return JSONResponse(status_code=404, content={"error": "Campaign not found"})
@@ -181,7 +181,7 @@ async def get_campaign_details(campaign_id: int):
             try:
                 cols = "id, status, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, transcription, datos_extra, tipo_resultados, fecha, llm_model"
                 res_surveys = await asyncio.to_thread(
-                    lambda: supabase.table("encuestas").select(cols).in_("id", call_ids).execute()
+                    supabase.table("encuestas").select(cols).in_("id", call_ids).execute
                 )
                 surveys_map = {s["id"]: s for s in res_surveys.data}
             except Exception as e:
@@ -190,7 +190,7 @@ async def get_campaign_details(campaign_id: int):
                     try:
                         fallback_cols = "id, status, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, transcription, datos_extra, fecha, llm_model"
                         res_surveys = await asyncio.to_thread(
-                            lambda: supabase.table("encuestas").select(fallback_cols).in_("id", call_ids).execute()
+                            supabase.table("encuestas").select(fallback_cols).in_("id", call_ids).execute
                         )
                         surveys_map = {s["id"]: s for s in res_surveys.data}
                         logger.warning("encuestas.tipo_resultados no existe; usando select fallback sin esa columna.")
@@ -200,9 +200,9 @@ async def get_campaign_details(campaign_id: int):
                     logger.error(f"Error fetching surveys for campaign: {e}")
 
         # Agregar datos de encuesta a cada lead y calcular métricas
-        sum_com: float = 0
-        sum_ins: float = 0
-        sum_rap: float = 0
+        sum_com: float = 0.0
+        sum_ins: float = 0.0
+        sum_rap: float = 0.0
         count_com: int = 0
         count_ins: int = 0
         count_rap: int = 0
@@ -222,11 +222,14 @@ async def get_campaign_details(campaign_id: int):
                 l["comentarios"] = survey.get("comentarios")
                 l["transcription_preview"] = survey.get("transcription")
                 if survey.get("puntuacion_comercial") is not None:
-                    sum_com += float(survey["puntuacion_comercial"]); count_com += 1
+                    sum_com = sum_com + float(survey["puntuacion_comercial"]) # type: ignore
+                    count_com = count_com + 1 # type: ignore
                 if survey.get("puntuacion_instalador") is not None:
-                    sum_ins += float(survey["puntuacion_instalador"]); count_ins += 1
+                    sum_ins = sum_ins + float(survey["puntuacion_instalador"]) # type: ignore
+                    count_ins = count_ins + 1 # type: ignore
                 if survey.get("puntuacion_rapidez") is not None:
-                    sum_rap += float(survey["puntuacion_rapidez"]); count_rap += 1
+                    sum_rap = sum_rap + float(survey["puntuacion_rapidez"]) # type: ignore
+                    count_rap = count_rap + 1 # type: ignore
             enriched_leads.append(l)
 
         total_leads = len(leads)
@@ -246,12 +249,12 @@ async def get_campaign_details(campaign_id: int):
         campaign["rejected_leads"]  = rejected
 
         metrics = {
-            "avg_comercial": round(sum_com / count_com, 1) if count_com else 0,
-            "avg_instalador": round(sum_ins / count_ins, 1) if count_ins else 0,
-            "avg_rapidez": round(sum_rap / count_rap, 1) if count_rap else 0,
-            "avg_overall": round(
-                (sum_com + sum_ins + sum_rap) / (count_com + count_ins + count_rap), 1
-            ) if (count_com + count_ins + count_rap) else 0,
+            "avg_comercial": round(float(sum_com / count_com), 1) if count_com else 0.0, # type: ignore
+            "avg_instalador": round(float(sum_ins / count_ins), 1) if count_ins else 0.0, # type: ignore
+            "avg_rapidez": round(float(sum_rap / count_rap), 1) if count_rap else 0.0, # type: ignore
+            "avg_overall": round( # type: ignore
+                float((sum_com + sum_ins + sum_rap) / (count_com + count_ins + count_rap)), 1 # type: ignore
+            ) if (count_com + count_ins + count_rap) else 0.0, # type: ignore
         }
 
         return {"campaign": campaign, "metrics": metrics, "leads": enriched_leads}
@@ -443,7 +446,7 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
         # 1. Crear encuesta en BD y vincular al lead
         try:
             enc_res = await asyncio.to_thread(
-                lambda: supabase.table("encuestas").insert({
+                supabase.table("encuestas").insert({
                     "telefono": phone,
                     "nombre_cliente": lead.get("customer_name", "Cliente"),
                     "fecha": datetime.now(timezone.utc).isoformat(),
@@ -453,22 +456,22 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
                     "empresa_id": empresa_id,
                     "campaign_id": campaign_id,
                     "campaign_name": campaign.get("name"),
-                }).execute()
+                }).execute
             )
             encuesta_id = enc_res.data[0]["id"]
             await asyncio.to_thread(
-                lambda: supabase.table("campaign_leads").update({
+                supabase.table("campaign_leads").update({
                     "call_id": encuesta_id,
                     "status": "calling",
                     "last_call_at": datetime.now(timezone.utc).isoformat(),
-                }).eq("id", lead_id).execute()
+                }).eq("id", lead_id).execute
             )
         except Exception as e:
             logger.error(f"❌ [Drip] Error creando encuesta para lead {lead_id}: {e}")
             await asyncio.to_thread(
-                lambda: supabase.table("campaign_leads").update(
+                supabase.table("campaign_leads").update(
                     {"status": "failed", "error_msg": str(e)}
-                ).eq("id", lead_id).execute()
+                ).eq("id", lead_id).execute
             )
             return
 
@@ -515,12 +518,12 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
         except Exception as sip_err:
             logger.error(f"❌ [Drip] Error SIP lead {lead_id}: {sip_err}")
             await asyncio.to_thread(
-                lambda: supabase.table("campaign_leads").update(
+                supabase.table("campaign_leads").update(
                     {"status": "failed", "error_msg": str(sip_err)}
-                ).eq("id", lead_id).execute()
+                ).eq("id", lead_id).execute
             )
             await asyncio.to_thread(
-                lambda: supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute()
+                supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute
             )
             return
 
@@ -537,8 +540,8 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
             waited += POLL_INTERVAL_S
             try:
                 enc_check = await asyncio.to_thread(
-                    lambda: supabase.table("encuestas").select("status")
-                        .eq("id", encuesta_id).limit(1).execute()
+                    supabase.table("encuestas").select("status")
+                        .eq("id", encuesta_id).limit(1).execute
                 )
                 current = enc_check.data[0].get("status") if enc_check.data else None
                 if current in TERMINAL:
@@ -552,7 +555,7 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
                     except Exception:
                         pass
                     await asyncio.to_thread(
-                        lambda: supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute()
+                        supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute
                     )
                     await _apply_retry_after_failure(lead_id=lead_id, campaign=campaign)
                     break
@@ -580,7 +583,7 @@ async def _apply_retry_after_failure(lead_id: int, campaign: dict) -> None:
     max_retries = int(campaign.get("retries_count") or 3)
     try:
         lr = await asyncio.to_thread(
-            lambda: supabase.table("campaign_leads").select("retries_attempted").eq("id", lead_id).limit(1).execute()
+            supabase.table("campaign_leads").select("retries_attempted").eq("id", lead_id).limit(1).execute
         )
         current_retries = (lr.data[0].get("retries_attempted") if lr.data else 0) or 0
     except Exception:
@@ -593,7 +596,7 @@ async def _apply_retry_after_failure(lead_id: int, campaign: dict) -> None:
         lead_update["next_retry_at"] = (datetime.utcnow() + timedelta(seconds=retry_seconds)).isoformat()
     try:
         await asyncio.to_thread(
-            lambda: supabase.table("campaign_leads").update(lead_update).eq("id", lead_id).execute()
+            supabase.table("campaign_leads").update(lead_update).eq("id", lead_id).execute
         )
     except Exception as e:
         logger.error(f"[Drip] Error programando reintento lead {lead_id}: {e}")
@@ -603,12 +606,12 @@ async def _check_campaign_completion(campaign_id: int) -> bool:
     """Retorna True si no quedan leads en estado pendiente/calling."""
     try:
         res = await asyncio.to_thread(
-            lambda: supabase.table("campaign_leads")
+            supabase.table("campaign_leads")
                 .select("id")
                 .eq("campaign_id", campaign_id)
                 .in_("status", ["pending", "calling"])
                 .limit(1)
-                .execute()
+                .execute
         )
         return len(res.data) == 0
     except Exception:
@@ -633,10 +636,10 @@ async def campaign_scheduler_loop():
     while True:
         try:
             active_res = await asyncio.to_thread(
-                lambda: supabase.table("campaigns")
+                supabase.table("campaigns")
                     .select("*")
                     .in_("status", ["active", "running"])
-                    .execute()
+                    .execute
             )
             campaigns = active_res.data or []
 
@@ -665,14 +668,14 @@ async def campaign_scheduler_loop():
                     # Usamos variable local explícita para evitar cierre sobre 'camp' que puede mutar
                     camp_id_local = camp["id"]
                     leads_res = await asyncio.to_thread(
-                        lambda: supabase.table("campaign_leads")
+                        supabase.table("campaign_leads")
                             .select("*")
                             .eq("campaign_id", camp_id_local)
                             .eq("status", "pending")
                             .or_(f"next_retry_at.is.null,next_retry_at.lte.{now_iso}")
                             .order("next_retry_at", desc=False, nullsfirst=True)
                             .limit(1)
-                            .execute()
+                            .execute
                     )
                 except Exception as fetch_err:
                     logger.error(f"[Scheduler] Error leyendo leads campaña {camp['id']}: {fetch_err}")
@@ -685,10 +688,10 @@ async def campaign_scheduler_loop():
                         try:
                             camp_id_done = camp["id"]
                             await asyncio.to_thread(
-                                lambda: supabase.table("campaigns")
+                                supabase.table("campaigns")
                                     .update({"status": "completed"})
                                     .eq("id", camp_id_done)
-                                    .execute()
+                                    .execute
                             )
                             logger.info(f"✅ [Scheduler] Campaña {camp['id']} completada.")
                         except Exception as done_err:
@@ -752,7 +755,7 @@ async def receive_call_result(result: CallResultWebhook):
             "error_msg": None if result.status in ("completed", "completada") else f"Incidencia: {result.status}"
         }
         await asyncio.to_thread(
-            lambda: supabase.table("campaign_leads").update(lead_update).eq("id", result.lead_id).execute()
+            supabase.table("campaign_leads").update(lead_update).eq("id", result.lead_id).execute
         )
         return {"status": "ok"}
     except Exception as e:

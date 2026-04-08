@@ -1,5 +1,6 @@
 from fastapi import APIRouter
-from typing import Optional
+from typing import Optional, Any
+from collections import defaultdict
 from services.supabase_service import supabase, get_ui_cache
 from services.livekit_service import lkapi
 import os
@@ -111,7 +112,7 @@ async def get_dashboard_stats(
         )
         total_calls, completed_calls, pending_calls, scores_data, status_breakdown, is_question_based = results
 
-        avg_comercial = 0; avg_instalador = 0; avg_rapidez = 0; avg_overall = 0
+        avg_comercial = 0.0; avg_instalador = 0.0; avg_rapidez = 0.0; avg_overall = 0.0
         if scores_data:
             vals_com = [r['puntuacion_comercial'] for r in scores_data if r.get('puntuacion_comercial') is not None]
             vals_ins = [r['puntuacion_instalador'] for r in scores_data if r.get('puntuacion_instalador') is not None]
@@ -222,9 +223,9 @@ async def get_top_performers(
         if not rows:
             return {"top_campaign": None, "top_agent": None}
 
-        from collections import defaultdict
-        campaign_stats = defaultdict(lambda: {"total": 0, "completed": 0, "name": ""})
-        agent_stats = defaultdict(lambda: {"total": 0, "completed": 0})
+
+        campaign_stats: dict[str, Any] = defaultdict(lambda: {"total": 0, "completed": 0, "name": ""})
+        agent_stats: dict[str, Any] = defaultdict(lambda: {"total": 0, "completed": 0})
 
         for r in rows:
             cid = r.get("campaign_id")
@@ -384,7 +385,7 @@ async def get_recent_insights(
             extra = r.get("datos_extra")
             if not extra or (isinstance(extra, dict) and len(extra) == 0):
                 continue
-            keys_preview = list(extra.keys())[:4] if isinstance(extra, dict) else []
+            keys_preview = list(extra.keys())[:4] if isinstance(extra, dict) else [] # type: ignore
             insights.append({
                 "id": r.get("id"),
                 "telefono": r.get("telefono"),
@@ -448,7 +449,7 @@ async def get_usage_stats(
         res = await loop.run_in_executor(executor, query.execute)
         
         total_seconds = sum(r.get('seconds_used') or 0 for r in res.data)
-        model_stats = {}
+        model_stats: dict[str, dict[str, Any]] = {}
         for r in res.data:
             model = r.get('llm_model') or "Standard"
             if model not in model_stats:

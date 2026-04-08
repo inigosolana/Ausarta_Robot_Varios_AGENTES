@@ -79,7 +79,8 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
     logger.info(f"📥 [guardar-encuesta] encuesta={datos.id_encuesta}: {datos.dict(exclude_none=True)}")
 
     # --- Construir payload de actualización ---
-    update_data = {}
+    from typing import Any
+    update_data: dict[str, Any] = {}
     if datos.nota_comercial is not None:  update_data["puntuacion_comercial"] = datos.nota_comercial
     if datos.nota_instalador is not None: update_data["puntuacion_instalador"] = datos.nota_instalador
     if datos.nota_rapidez is not None:    update_data["puntuacion_rapidez"] = datos.nota_rapidez
@@ -484,11 +485,11 @@ async def _handle_room_finished(encuesta_id: int, room_name: str, room_metadata:
         return
     try:
         res = await asyncio.to_thread(
-            lambda: supabase.table("encuestas")
+            supabase.table("encuestas")
                 .select("status, empresa_id, telefono")
                 .eq("id", encuesta_id)
                 .limit(1)
-                .execute()
+                .execute
         )
         if not res.data:
             return
@@ -500,7 +501,7 @@ async def _handle_room_finished(encuesta_id: int, room_name: str, room_metadata:
             # La sala cerró pero el agente no guardó un status final → fallida reintentable
             logger.warning(f"📵 [LK Webhook] Sala {room_name} cerrada sin status terminal. Forzando 'failed'. metadata={room_metadata or {}}")
             await asyncio.to_thread(
-                lambda: supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute()
+                supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute
             )
             # Propagar a campaign_leads
             await _propagate_to_lead(encuesta_id, "failed", enc)
