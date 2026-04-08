@@ -8,6 +8,7 @@ livekit-plugins-silero
 livekit-plugins-google
 livekit-plugins-noise-cancellation
 redis
+arq
 python-dotenv
 requests
 aiohttp

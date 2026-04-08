@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 import { AnalyticsDashboard } from '../components/AnalyticsDashboard';
 import { DateRangePicker, getDatesFromRange, DateRange } from '../components/DateRangePicker';
 import { CallResultModal } from '../components/CallResultModal';
-import { SurveyResult } from '../types';
+import { SurveyResult, ExtractionSchemaProperty } from '../types';
 
 interface Props {
     empresaId?: number;
@@ -14,9 +14,10 @@ interface Props {
     campaignId?: number;
     title?: string;
     hideHeader?: boolean;
+    schema?: ExtractionSchemaProperty[];
 }
 
-const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, hideHeader }) => {
+const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, hideHeader, schema }) => {
     const { profile, isRole, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
 
@@ -332,6 +333,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                         <AnalyticsDashboard
                             tipoResultados={activeAgentType}
                             results={filteredResults}
+                            schema={schema}
                         />
                     </div>
                 )

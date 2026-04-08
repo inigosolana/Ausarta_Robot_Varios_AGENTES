@@ -85,6 +85,13 @@ export interface AIConfig {
   language: string;
 }
 
+export interface ExtractionSchemaProperty {
+  key: string;
+  type: 'boolean' | 'number' | 'text' | 'enum' | string;
+  label: string;
+  options?: string[];
+}
+
 export interface Campaign {
   id: number;
   name: string;
@@ -98,6 +105,7 @@ export interface Campaign {
   called_leads?: number;
   failed_leads?: number;
   pending_leads?: number;
+  extraction_schema?: ExtractionSchemaProperty[];
 }
 
 export interface VoiceAgent {

@@ -63,6 +63,49 @@ services:
       timeout: 10s
       retries: 3
 
+  arq-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ausarta-arq-worker
+    restart: unless-stopped
+    command: ["arq", "backend.worker.WorkerSettings"]
+    working_dir: /app
+    environment:
+      - LIVEKIT_URL=${LIVEKIT_URL}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - SIP_OUTBOUND_TRUNK_ID=${SIP_OUTBOUND_TRUNK_ID}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - CARTESIA_API_KEY=${CARTESIA_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - ELEVEN_API_KEY=${ELEVEN_API_KEY}
+      - VOICE_ID_AUSARTA=${VOICE_ID_AUSARTA}
+      - VOICE_ID_ESPANOLA=${VOICE_ID_ESPANOLA}
+      - VOICE_ID_BUENA=${VOICE_ID_BUENA}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - AGENT_NAME_DISPATCH=${AGENT_NAME_DISPATCH}
+      - MAX_CONCURRENT_CALLS=${MAX_CONCURRENT_CALLS:-10}
+      - CAMPAIGN_POLL_INTERVAL_SECONDS=${CAMPAIGN_POLL_INTERVAL_SECONDS:-30}
+      - DRIP_COOLDOWN_MIN_SECONDS=${DRIP_COOLDOWN_MIN_SECONDS:-120}
+      - DRIP_COOLDOWN_MAX_SECONDS=${DRIP_COOLDOWN_MAX_SECONDS:-180}
+      - DRIP_ANSWER_TIMEOUT_SECONDS=${DRIP_ANSWER_TIMEOUT_SECONDS:-30}
+      - DRIP_AGENT_JOIN_DELAY_SECONDS=${DRIP_AGENT_JOIN_DELAY_SECONDS:-3}
+      - REDIS_URL=redis://redis:6379/0
+      - ARQ_MAX_JOBS=${ARQ_MAX_JOBS:-10}
+      - ARQ_JOB_TIMEOUT=${ARQ_JOB_TIMEOUT:-660}
+      - PYTHONUNBUFFERED=1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+    networks:
+      - ausarta-network
+
   redis:
     image: redis:alpine
     container_name: ausarta-redis

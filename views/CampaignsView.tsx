@@ -758,6 +758,7 @@ export function CampaignsView() {
             campaignId={selectedCampaign.id}
             title={`Resultados: ${selectedCampaign.name}`}
             hideHeader={true}
+            schema={selectedCampaign.extraction_schema}
           />
         )}
 
