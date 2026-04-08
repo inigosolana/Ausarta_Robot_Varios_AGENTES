@@ -92,12 +92,30 @@ app.include_router(n8n_proxy_router)
 app.include_router(assistant_router)
 
 
-# --- LIFECYCLE: Arrancar el motor de campañas al iniciar ---
+# --- LIFECYCLE: Arrancar Redis + motor de campañas al iniciar ---
 
 @app.on_event("startup")
 async def startup_event():
     logger.info("🌅 Iniciando API Ausarta v2 (Motor asíncrono de campañas activo)...")
-    # Importar aquí para evitar importación circular durante la carga del módulo
+
+    # 1. Inicializar Redis (necesario antes del scheduler para locks distribuidos)
+    try:
+        from services.redis_service import get_redis
+        await get_redis()
+    except Exception as e:
+        logger.warning(f"⚠️ Redis no disponible al arrancar: {e}. Los locks usarán fallback en memoria.")
+
+    # 2. Arrancar scheduler de campañas
     from routers.campaigns import campaign_scheduler_loop
     asyncio.create_task(campaign_scheduler_loop())
     logger.info("✅ Scheduler de campañas arrancado como background task.")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("🌙 Apagando API Ausarta v2...")
+    try:
+        from services.redis_service import close_redis
+        await close_redis()
+    except Exception:
+        pass

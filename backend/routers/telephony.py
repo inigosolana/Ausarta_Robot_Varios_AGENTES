@@ -8,7 +8,7 @@ Responsabilidades:
   - /api/livekit/webhook: recibe eventos de LiveKit (room_finished, participant_left)
     para actualizar el estado de los leads sin polling.
 """
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import JSONResponse
 from models.schemas import CallEndRequest, EncuestaData
 from services.supabase_service import supabase
@@ -20,6 +20,7 @@ import os
 from datetime import datetime, timedelta, timezone
 import random
 import logging
+from services.auth import require_api_key as _outbound_api_key
 
 logger = logging.getLogger("api-backend")
 
@@ -252,11 +253,35 @@ async def _notify_n8n_post_call(encuesta_id: int, status: str, result_data: dict
 # ──────────────────────────────────────────────
 
 # Lock para evitar doble despacho accidental
-_processing_rooms: set[str] = set()
+# Fallback en memoria si Redis no está disponible
+_processing_rooms_fallback: set[str] = set()
+
+
+async def _acquire_room_lock(room_name: str) -> bool:
+    """Intenta adquirir lock distribuido para un room. Fallback a set local."""
+    try:
+        from services.redis_service import acquire_lock
+        return await acquire_lock(f"room:{room_name}", ttl_seconds=30)
+    except Exception:
+        # Redis no disponible: fallback a set en memoria
+        if room_name in _processing_rooms_fallback:
+            return False
+        _processing_rooms_fallback.add(room_name)
+        return True
+
+
+async def _release_room_lock(room_name: str) -> None:
+    """Libera lock distribuido para un room."""
+    try:
+        from services.redis_service import release_lock
+        await release_lock(f"room:{room_name}")
+    except Exception:
+        pass
+    _processing_rooms_fallback.discard(room_name)
 
 
 @router.post("/api/calls/outbound")
-async def make_outbound_call(request: dict):
+async def make_outbound_call(request: dict, _api_key: str = Depends(_outbound_api_key)):
     """Inicia una llamada SIP individual. Usado para pruebas desde el dashboard."""
     phone = request.get("phoneNumber")
     agent_id = request.get("agentId", "1")
@@ -316,11 +341,10 @@ async def make_outbound_call(request: dict):
         room_name = f"llamada_ausarta_empresa_{emp_id or 0}_campana_{camp_id_str}_contacto_{contacto_id}_encuesta_{encuesta_id}"
         sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
 
-        # Prevención de doble despacho
-        if room_name in _processing_rooms:
+        # Prevención de doble despacho (lock distribuido vía Redis)
+        if not await _acquire_room_lock(room_name):
             logger.warning(f"⚠️ Despacho ya en curso para {room_name}. Ignorando.")
             return {"status": "ok", "message": "Call already initiated", "roomName": room_name}
-        _processing_rooms.add(room_name)
 
         room_metadata = {
             "empresa_id": int(emp_id or 0),
@@ -358,21 +382,21 @@ async def make_outbound_call(request: dict):
                 participant_name="Cliente",
             ))
         except Exception as sip_err:
-            _processing_rooms.discard(room_name)
+            await _release_room_lock(room_name)
             raise sip_err
         except Exception as dispatch_err:
             logger.warning(f"⚠️ Dispatch explícito fallido (auto-dispatch como fallback): {dispatch_err}")
 
-        async def clear_lock(rname):
+        async def clear_lock(rname: str) -> None:
             await asyncio.sleep(10)
-            _processing_rooms.discard(rname)
+            await _release_room_lock(rname)
 
         asyncio.create_task(clear_lock(room_name))
         return {"status": "ok", "roomName": room_name, "callId": encuesta_id}
 
     except Exception as e:
         if "room_name" in locals():
-            _processing_rooms.discard(room_name)
+            await _release_room_lock(room_name)
         logger.error(f"❌ Error fatal en outbound call: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 

@@ -45,8 +45,14 @@ services:
       - DRIP_COOLDOWN_MAX_SECONDS=${DRIP_COOLDOWN_MAX_SECONDS:-180}
       - AGENT_CALL_TIMEOUT_SECONDS=${AGENT_CALL_TIMEOUT_SECONDS:-600}
       - BRIDGE_SERVER_URL=${BRIDGE_SERVER_URL:-http://localhost:8001}
+      - AUSARTA_API_KEY=${AUSARTA_API_KEY:-}
+      - SIP_TRANSFER_NUMBER=${SIP_TRANSFER_NUMBER:-}
+      - AGENT_AMD_WINDOW_SECONDS=${AGENT_AMD_WINDOW_SECONDS:-15}
+      - REDIS_URL=redis://redis:6379/0
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
     networks:
       - ausarta-network
     volumes:

@@ -35,16 +35,59 @@ class ScheduleRetryRequest(BaseModel):
     retry_at: str
 
 # ──────────────────────────────────────────────
-# DRIP LOCK MULTITENANT
+# DRIP LOCK MULTITENANT (Redis distribuido)
 #
-# Set de empresa_ids que tienen una llamada activa (incluido cooldown).
-# Garantiza que una empresa nunca tenga más de una llamada SIP a la vez.
+# Cada empresa tiene un lock en Redis con TTL como safety net.
+# Si Redis no está disponible, se usa un set local como fallback.
 # ──────────────────────────────────────────────
-_empresas_en_llamada: set[int] = set()
+_empresas_en_llamada_fallback: set[int] = set()
 
 # Rango de cooldown entre llamadas de la misma empresa (segundos)
 _COOLDOWN_MIN = int(os.getenv("DRIP_COOLDOWN_MIN_SECONDS", "120"))  # 2 minutos
 _COOLDOWN_MAX = int(os.getenv("DRIP_COOLDOWN_MAX_SECONDS", "180"))  # 3 minutos
+
+# TTL del lock de empresa: cooldown máximo + tiempo máximo de llamada + margen
+_EMPRESA_LOCK_TTL = _COOLDOWN_MAX + 300 + 60  # ~540s
+
+
+async def _acquire_empresa_lock(empresa_id: int) -> bool:
+    """Intenta adquirir el drip lock para una empresa. Fallback a set local."""
+    try:
+        from services.redis_service import acquire_lock
+        return await acquire_lock(f"empresa:{empresa_id}", ttl_seconds=_EMPRESA_LOCK_TTL)
+    except Exception:
+        if empresa_id in _empresas_en_llamada_fallback:
+            return False
+        _empresas_en_llamada_fallback.add(empresa_id)
+        return True
+
+
+async def _release_empresa_lock(empresa_id: int) -> None:
+    """Libera el drip lock de una empresa."""
+    try:
+        from services.redis_service import release_lock
+        await release_lock(f"empresa:{empresa_id}")
+    except Exception:
+        pass
+    _empresas_en_llamada_fallback.discard(empresa_id)
+
+
+async def _is_empresa_locked(empresa_id: int) -> bool:
+    """Comprueba si una empresa tiene lock activo."""
+    try:
+        from services.redis_service import is_locked
+        return await is_locked(f"empresa:{empresa_id}")
+    except Exception:
+        return empresa_id in _empresas_en_llamada_fallback
+
+
+async def _get_active_call_count() -> int:
+    """Retorna el número de empresas con llamada activa (distribuido)."""
+    try:
+        from services.redis_service import get_active_call_count
+        return await get_active_call_count()
+    except Exception:
+        return len(_empresas_en_llamada_fallback)
 
 
 # ──────────────────────────────────────────────
@@ -571,7 +614,7 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
         await asyncio.sleep(cooldown)
 
     finally:
-        _empresas_en_llamada.discard(empresa_id)
+        await _release_empresa_lock(empresa_id)
         logger.info(f"🔓 [Drip] Lock liberado para empresa {empresa_id}")
 
 
@@ -650,7 +693,8 @@ async def campaign_scheduler_loop():
             
             MAX_CONCURRENT_CALLS = int(os.getenv("MAX_CONCURRENT_CALLS", "10"))
             
-            if len(_empresas_en_llamada) >= MAX_CONCURRENT_CALLS:
+            active_count = await _get_active_call_count()
+            if active_count >= MAX_CONCURRENT_CALLS:
                 logger.warning(f"Límite global de canales SIP alcanzado ({MAX_CONCURRENT_CALLS}). Esperando...")
                 await asyncio.sleep(POLL_INTERVAL)
                 continue
@@ -659,7 +703,7 @@ async def campaign_scheduler_loop():
                 empresa_id = camp.get("empresa_id") or 0
 
                 # Si la empresa ya tiene un goteo en curso, no lanzamos más
-                if empresa_id in _empresas_en_llamada:
+                if await _is_empresa_locked(empresa_id):
                     logger.debug(f"[Scheduler] Empresa {empresa_id} en llamada activa, skipping campaña {camp['id']}.")
                     continue
 
@@ -700,10 +744,13 @@ async def campaign_scheduler_loop():
 
                 lead = leads_res.data[0]
                 
-                # BLOQUEO SÍNCRONO INMEDIATO:
+                # BLOQUEO DISTRIBUÍDO INMEDIATO:
                 # Evita que la siguiente campaña de esta misma empresa
                 # lance una llamada en este mismo ciclo del bucle.
-                _empresas_en_llamada.add(empresa_id)
+                acquired = await _acquire_empresa_lock(empresa_id)
+                if not acquired:
+                    logger.debug(f"[Scheduler] Lock empresa {empresa_id} ya adquirido por otra instancia, skipping.")
+                    continue
                 
                 # Lanzar como task independiente: el scheduler no espera, sigue con las demás empresas
                 asyncio.create_task(_dispatch_single_lead_drip(lead, camp))

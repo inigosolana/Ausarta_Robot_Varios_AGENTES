@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from typing import Optional, Any
 from collections import defaultdict
 from services.supabase_service import supabase, get_ui_cache
@@ -496,21 +496,46 @@ async def get_ai_limits():
 
 @router.get("/dashboard/live-sessions")
 async def get_live_sessions():
-    """List active LiveKit rooms for supervision."""
+    """List active LiveKit rooms for supervision with enriched metadata."""
     if not lkapi:
         return []
     try:
         from livekit import api
-        # List sessions
+        import re
         rooms_res = await lkapi.room.list_rooms(api.ListRoomsRequest())
         sessions = []
+        now_ts = int(time.time())
         for r in rooms_res.rooms:
-            sessions.append({
+            # Extraer metadata del nombre de sala
+            name = r.name or ""
+            encuesta_match = re.search(r"encuesta_(\d+)", name)
+            empresa_match = re.search(r"empresa_(\d+)", name)
+            campana_match = re.search(r"campana_(\d+)", name)
+
+            duration_secs = max(0, now_ts - r.creation_time) if r.creation_time else 0
+
+            session_data = {
                 "sid": r.sid,
-                "name": r.name,
+                "name": name,
                 "num_participants": r.num_participants,
-                "created_at": r.creation_time
-            })
+                "created_at": r.creation_time,
+                "duration_seconds": duration_secs,
+                "metadata": {
+                    "encuesta_id": int(encuesta_match.group(1)) if encuesta_match else None,
+                    "empresa_id": int(empresa_match.group(1)) if empresa_match else None,
+                    "campaign_id": int(campana_match.group(1)) if campana_match else None,
+                },
+            }
+
+            # Intentar obtener info de participantes
+            participants = []
+            for p in (r.metadata or "").split(","):
+                if p.strip():
+                    participants.append(p.strip())
+            if participants:
+                session_data["metadata"]["participants"] = participants
+
+            sessions.append(session_data)
         return sessions
     except Exception as e:
         logger.error(f"Error listing LiveKit sessions: {e}")

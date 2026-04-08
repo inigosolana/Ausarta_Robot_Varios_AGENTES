@@ -531,6 +531,73 @@ class DynamicAgent(Agent):
         
         return "Dato guardado."
 
+    @function_tool(name="transferir_a_agente_humano")
+    async def _http_tool_transferir_humano(
+        self,
+        context: RunContext,
+        motivo: str = "El cliente solicita hablar con una persona",
+    ) -> str | None:
+        """
+        Transfiere la llamada a un agente humano via SIP REFER.
+        Usa esta herramienta SOLO cuando el cliente pida EXPLÍCITAMENTE hablar con una persona.
+        Antes de transferir:
+        1. Confirma con el cliente: \"Entendido, le paso con un compañero. Un momento por favor.\"
+        2. llama a esta herramienta.
+        """
+        transfer_number = os.getenv("SIP_TRANSFER_NUMBER", "")
+        if not transfer_number:
+            logger.warning(f"⚠️ [{self.room_name}] SIP_TRANSFER_NUMBER no configurado. Transferencia no posible.")
+            return "Lo siento, no puedo transferir la llamada en este momento. ¿Puedo ayudarle en algo más?"
+
+        logger.info(f"📞 [{self.room_name}] Transferencia solicitada → {transfer_number} (motivo: {motivo})")
+
+        try:
+            # Notificar al backend para registro
+            async with aiohttp.ClientSession() as sess:
+                await sess.post(
+                    f"{self.server_url}/guardar-encuesta",
+                    json={
+                        "id_encuesta": int(self.survey_id) if str(self.survey_id).isdigit() else 0,
+                        "status": "transferred",
+                        "comentarios": f"Transferido a humano: {motivo}",
+                    },
+                    timeout=8,
+                )
+
+            # SIP REFER via LiveKit API para transferir la llamada
+            from livekit import api as lk_api
+            lk = lk_api.LiveKitAPI()
+            try:
+                # Buscar el participante SIP activo en la sala
+                sip_participant = None
+                for p_id, p_info in context.session.room.remote_participants.items():
+                    identity = getattr(p_info, "identity", "")
+                    if identity.startswith("sip_") or identity.startswith("user_"):
+                        sip_participant = identity
+                        break
+
+                if sip_participant:
+                    await lk.sip.transfer_sip_participant(
+                        lk_api.TransferSIPParticipantRequest(
+                            room_name=self.room_name,
+                            participant_identity=sip_participant,
+                            transfer_to=f"sip:{transfer_number}@trunk",
+                        )
+                    )
+                    logger.info(f"✅ [{self.room_name}] SIP REFER enviado para transferir a {transfer_number}")
+                else:
+                    logger.warning(f"⚠️ [{self.room_name}] No se encontró participante SIP para transferir")
+                    return "No puedo completar la transferencia ahora. ¿Puedo tomar nota de su consulta?"
+            finally:
+                await lk.aclose()
+
+            return "Transferencia iniciada. La llamada se está pasando a un compañero."
+
+        except Exception as transfer_err:
+            logger.error(f"❌ [{self.room_name}] Error en transferencia SIP: {transfer_err}")
+            return "Ha habido un problema técnico con la transferencia. ¿Puedo tomar nota para que le llame un compañero?"
+
+
     @function_tool(name="finalizar_llamada")
     async def _http_tool_finalizar_llamada(
         self, context: RunContext, mensaje_despedida_manual: str
@@ -867,7 +934,81 @@ async def entrypoint(ctx: JobContext):
             agent=agent_instance,
         )
 
-        # --- RUIDO DE FONDO DE OFICINA ---
+        # --- DETECCIÓN DE BUZÓN DE VOZ (AMD) ---
+        # Monitoriza las primeras transcripciones para detectar contestadores automáticos.
+        # Se auto-cancela tras AMD_WINDOW_SECONDS de actividad humana real.
+        AMD_WINDOW_SECONDS = float(os.getenv("AGENT_AMD_WINDOW_SECONDS", "15.0"))
+        VOICEMAIL_PATTERNS = (
+            "buzón de voz", "buzon de voz", "contestador", "contestadora",
+            "fuera de cobertura", "apagado o fuera", "deje su mensaje",
+            "grabe su mensaje", "después de la señal", "despues de la señal",
+            "no está disponible", "no esta disponible", "no se encuentra",
+            "número no disponible", "numero no disponible",
+            "terminado el tiempo", "el usuario no contesta",
+            "mailbox", "voicemail", "leave a message", "not available",
+            "el número marcado", "el numero marcado",
+        )
+        amd_state = {"detected": False, "human_confirmed": False, "check_count": 0}
+
+        async def amd_monitor():
+            """Monitoriza transcripciones tempranas para detectar contestador automático."""
+            start_time = asyncio.get_running_loop().time()
+            while not stop_guard.is_set():
+                await asyncio.sleep(0.5)
+                elapsed = asyncio.get_running_loop().time() - start_time
+
+                # Pasado el umbral temporal, asumimos interlocutor humano
+                if elapsed > AMD_WINDOW_SECONDS or amd_state["human_confirmed"]:
+                    logger.info(f"✅ [{job_id}] AMD: Interlocutor humano confirmado (elapsed={elapsed:.1f}s)")
+                    return
+
+                # Revisar transcripciones en el buffer de eventos
+                if not transcript_event_buffer:
+                    continue
+
+                for item in transcript_event_buffer:
+                    if item.get("role") != "user":
+                        continue
+                    text = item.get("content", "").lower()
+                    amd_state["check_count"] += 1
+
+                    for pattern in VOICEMAIL_PATTERNS:
+                        if pattern in text:
+                            amd_state["detected"] = True
+                            logger.warning(f"📵 [{job_id}] AMD: BUZÓN DETECTADO — patrón '{pattern}' en '{text[:80]}'")
+
+                            # Guardar como no_contesta y colgar
+                            try:
+                                _api_url = agent_instance.server_url
+                                async with aiohttp.ClientSession() as _s:
+                                    await _s.post(
+                                        f"{_api_url}/guardar-encuesta",
+                                        json={
+                                            "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
+                                            "status": "failed",
+                                            "comentarios": f"Buzón de voz detectado automáticamente (AMD): {pattern}",
+                                        },
+                                        timeout=8,
+                                    )
+                                    await _s.post(
+                                        f"{_api_url}/colgar",
+                                        json={"nombre_sala": room_name},
+                                        timeout=5,
+                                    )
+                                logger.info(f"📵 [{job_id}] AMD: Encuesta {survey_id} marcada failed; sala cerrada.")
+                            except Exception as amd_err:
+                                logger.error(f"❌ [{job_id}] AMD: Error al cerrar por buzón: {amd_err}")
+                            return
+
+                    # Si hay 2+ mensajes del user sin patrón de buzón, es humano
+                    user_msgs = [i for i in transcript_event_buffer if i.get("role") == "user"]
+                    if len(user_msgs) >= 2:
+                        amd_state["human_confirmed"] = True
+                        return
+
+        amd_task = asyncio.create_task(amd_monitor())
+
+
         # Hace que el agente suene como si estuviera en una oficina real.
         # Se puede desactivar con AGENT_OFFICE_NOISE=false en el entorno.
         if os.getenv("AGENT_OFFICE_NOISE", "true").lower() not in ("false", "0", "no"):
@@ -1278,6 +1419,8 @@ async def entrypoint(ctx: JobContext):
                 transcript_autosave_task.cancel()
             if 'silence_reprompt_task' in locals():
                 silence_reprompt_task.cancel()
+            if 'amd_task' in locals():
+                amd_task.cancel()
         except Exception:
             pass
 
