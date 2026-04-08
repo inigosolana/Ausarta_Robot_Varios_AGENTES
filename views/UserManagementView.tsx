@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
+import { apiFetch } from '../lib/apiFetch';
 import { useAuth } from '../contexts/AuthContext';
 import type { UserProfile, UserPermission, UserRole, Empresa } from '../types';
 import { ALL_MODULES } from '../types';
@@ -48,47 +49,64 @@ const UserManagementView: React.FC = () => {
 
     const loadUsersAndEmpresas = async () => {
         setLoading(true);
-        try {
-            const API_URL = import.meta.env.VITE_API_URL || '';
-            // 1. Load empresas using API (Cache-friendly)
-            const empRes = await fetch(`${API_URL}/api/empresas`);
-            const empData = await empRes.json();
+        const API_URL = (import.meta.env.VITE_API_URL as string) || '';
 
-            if (Array.isArray(empData)) {
-                let filteredEmp = empData;
-                if (!isPlatformOwner && currentProfile?.empresa_id) {
-                    filteredEmp = empData.filter(e => e.id === currentProfile.empresa_id);
+        // Safety: never stay in skeleton more than 10 seconds
+        const safetyTimer = setTimeout(() => setLoading(false), 10_000);
+
+        try {
+            // 1. Load empresas
+            const empRes = await fetch(`${API_URL}/api/empresas`);
+            if (empRes.ok) {
+                const empData = await empRes.json();
+                if (Array.isArray(empData)) {
+                    let filteredEmp = empData;
+                    if (!isPlatformOwner && currentProfile?.empresa_id) {
+                        filteredEmp = empData.filter((e: any) => e.id === currentProfile.empresa_id);
+                    }
+                    setEmpresas(filteredEmp);
                 }
-                setEmpresas(filteredEmp);
             }
 
-            // 2. Load user profiles using API (Cache-friendly)
+            // 2. Load user profiles
             const userRes = await fetch(`${API_URL}/api/users`);
+            if (!userRes.ok) {
+                console.error('[Users] GET /api/users returned', userRes.status);
+                return;
+            }
             const usersData = await userRes.json();
 
             if (Array.isArray(usersData)) {
                 let filteredUsers = usersData;
                 if (!isPlatformOwner && currentProfile?.empresa_id) {
-                    filteredUsers = usersData.filter(u => u.empresa_id === currentProfile.empresa_id);
+                    filteredUsers = usersData.filter((u: any) => u.empresa_id === currentProfile.empresa_id);
                 }
 
-                // Enrichment still needed for current profile details unless backend does it
-                // But the API already does `select("*, empresas(*)")`
-                const usersWithPerms = await Promise.all(
-                    filteredUsers.map(async (u: any) => {
-                        const { data: perms } = await supabase
-                            .from('user_permissions')
-                            .select('*')
-                            .eq('user_id', u.id);
-                        return { ...u, permissions: (perms || []) as UserPermission[] };
-                    })
-                );
+                // Enrich each user with their permissions in parallel (batch)
+                const userIds = filteredUsers.map((u: any) => u.id);
+                const { data: allPerms } = await supabase
+                    .from('user_permissions')
+                    .select('*')
+                    .in('user_id', userIds);
+
+                const permsMap: Record<string, UserPermission[]> = {};
+                for (const p of (allPerms || [])) {
+                    if (!permsMap[p.user_id]) permsMap[p.user_id] = [];
+                    permsMap[p.user_id].push(p as UserPermission);
+                }
+
+                const usersWithPerms = filteredUsers.map((u: any) => ({
+                    ...u,
+                    permissions: permsMap[u.id] || [],
+                }));
+
                 setUsers(usersWithPerms);
             }
         } catch (err) {
             console.error('Error loading users:', err);
         } finally {
-            setTimeout(() => setLoading(false), 300); // Small delay for smooth transition
+            clearTimeout(safetyTimer);
+            setLoading(false);
         }
     };
 
@@ -289,18 +307,19 @@ const UserManagementView: React.FC = () => {
     const handleDeleteUser = async (userId: string) => {
         if (!confirm(t('Are you sure you want to delete this user? This action cannot be undone and will also delete their authentication access.', '¿Estás seguro de que quieres eliminar este usuario? Esta acción no se puede deshacer y borrará también su acceso de autenticación.'))) return;
         try {
-            const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
-            const res = await fetch(`${API_URL}/api/admin/users/${userId}`, {
-                method: 'DELETE'
+            // apiFetch adjunta automáticamente el Bearer token necesario para require_admin
+            const res = await apiFetch(`/api/admin/users/${userId}`, {
+                method: 'DELETE',
             });
 
             if (!res.ok) {
-                const data = await res.json();
-                throw new Error(data.error || 'Error al eliminar usuario');
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.message || data.error || `Error ${res.status} al eliminar usuario`);
             }
 
             setUsers(prev => prev.filter(u => u.id !== userId));
         } catch (err: any) {
+            console.error('[DeleteUser]', err);
             alert(`Error: ${err.message}`);
         }
     };
