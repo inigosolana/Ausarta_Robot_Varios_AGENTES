@@ -18,6 +18,12 @@ class VoiceAgentUpdate(BaseModel):
     speaking_speed: Optional[float] = None
     agent_config: Optional[dict] = None # Para guardar configuraciones completas si se necesita
 
+class ExtractionSchemaProperty(BaseModel):
+    key: str
+    type: str # 'boolean', 'number', 'enum', 'text'
+    label: str
+    options: Optional[List[str]] = None
+
 class CampaignCreate(BaseModel):
     name: str
     agent_id: int
@@ -26,6 +32,7 @@ class CampaignCreate(BaseModel):
     retries_count: int = 3
     retry_interval: int = 60 # Minutos - Default 1 hora
     interval_minutes: int = 2 # Espera entre leads (Campañas por Goteo)
+    extraction_schema: Optional[List[ExtractionSchemaProperty]] = None
 
 class CampaignLeadModel(BaseModel):
     phone_number: str
@@ -42,6 +49,7 @@ class CampaignModel(BaseModel):
     retry_interval: int = 180
     retry_unit: str = "minutes"
     interval_minutes: int = 2
+    extraction_schema: Optional[List[ExtractionSchemaProperty]] = None
 
 class LlmConfig(BaseModel):
     llm_provider: str

@@ -129,6 +129,7 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
             "retry_interval": interval_raw,
             "retry_unit": campaign.retry_unit,
             "interval_minutes": campaign.interval_minutes,
+            "extraction_schema": [s.model_dump() for s in campaign.extraction_schema] if campaign.extraction_schema else [],
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         res_camp = supabase.table("campaigns").insert(camp_data).execute()
@@ -318,13 +319,14 @@ async def get_result_transcription(result_id: int):
 async def get_agent_config_by_survey(survey_id: int):
     if not supabase: return JSONResponse(status_code=500, content={"error": "Supabase not connected"})
     try:
-        res_survey = supabase.table("encuestas").select("agent_id, nombre_cliente, empresa_id").eq("id", survey_id).execute()
+        res_survey = supabase.table("encuestas").select("agent_id, nombre_cliente, empresa_id, campaign_id").eq("id", survey_id).execute()
         if not res_survey.data:
             return JSONResponse(status_code=404, content={"error": "Survey not found"})
 
         agent_id = res_survey.data[0].get("agent_id")
         nombre_cliente = res_survey.data[0].get("nombre_cliente")
         empresa_id = res_survey.data[0].get("empresa_id")
+        campaign_id = res_survey.data[0].get("campaign_id")
 
         if not agent_id:
             return {

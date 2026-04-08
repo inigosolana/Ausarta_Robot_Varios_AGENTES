@@ -427,7 +427,22 @@ class DynamicAgent(Agent):
             "- SIEMPRE termina con un 'adiós', 'hasta luego' o 'hasta pronto' explícito al final para que el cliente sepa que la llamada acaba.\n\n"
         )
         full_instructions += "SIGUE ESTE GUION AL PIE DE LA LETRA:\n"
-        full_instructions += f"{agent_instructions}\n"
+        full_instructions += f"{agent_instructions}\n\n"
+
+        extraction_schema = agent_config.get("extraction_schema")
+        if extraction_schema and isinstance(extraction_schema, list) and len(extraction_schema) > 0:
+            import json
+            schema_str = json.dumps(extraction_schema, ensure_ascii=False, indent=2)
+            full_instructions += (
+                "IMPORTANTE - EXTRACCIÓN DE DATOS:\n"
+                "Al finalizar la llamada o al usar la herramienta 'guardar_encuesta', DEBES enviar un string JSON "
+                "en el argumento 'datos_extra'. Este JSON DEBE seguir estrictamente el siguiente esquema de variables "
+                "que necesitamos extraer de la conversación:\n"
+                f"{schema_str}\n"
+                "Asegúrate de inferir y completar todos los campos posibles según lo que el cliente haya dicho, "
+                "respetando el tipo de cada campo ('boolean', 'number', 'text', 'enum'). "
+                "Para campos de tipo 'enum', el valor DEBE ser obligatoriamente una de las 'options' listadas.\n"
+            )
 
         super().__init__(instructions=full_instructions) # type: ignore
         logger.info(f"Agente '{agent_name}' creado (Survey: {self.survey_id})")

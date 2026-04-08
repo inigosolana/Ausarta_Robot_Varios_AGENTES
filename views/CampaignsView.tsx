@@ -25,6 +25,7 @@ interface Campaign {
   interval_minutes?: number;
   is_question_based?: boolean;
   empresas?: { nombre: string };
+  extraction_schema?: {key: string; type: string; label: string; options?: string[]}[];
 }
 
 interface Lead {
@@ -99,6 +100,10 @@ export function CampaignsView() {
   const [intervalMinutes, setIntervalMinutes] = useState<number>(2);
   const [editIntervalMinutes, setEditIntervalMinutes] = useState<number>(2);
 
+  // Dynamic Schema Extraction State
+  const [extractionSchema, setExtractionSchema] = useState<{key: string; type: string; label: string; options?: string[]}[]>([]);
+  const [editExtractionSchema, setEditExtractionSchema] = useState<{key: string; type: string; label: string; options?: string[]}[]>([]);
+
   const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
   const openEditModal = (camp: Campaign) => {
@@ -127,6 +132,7 @@ export function CampaignsView() {
     }
     setEditRetriesCount((camp as any).retries_count || 3);
     setEditIntervalMinutes(camp.interval_minutes || 2);
+    setEditExtractionSchema(camp.extraction_schema || []);
   };
 
   const handleUpdateCampaign = async () => {
@@ -138,7 +144,8 @@ export function CampaignsView() {
         retry_interval: editRetryInterval,
         retry_unit: editRetryUnit,
         retries_count: editRetriesCount,
-        interval_minutes: editIntervalMinutes
+        interval_minutes: editIntervalMinutes,
+        extraction_schema: editExtractionSchema.length > 0 ? editExtractionSchema : null
       };
       const res = await fetch(`${API_URL}/api/campaigns/${editingCampaign.id}`, {
         method: 'PUT',
@@ -386,7 +393,8 @@ export function CampaignsView() {
           retry_interval: retryInterval || 60,
           retry_unit: retryUnit,
           retries_count: retriesCount,
-          interval_minutes: intervalMinutes
+          interval_minutes: intervalMinutes,
+          extraction_schema: extractionSchema.length > 0 ? extractionSchema : null
         },
         leads
       };
@@ -403,6 +411,7 @@ export function CampaignsView() {
       setShowCreate(false);
       setName('');
       setCsvFile(null);
+      setExtractionSchema([]);
       loadCampaigns();
       alert(t('Campaign created successfully!', '¡Campaña creada exitosamente!'));
 
@@ -568,6 +577,54 @@ export function CampaignsView() {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               />
               <p className="text-[10px] text-gray-400 mt-1">{t("Wait time between each call in the campaign.", "Tiempo de espera entre cada llamada de la campaña.")}</p>
+            </div>
+
+            <div className="border-t border-gray-100 pt-4">
+              <h3 className="text-sm font-medium text-gray-700 mb-1">{t("Dynamic Data Extraction", "Extracción de Datos Dinámica")}</h3>
+              <p className="text-xs text-gray-500 mb-2">{t("Edit the fields the AI extracts:", "Edita los campos que extrae la IA:")}</p>
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {editExtractionSchema.map((field, index) => (
+                  <div key={index} className="flex flex-col gap-1 bg-gray-50 p-2 rounded border border-gray-200">
+                    <div className="flex gap-2 w-full">
+                      <input type="text" placeholder="Key" className="flex-1 text-xs px-2 py-1 border rounded" value={field.key} onChange={(e) => {
+                        const newSchema = [...editExtractionSchema];
+                        newSchema[index].key = e.target.value.replace(/\s+/g, '_').toLowerCase();
+                        setEditExtractionSchema(newSchema);
+                      }} />
+                      <input type="text" placeholder="Label" className="flex-1 text-xs px-2 py-1 border rounded" value={field.label} onChange={(e) => {
+                        const newSchema = [...editExtractionSchema];
+                        newSchema[index].label = e.target.value;
+                        setEditExtractionSchema(newSchema);
+                      }} />
+                      <select className="w-24 text-xs px-1 py-1 border rounded" value={field.type} onChange={(e) => {
+                        const newSchema = [...editExtractionSchema];
+                        newSchema[index].type = e.target.value;
+                        if(e.target.value !== 'enum') delete newSchema[index].options;
+                        else newSchema[index].options = [];
+                        setEditExtractionSchema(newSchema);
+                      }}>
+                        <option value="text">Texto</option>
+                        <option value="number">Núm</option>
+                        <option value="boolean">Bool</option>
+                        <option value="enum">Enum</option>
+                      </select>
+                      <button onClick={() => setEditExtractionSchema(editExtractionSchema.filter((_, i) => i !== index))} className="p-1 px-1 text-red-500 hover:bg-red-100 rounded">
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                    {field.type === 'enum' && (
+                      <input type="text" placeholder="Opciones separadas por coma" className="w-full text-xs px-2 py-1 border rounded bg-white" value={field.options?.join(', ') || ''} onChange={(e) => {
+                        const newSchema = [...editExtractionSchema];
+                        newSchema[index].options = e.target.value.split(',').map(s=>s.trim()).filter(Boolean);
+                        setEditExtractionSchema(newSchema);
+                      }} />
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setEditExtractionSchema([...editExtractionSchema, {key: '', label: '', type: 'text'}])} className="mt-2 text-xs bg-white text-blue-600 px-3 py-1.5 rounded-lg border border-dashed border-blue-300 hover:bg-blue-50 flex items-center gap-1 font-medium w-full justify-center">
+                <Plus className="w-3 h-3" /> Añadir Dato
+              </button>
             </div>
           </div>
           <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
@@ -1023,6 +1080,66 @@ export function CampaignsView() {
               </code>
             </div>
           )}
+
+          <div className="border-t border-gray-100 pt-6">
+            <h3 className="text-sm font-medium text-gray-700 mb-1">{t("Dynamic Data Extraction", "Extracción de Datos Dinámica")}</h3>
+            <p className="text-xs text-gray-500 mb-4">{t("Define what information the AI should extract from the conversation.", "Define qué información debe extraer la IA de la conversación.")}</p>
+            <div className="space-y-3">
+              {extractionSchema.map((field, index) => (
+                <div key={index} className="flex flex-col md:flex-row gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200 items-start md:items-center">
+                  <div className="flex-1 w-full relative">
+                    <label className="text-[10px] uppercase text-gray-500 font-semibold absolute -top-2 bg-gray-50 px-1 left-2">Variable Key</label>
+                    <input type="text" placeholder="ej: opcion_cliente" className="w-full text-xs px-3 py-2 border border-gray-300 rounded focus:border-blue-500 outline-none bg-white" value={field.key} onChange={(e) => {
+                      const newSchema = [...extractionSchema];
+                      newSchema[index].key = e.target.value.replace(/\s+/g, '_').toLowerCase();
+                      setExtractionSchema(newSchema);
+                    }} />
+                  </div>
+                  <div className="flex-1 w-full relative">
+                    <label className="text-[10px] uppercase text-gray-500 font-semibold absolute -top-2 bg-gray-50 px-1 left-2">Display Name</label>
+                    <input type="text" placeholder="ej: Opción del Cliente" className="w-full text-xs px-3 py-2 border border-gray-300 rounded focus:border-blue-500 outline-none bg-white" value={field.label} onChange={(e) => {
+                      const newSchema = [...extractionSchema];
+                      newSchema[index].label = e.target.value;
+                      setExtractionSchema(newSchema);
+                    }} />
+                  </div>
+                  <div className="w-full md:w-32 relative">
+                    <label className="text-[10px] uppercase text-gray-500 font-semibold absolute -top-2 bg-gray-50 px-1 left-2">Type</label>
+                    <select className="w-full text-xs px-3 py-2 border border-gray-300 rounded focus:border-blue-500 outline-none bg-white font-medium" value={field.type} onChange={(e) => {
+                      const newSchema = [...extractionSchema];
+                      newSchema[index].type = e.target.value;
+                      if(e.target.value !== 'enum') delete newSchema[index].options;
+                      else newSchema[index].options = [];
+                      setExtractionSchema(newSchema);
+                    }}>
+                      <option value="text">Texto</option>
+                      <option value="number">Número</option>
+                      <option value="boolean">Verdadero/Falso</option>
+                      <option value="enum">Opciones (Enum)</option>
+                    </select>
+                  </div>
+                  {field.type === 'enum' && (
+                    <div className="flex-1 w-full relative">
+                      <label className="text-[10px] uppercase text-gray-500 font-semibold absolute -top-2 bg-gray-50 px-1 left-2">Opciones (,)</label>
+                      <input type="text" placeholder="opcion1, opcion2..." className="w-full text-xs px-3 py-2 border border-blue-200 rounded focus:border-blue-500 outline-none bg-blue-50" value={field.options?.join(', ') || ''} onChange={(e) => {
+                        const newSchema = [...extractionSchema];
+                        newSchema[index].options = e.target.value.split(',').map(s=>s.trim()).filter(Boolean);
+                        setExtractionSchema(newSchema);
+                      }} />
+                    </div>
+                  )}
+                  <button onClick={() => setExtractionSchema(extractionSchema.filter((_, i) => i !== index))} className="p-2 text-red-500 hover:bg-red-100 rounded border border-transparent hover:border-red-200 transition-colors mt-2 md:mt-0">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              <div className="flex">
+                <button onClick={() => setExtractionSchema([...extractionSchema, {key: '', label: '', type: 'text'}])} className="text-xs bg-white text-blue-600 px-3 py-2 rounded-lg border border-dashed border-blue-300 hover:bg-blue-50 flex items-center gap-1 font-medium transition-all shadow-sm">
+                  <Plus className="w-3 h-3" /> {t("Add Custom Extraction Field", "Añadir campo a extraer")}
+                </button>
+              </div>
+            </div>
+          </div>
 
           <div className="border-t border-gray-100 pt-6">
             <button className="flex items-center justify-between w-full text-left font-medium text-gray-700">
