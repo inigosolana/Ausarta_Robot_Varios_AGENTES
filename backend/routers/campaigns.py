@@ -11,10 +11,12 @@ Arquitectura:
 - El estado de las llamadas se actualiza vía webhook de LiveKit (/api/livekit/webhook).
 - Salas con naming aislado: empresa_{id}_camp_{camp_id}_call_{enc_id}.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from typing import Optional, List
 from services.supabase_service import supabase
+from services.audit import log_audit_event
+from services.auth import CurrentUser, require_admin
 from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
 from livekit import api as lk_api
 from pydantic import BaseModel
@@ -129,19 +131,26 @@ async def _enqueue_scheduler_tick() -> None:
 # ──────────────────────────────────────────────
 
 @router.delete("/campaigns/{campaign_id}")
-async def delete_campaign(campaign_id: int):
+async def delete_campaign(campaign_id: int, current_user: CurrentUser = Depends(require_admin)):
     if not supabase: return {"error": "No DB"}
     try:
         supabase.table("campaign_leads").delete().eq("campaign_id", campaign_id).execute()
         supabase.table("encuestas").delete().eq("campaign_id", campaign_id).execute()
         supabase.table("campaigns").delete().eq("id", campaign_id).execute()
+        await log_audit_event(
+            user_id=current_user.user_id,
+            action="delete_campaign",
+            target_type="campaign",
+            target_id=str(campaign_id),
+            metadata={"cascade": ["campaign_leads", "encuestas"]},
+        )
         return {"status": "ok", "message": f"Campaña {campaign_id} eliminada"}
     except Exception as e:
         logger.error(f"Error deleting campaign: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.post("/campaigns")
-async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel]):
+async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel], current_user: CurrentUser = Depends(require_admin)):
     if not supabase: return {"error": "No DB"}
     try:
         status_final = campaign.status
@@ -179,6 +188,13 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
 
         if leads_data:
             supabase.table("campaign_leads").insert(leads_data).execute()
+        await log_audit_event(
+            user_id=current_user.user_id,
+            action="create_campaign",
+            target_type="campaign",
+            target_id=str(campaign_id),
+            metadata={"empresa_id": campaign.empresa_id, "agent_id": campaign.agent_id, "leads_count": len(leads_data)},
+        )
 
         return {"id": campaign_id, "message": f"Campaña creada con {len(leads_data)} leads"}
     except Exception as e:
@@ -186,7 +202,7 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.put("/campaigns/{campaign_id}")
-async def update_campaign(campaign_id: int, payload: dict):
+async def update_campaign(campaign_id: int, payload: dict, current_user: CurrentUser = Depends(require_admin)):
     if not supabase: return {"error": "No DB"}
     try:
         if "retry_interval" in payload and "retry_unit" in payload:
@@ -197,6 +213,13 @@ async def update_campaign(campaign_id: int, payload: dict):
             elif unit == "days":   raw *= 86400
             payload["retry_interval"] = raw
         supabase.table("campaigns").update(payload).eq("id", campaign_id).execute()
+        await log_audit_event(
+            user_id=current_user.user_id,
+            action="update_campaign",
+            target_type="campaign",
+            target_id=str(campaign_id),
+            metadata={"fields": list(payload.keys())},
+        )
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Error updating campaign {campaign_id}: {e}")

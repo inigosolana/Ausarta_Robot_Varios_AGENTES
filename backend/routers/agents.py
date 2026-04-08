@@ -2,6 +2,9 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from typing import Optional
 from services.supabase_service import supabase, get_ui_cache, clear_ui_cache
+from services.audit import log_audit_event
+from services.auth import CurrentUser, require_admin
+from fastapi import Depends
 from models.schemas import VoiceAgentCreate, VoiceAgentUpdate
 from datetime import datetime
 import logging
@@ -94,7 +97,7 @@ async def get_prompts_alias():
     return await get_agents()
 
 @router.put("/agents/{agent_id}")
-async def update_agent(agent_id: str, config: dict):
+async def update_agent(agent_id: str, config: dict, current_user: CurrentUser = Depends(require_admin)):
     if not supabase: return {"error": "No DB"}
     try:
         # Agent Config
@@ -163,13 +166,20 @@ async def update_agent(agent_id: str, config: dict):
             asyncio.create_task(call_webhook())
         
         await clear_ui_cache("agents_list")
+        await log_audit_event(
+            user_id=current_user.user_id,
+            action="update_agent",
+            target_type="agent",
+            target_id=str(agent_id),
+            metadata={"empresa_id": db_config.get("empresa_id"), "fields": list(db_config.keys())},
+        )
         return {"status": "ok", "message": f"Agente {agent_id} actualizado"}
     except Exception as e:
         logger.error(f"Error updating agent: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.post("/agents")
-async def create_agent(config: dict):
+async def create_agent(config: dict, current_user: CurrentUser = Depends(require_admin)):
     if not supabase: return JSONResponse(status_code=500, content={"error": "No DB"})
     try:
         effective_type = _normalize_agent_type(
@@ -226,13 +236,20 @@ async def create_agent(config: dict):
         asyncio.create_task(call_webhook())
 
         await clear_ui_cache("agents_list")
+        await log_audit_event(
+            user_id=current_user.user_id,
+            action="create_agent",
+            target_type="agent",
+            target_id=str(new_id),
+            metadata={"empresa_id": db_config.get("empresa_id"), "name": db_config.get("name")},
+        )
         return {"status": "ok", "agent": new_agent}
     except Exception as e:
         logger.error(f"Error creating agent: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.delete("/agents/{agent_id}")
-async def delete_agent(agent_id: str):
+async def delete_agent(agent_id: str, current_user: CurrentUser = Depends(require_admin)):
     """Elimina un agente y ABSOLUTAMENTE TODO lo relacionado (Campañas, leads, encuestas, config)"""
     if not supabase: return JSONResponse(status_code=500, content={"error": "No DB connection"})
     
@@ -261,6 +278,13 @@ async def delete_agent(agent_id: str):
         await clear_ui_cache("agents_list")
         
         logger.info(f"🗑️ Agente {aid} y todos sus datos eliminados por solicitud del usuario.")
+        await log_audit_event(
+            user_id=current_user.user_id,
+            action="delete_agent",
+            target_type="agent",
+            target_id=str(aid),
+            metadata={"cascade": ["campaigns", "campaign_leads", "encuestas", "ai_config"]},
+        )
         return {"status": "ok", "message": f"Agente {aid} y todos sus datos relacionados (campañas, leads, encuestas) han sido eliminados."}
         
     except Exception as e:

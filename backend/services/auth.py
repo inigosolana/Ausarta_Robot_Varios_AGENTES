@@ -1,30 +1,49 @@
 """
-auth.py — Autenticación por API Key para endpoints protegidos.
+auth.py — Dependencias de autenticación/autorización para FastAPI.
 
-Uso:
-    from services.auth import require_api_key
-    @router.post("/mi-endpoint", dependencies=[Depends(require_api_key)])
-    async def mi_endpoint(): ...
-
-Configuración:
-    AUSARTA_API_KEY en variables de entorno (.env / docker-compose).
-    El cliente envía la key en el header X-API-Key.
+Incluye:
+- API Key auth (compatibilidad con endpoints legacy).
+- JWT auth (Supabase) para control de roles y aislamiento multi-tenant.
 """
 import os
 import logging
-from fastapi import Security, HTTPException, status
-from fastapi.security import APIKeyHeader
+from dataclasses import dataclass
+from typing import Optional
+
+import aiohttp
+from fastapi import Security, HTTPException, status, Depends
+from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
+
+from services.supabase_service import supabase
 
 logger = logging.getLogger("api-backend")
 
 _API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+_BEARER = HTTPBearer(auto_error=False)
+
+
+@dataclass
+class CurrentUser:
+    user_id: str
+    email: Optional[str]
+    role: str
+    empresa_id: Optional[int]
+
+
+def _canonical_role(raw_role: Optional[str]) -> str:
+    role = (raw_role or "").strip().lower()
+    if role == "superadmin":
+        return "superadmin"
+    # Compatibilidad: "admin_empresa" => "admin"
+    if role in ("admin", "admin_empresa"):
+        return "admin"
+    # Compatibilidad: "viewer" => "user"
+    if role in ("user", "viewer"):
+        return "user"
+    return role
 
 
 def _get_valid_keys() -> set[str]:
-    """
-    Carga las API keys válidas del entorno.
-    Soporta múltiples keys separadas por coma para rotación sin downtime.
-    """
     raw = os.getenv("AUSARTA_API_KEY", "")
     if not raw:
         return set()
@@ -32,15 +51,7 @@ def _get_valid_keys() -> set[str]:
 
 
 async def require_api_key(api_key: str | None = Security(_API_KEY_HEADER)) -> str:
-    """
-    Dependency de FastAPI que valida el header X-API-Key.
-
-    Si AUSARTA_API_KEY no está configurada en el entorno, deja pasar todo
-    (modo desarrollo). En producción, SIEMPRE debe estar definida.
-    """
     valid_keys = _get_valid_keys()
-
-    # Modo desarrollo: si no hay keys configuradas, no bloqueamos
     if not valid_keys:
         logger.debug("[Auth] AUSARTA_API_KEY no configurada — modo abierto (desarrollo).")
         return "dev-mode"
@@ -57,5 +68,95 @@ async def require_api_key(api_key: str | None = Security(_API_KEY_HEADER)) -> st
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid API Key",
         )
-
     return api_key
+
+
+async def _get_user_from_supabase_jwt(token: str) -> dict:
+    supabase_url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
+    if not supabase_url:
+        raise HTTPException(status_code=500, detail="SUPABASE_URL no configurada")
+
+    apikey = (
+        os.getenv("SUPABASE_ANON_KEY")
+        or os.getenv("SUPABASE_KEY")
+        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or ""
+    )
+    if not apikey:
+        raise HTTPException(status_code=500, detail="Supabase API key no configurada")
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "apikey": apikey,
+    }
+    url = f"{supabase_url}/auth/v1/user"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            if resp.status in (401, 403):
+                raise HTTPException(status_code=401, detail="Token inválido o expirado")
+            body = await resp.text()
+            logger.error(f"[Auth] Error validando JWT en Supabase ({resp.status}): {body[:300]}")
+            raise HTTPException(status_code=500, detail="No se pudo validar el token")
+
+
+async def get_current_user(
+    creds: HTTPAuthorizationCredentials | None = Security(_BEARER),
+) -> CurrentUser:
+    if not creds or not creds.credentials:
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+
+    if not supabase:
+        raise HTTPException(status_code=500, detail="No hay conexión con Supabase")
+
+    token = creds.credentials
+    auth_user = await _get_user_from_supabase_jwt(token)
+    user_id = auth_user.get("id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token sin user_id")
+
+    try:
+        prof_res = (
+            supabase.table("user_profiles")
+            .select("id,email,role,empresa_id")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        logger.error(f"[Auth] Error consultando user_profiles para {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Error cargando perfil de usuario")
+
+    if not prof_res.data:
+        raise HTTPException(status_code=403, detail="Perfil no encontrado en user_profiles")
+
+    profile = prof_res.data[0]
+    canonical = _canonical_role(profile.get("role"))
+    if canonical not in {"superadmin", "admin", "user"}:
+        raise HTTPException(status_code=403, detail="Rol no permitido")
+
+    return CurrentUser(
+        user_id=user_id,
+        email=profile.get("email"),
+        role=canonical,
+        empresa_id=profile.get("empresa_id"),
+    )
+
+
+async def require_superadmin(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if current_user.role != "superadmin":
+        raise HTTPException(status_code=403, detail="Superadmin required")
+    return current_user
+
+
+async def require_admin(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Permite superadmin y admin; bloquea user."""
+    if current_user.role not in {"superadmin", "admin"}:
+        raise HTTPException(status_code=403, detail="Admin required")
+    return current_user
+
+
+# Alias de compatibilidad para código existente.
+async def require_admin_empresa(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    return await require_admin(current_user)
