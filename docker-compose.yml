@@ -69,7 +69,7 @@ services:
       dockerfile: Dockerfile
     container_name: ausarta-arq-worker
     restart: unless-stopped
-    command: ["arq", "backend.worker.WorkerSettings"]
+    command: ["arq", "worker.WorkerSettings"]
     working_dir: /app
     environment:
       - LIVEKIT_URL=${LIVEKIT_URL}

@@ -4,10 +4,8 @@ worker.py — ARQ Worker para el motor de campañas Ausarta.
 PROCESO SEPARADO a la API FastAPI. Consume tareas de Redis de forma
 persistente: si el servidor se reinicia, los jobs pendientes sobreviven.
 
-Arranque:
-    arq backend.worker.WorkerSettings
-
-    (desde /backend, con REDIS_URL definido en el entorno)
+Arranque (imagen Docker: WORKDIR /app = raíz del backend):
+    arq worker.WorkerSettings
 
 Fases:
     Fase 1 (este archivo): Configuración base + stubs de tareas.
@@ -145,7 +143,7 @@ class WorkerSettings:
     """
     Configuración del worker ARQ. La clase es leída por el CLI de arq:
 
-        arq backend.worker.WorkerSettings
+        arq worker.WorkerSettings
 
     Variables de entorno reconocidas:
         REDIS_URL              — URL de Redis (default: redis://redis:6379/0)
