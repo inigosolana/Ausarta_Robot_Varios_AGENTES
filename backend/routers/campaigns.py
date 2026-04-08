@@ -11,7 +11,7 @@ Arquitectura:
 - El estado de las llamadas se actualiza vía webhook de LiveKit (/api/livekit/webhook).
 - Salas con naming aislado: empresa_{id}_camp_{camp_id}_call_{enc_id}.
 """
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from typing import Optional, List
 from services.supabase_service import supabase
@@ -88,6 +88,19 @@ async def _get_active_call_count() -> int:
         return await get_active_call_count()
     except Exception:
         return len(_empresas_en_llamada_fallback)
+
+
+async def _enqueue_scheduler_tick() -> None:
+    """
+    Encola una ejecución inmediata del scheduler ARQ.
+    Se usa al iniciar/reintentar campañas para no esperar al próximo cron (:00/:30).
+    """
+    try:
+        from services.queue_service import get_arq_pool
+        arq = await get_arq_pool()
+        await arq.enqueue_job("campaign_scheduler_task")
+    except Exception as e:
+        logger.warning(f"No se pudo encolar campaign_scheduler_task: {e}")
 
 
 # ──────────────────────────────────────────────
@@ -399,6 +412,13 @@ async def retry_campaign(campaign_id: int):
             "error_msg": None, "next_retry_at": None
         }).eq("campaign_id", campaign_id).in_("status", ["failed", "unreached", "incomplete"]).execute()
         supabase.table("campaigns").update({"status": "active"}).eq("id", campaign_id).execute()
+        try:
+            from services.redis_service import get_redis
+            redis = await get_redis()
+            await redis.delete(f"ausarta:campaign:cancel:{campaign_id}")
+        except Exception:
+            pass
+        await _enqueue_scheduler_tick()
         return {"status": "success", "retried_count": len(res.data)}
     except Exception as e:
         logger.error(f"Error retrying campaign {campaign_id}: {e}")
@@ -416,6 +436,13 @@ async def retry_lead(lead_id: int):
             camp_id = res.data[0].get("campaign_id")
             if camp_id:
                 supabase.table("campaigns").update({"status": "active"}).eq("id", camp_id).execute()
+                try:
+                    from services.redis_service import get_redis
+                    redis = await get_redis()
+                    await redis.delete(f"ausarta:campaign:cancel:{camp_id}")
+                except Exception:
+                    pass
+                await _enqueue_scheduler_tick()
         return {"status": "success"}
     except Exception as e:
         logger.error(f"Error retrying lead {lead_id}: {e}")
@@ -443,6 +470,13 @@ async def schedule_campaign_retry(campaign_id: int, payload: ScheduleRetryReques
             "next_retry_at": retry_at_iso,
         }).eq("campaign_id", campaign_id).in_("status", ["failed", "unreached", "incomplete"]).execute()
         supabase.table("campaigns").update({"status": "active"}).eq("id", campaign_id).execute()
+        try:
+            from services.redis_service import get_redis
+            redis = await get_redis()
+            await redis.delete(f"ausarta:campaign:cancel:{campaign_id}")
+        except Exception:
+            pass
+        await _enqueue_scheduler_tick()
         return {"status": "success", "scheduled_count": len(res.data or []), "retry_at": retry_at_iso}
     except Exception as e:
         logger.error(f"Error scheduling retry for campaign {campaign_id}: {e}")
@@ -453,6 +487,13 @@ async def stop_campaign(campaign_id: int):
     if not supabase: return {"error": "No DB"}
     try:
         supabase.table("campaigns").update({"status": "paused"}).eq("id", campaign_id).execute()
+        try:
+            from services.redis_service import get_redis
+            redis = await get_redis()
+            # Marca de cancelación para que jobs encolados se autodescarten.
+            await redis.set(f"ausarta:campaign:cancel:{campaign_id}", "1", ex=86400)
+        except Exception:
+            pass
         return {"status": "ok", "message": "Campaña pausada"}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -778,6 +819,13 @@ async def start_campaign(campaign_id: int):
         if not res.data:
             raise HTTPException(status_code=404, detail="Campaña no encontrada")
         supabase.table("campaigns").update({"status": "active"}).eq("id", campaign_id).execute()
+        try:
+            from services.redis_service import get_redis
+            redis = await get_redis()
+            await redis.delete(f"ausarta:campaign:cancel:{campaign_id}")
+        except Exception:
+            pass
+        await _enqueue_scheduler_tick()
         return {"status": "ok", "message": "Campaña marcada como activa. El scheduler la procesará en el próximo ciclo."}
     except Exception as e:
         logger.error(f"Error al iniciar campaña: {e}")

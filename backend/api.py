@@ -1,6 +1,5 @@
 import os
 import aiohttp
-import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Union, List
 from dotenv import load_dotenv
@@ -92,11 +91,11 @@ app.include_router(n8n_proxy_router)
 app.include_router(assistant_router)
 
 
-# --- LIFECYCLE: Arrancar Redis + motor de campañas al iniciar ---
+# --- LIFECYCLE: Arrancar Redis + cliente ARQ al iniciar ---
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("🌅 Iniciando API Ausarta v2 (Motor asíncrono de campañas activo)...")
+    logger.info("🌅 Iniciando API Ausarta v2 (scheduler delegado a ARQ worker)...")
 
     # 1. Inicializar Redis (necesario antes del scheduler para locks distribuidos)
     try:
@@ -105,10 +104,13 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"⚠️ Redis no disponible al arrancar: {e}. Los locks usarán fallback en memoria.")
 
-    # 2. Arrancar scheduler de campañas
-    from routers.campaigns import campaign_scheduler_loop
-    asyncio.create_task(campaign_scheduler_loop())
-    logger.info("✅ Scheduler de campañas arrancado como background task.")
+    # 2. Inicializar cliente ARQ (enqueue de jobs desde endpoints)
+    try:
+        from services.queue_service import get_arq_pool
+        await get_arq_pool()
+        logger.info("✅ Cliente ARQ inicializado.")
+    except Exception as e:
+        logger.warning(f"⚠️ ARQ no disponible al arrancar: {e}.")
 
 
 @app.on_event("shutdown")
@@ -117,5 +119,10 @@ async def shutdown_event():
     try:
         from services.redis_service import close_redis
         await close_redis()
+    except Exception:
+        pass
+    try:
+        from services.queue_service import close_arq_pool
+        await close_arq_pool()
     except Exception:
         pass

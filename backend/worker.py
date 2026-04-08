@@ -22,6 +22,8 @@ Flujo de datos:
 import os
 import logging
 from typing import Any
+from datetime import datetime
+import asyncio
 
 from arq import cron
 from arq.connections import ArqRedis, RedisSettings
@@ -111,8 +113,88 @@ async def campaign_scheduler_task(ctx: dict[str, Any]) -> None:
     Ventaja frente al while-True en memoria: si el worker se reinicia,
     el siguiente ciclo de 30s retoma el trabajo sin pérdida de estado.
     """
-    logger.info("[ARQ] campaign_scheduler_task — stub Fase 1 (sin implementación aún)")
-    # Fase 2 reemplazará este cuerpo con la lógica de campaign_scheduler_loop()
+    from services.supabase_service import supabase
+    from routers.campaigns import _is_empresa_locked, _acquire_empresa_lock, _check_campaign_completion, _get_active_call_count
+
+    if not supabase:
+        logger.warning("[ARQ] Supabase no disponible en scheduler")
+        return
+
+    redis: ArqRedis = ctx["redis"]
+    now_iso = datetime.utcnow().isoformat()
+    max_concurrent_calls = int(os.getenv("MAX_CONCURRENT_CALLS", "10"))
+
+    try:
+        campaigns_res = await asyncio.to_thread(
+            supabase.table("campaigns").select("*").in_("status", ["active", "running"]).execute
+        )
+        campaigns = campaigns_res.data or []
+    except Exception as e:
+        logger.error(f"[ARQ] Error leyendo campañas activas: {e}")
+        return
+
+    if campaigns:
+        logger.info(f"[ARQ] Scheduler: {len(campaigns)} campañas activas.")
+
+    active_count = await _get_active_call_count()
+    if active_count >= max_concurrent_calls:
+        logger.warning(f"[ARQ] Límite global de canales SIP alcanzado ({max_concurrent_calls}).")
+        return
+
+    for camp in campaigns:
+        campaign_id = camp["id"]
+        empresa_id = camp.get("empresa_id") or 0
+
+        cancel_key = f"ausarta:campaign:cancel:{campaign_id}"
+        try:
+            if await redis.exists(cancel_key):
+                continue
+        except Exception:
+            pass
+
+        if await _is_empresa_locked(empresa_id):
+            continue
+
+        try:
+            leads_res = await asyncio.to_thread(
+                supabase.table("campaign_leads")
+                .select("*")
+                .eq("campaign_id", campaign_id)
+                .eq("status", "pending")
+                .or_(f"next_retry_at.is.null,next_retry_at.lte.{now_iso}")
+                .order("next_retry_at", desc=False, nullsfirst=True)
+                .limit(1)
+                .execute
+            )
+        except Exception as fetch_err:
+            logger.error(f"[ARQ] Error leyendo leads campaña {campaign_id}: {fetch_err}")
+            continue
+
+        if not leads_res.data:
+            is_done = await _check_campaign_completion(campaign_id)
+            if is_done:
+                try:
+                    await asyncio.to_thread(
+                        supabase.table("campaigns").update({"status": "completed"}).eq("id", campaign_id).execute
+                    )
+                    logger.info(f"[ARQ] Campaña {campaign_id} completada.")
+                except Exception as done_err:
+                    logger.error(f"[ARQ] Error marcando campaña {campaign_id} como completada: {done_err}")
+            continue
+
+        lead = leads_res.data[0]
+
+        acquired = await _acquire_empresa_lock(empresa_id)
+        if not acquired:
+            continue
+
+        job_id = f"dispatch:{campaign_id}:{lead['id']}"
+        await redis.enqueue_job(
+            "dispatch_lead_drip_task",
+            lead["id"],
+            campaign_id,
+            _job_id=job_id,
+        )
 
 
 async def dispatch_lead_drip_task(ctx: dict[str, Any], lead_id: int, campaign_id: int) -> None:
@@ -126,13 +208,53 @@ async def dispatch_lead_drip_task(ctx: dict[str, Any], lead_id: int, campaign_id
         lead_id:     ID del lead en campaign_leads.
         campaign_id: ID de la campaña padre.
     """
-    logger.info(
-        f"[ARQ] dispatch_lead_drip_task — lead={lead_id} camp={campaign_id} "
-        f"(stub Fase 1, sin implementación aún)"
+    import asyncio
+    from services.supabase_service import supabase
+    from routers.campaigns import _dispatch_single_lead_drip, _release_empresa_lock
+
+    redis: ArqRedis = ctx["redis"]
+    if not supabase:
+        logger.warning("[ARQ] Supabase no disponible en dispatch task")
+        return
+
+    cancel_key = f"ausarta:campaign:cancel:{campaign_id}"
+    if await redis.exists(cancel_key):
+        try:
+            lead_row = await asyncio.to_thread(
+                supabase.table("campaign_leads").select("id, campaign_id").eq("id", lead_id).limit(1).execute
+            )
+            if lead_row.data:
+                camp_row = await asyncio.to_thread(
+                    supabase.table("campaigns").select("empresa_id").eq("id", campaign_id).limit(1).execute
+                )
+                empresa_id = (camp_row.data[0].get("empresa_id") if camp_row.data else 0) or 0
+                await _release_empresa_lock(empresa_id)
+        except Exception:
+            pass
+        logger.info(f"[ARQ] Campaña {campaign_id} cancelada, skipping lead {lead_id}")
+        return
+
+    lead_res = await asyncio.to_thread(
+        supabase.table("campaign_leads").select("*").eq("id", lead_id).limit(1).execute
     )
-    # Fase 2 cargará lead + campaign de Supabase y llamará a:
-    # from routers.campaigns import _dispatch_single_lead_drip
-    # await _dispatch_single_lead_drip(lead, campaign)
+    campaign_res = await asyncio.to_thread(
+        supabase.table("campaigns").select("*").eq("id", campaign_id).limit(1).execute
+    )
+
+    if not lead_res.data or not campaign_res.data:
+        logger.warning(f"[ARQ] Datos incompletos para dispatch lead={lead_id}, campaign={campaign_id}")
+        return
+
+    lead = lead_res.data[0]
+    campaign = campaign_res.data[0]
+
+    if campaign.get("status") not in ("active", "running"):
+        logger.info(f"[ARQ] Campaña {campaign_id} no activa ({campaign.get('status')}), skipping lead {lead_id}")
+        empresa_id = campaign.get("empresa_id") or 0
+        await _release_empresa_lock(empresa_id)
+        return
+
+    await _dispatch_single_lead_drip(lead, campaign)
 
 
 # ──────────────────────────────────────────────
@@ -161,6 +283,7 @@ class WorkerSettings:
 
     # Tareas disponibles para enqueue_job()
     functions = [
+        campaign_scheduler_task,
         dispatch_lead_drip_task,
     ]
 
