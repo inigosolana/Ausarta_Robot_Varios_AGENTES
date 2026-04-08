@@ -205,14 +205,49 @@ async def _propagate_to_lead(encuesta_id: int, final_status: str, enc_curr_data:
 
 async def _notify_n8n_post_call(encuesta_id: int, status: str, result_data: dict, empresa_id: int, telefono: str):
     """
-    Envía los datos post-llamada a n8n para integración CRM.
-    n8n ya NO orquesta el goteo; solo recibe los resultados finales.
+    Envía los datos post-llamada a:
+      1. webhook_url  (Zapier / Make — payload limpio y aplanado)
+      2. crm_webhook_url  (CRM específico — HubSpot / Salesforce / n8n)
+      3. N8N_WEBHOOK_URL_RESULTS  (webhook global de plataforma, si existe)
     """
-    # Primero intentamos el webhook específico de CRM (si la empresa lo tiene configurado)
     try:
-        emp_res = supabase.table("empresas").select("crm_webhook_url, crm_type").eq("id", empresa_id).execute()
-        if emp_res.data and emp_res.data[0].get("crm_webhook_url"):
-            cfg = emp_res.data[0]
+        emp_res = supabase.table("empresas").select("crm_webhook_url, crm_type, webhook_url").eq("id", empresa_id).execute()
+        emp_cfg = emp_res.data[0] if (emp_res.data) else {}
+    except Exception as e:
+        logger.warning(f"⚠️ No se pudo leer config de empresa {empresa_id}: {e}")
+        emp_cfg = {}
+
+    datos_extra: dict = result_data.get("datos_extra") or {}
+
+    # ── 1. Automation webhook (Zapier / Make) ──────────────────────────────────
+    automation_url = emp_cfg.get("webhook_url")
+    if automation_url:
+        try:
+            # Payload plano: los campos de datos_extra se elevan al nivel raíz
+            # para que Zapier/Make los detecte como variables individuales.
+            automation_payload = {
+                "event": "call.completed" if status == "completed" else (
+                    "call.rejected" if status == "rejected_opt_out" else "call.failed"
+                ),
+                "call_id": encuesta_id,
+                "phone": telefono,
+                "status": status,
+                "date": datetime.now(timezone.utc).isoformat(),
+                "campaign_name": result_data.get("campaign_name"),
+                "transcription": result_data.get("transcription"),
+                "seconds_used": result_data.get("seconds_used"),
+                "datos_extra": datos_extra,
+                **{k: v for k, v in datos_extra.items()},  # flatten for Zapier
+            }
+            async with aiohttp.ClientSession() as session:
+                async with session.post(automation_url, json=automation_payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    logger.info(f"📡 Automation Webhook [{status}] → {automation_url} ({resp.status})")
+        except Exception as e:
+            logger.warning(f"⚠️ Error en Automation Webhook: {e}")
+
+    # ── 2. CRM webhook (HubSpot / Salesforce / n8n) ────────────────────────────
+    if emp_cfg.get("crm_webhook_url"):
+        try:
             crm_payload = {
                 "event": "call_completed" if status == "completed" else ("call_rejected" if status == "rejected_opt_out" else "call_failed"),
                 "encuesta_id": encuesta_id,
@@ -220,13 +255,13 @@ async def _notify_n8n_post_call(encuesta_id: int, status: str, result_data: dict
                 "status": status,
                 "lead": {"phone": telefono},
                 "results": result_data,
-                "crm_type": cfg.get("crm_type", "custom"),
+                "crm_type": emp_cfg.get("crm_type", "custom"),
             }
             async with aiohttp.ClientSession() as session:
-                async with session.post(cfg["crm_webhook_url"], json=crm_payload, timeout=10) as resp:
-                    logger.info(f"📡 CRM Webhook [{status}] → {cfg['crm_webhook_url']} ({resp.status})")
-    except Exception as e:
-        logger.warning(f"⚠️ Error en CRM Webhook: {e}")
+                async with session.post(emp_cfg["crm_webhook_url"], json=crm_payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    logger.info(f"📡 CRM Webhook [{status}] → {emp_cfg['crm_webhook_url']} ({resp.status})")
+        except Exception as e:
+            logger.warning(f"⚠️ Error en CRM Webhook: {e}")
 
     # También notificar al webhook global de n8n si está configurado
     n8n_results_url = os.getenv("N8N_WEBHOOK_URL_RESULTS")

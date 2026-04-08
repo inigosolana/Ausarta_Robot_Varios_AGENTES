@@ -1,10 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
     ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from 'recharts';
-import { Database, Hash, ToggleLeft, AlignLeft, List } from 'lucide-react';
+import { Database, Hash, ToggleLeft, AlignLeft, List, Download } from 'lucide-react';
 import { SurveyResult, getCallDisposition, ExtractionSchemaProperty } from '../types';
 
 interface AnalyticsProps {
@@ -300,6 +300,54 @@ const TextWidget: React.FC<WidgetProps> = ({ field, completedResults }) => {
     );
 };
 
+// ─── CSV Export ───────────────────────────────────────────────────────────────
+
+function escapeCsvValue(v: any): string {
+    if (v === null || v === undefined) return '';
+    const str = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+}
+
+function buildCsv(results: SurveyResult[], schema?: ExtractionSchemaProperty[]): string {
+    const BASE_HEADERS = ['id', 'telefono', 'fecha', 'status', 'campaign_name', 'segundos'];
+
+    // Collect all unique datos_extra keys (preserve insertion order)
+    const extraKeysSet = new Set<string>();
+    results.forEach(r => {
+        if (r.datos_extra && typeof r.datos_extra === 'object') {
+            Object.keys(r.datos_extra).forEach(k => extraKeysSet.add(k));
+        }
+    });
+    const extraKeys = Array.from(extraKeysSet);
+
+    // Build human-readable header labels using schema if available
+    const schemaMap = new Map(schema?.map(f => [f.key, f.label]) ?? []);
+    const extraLabels = extraKeys.map(k => schemaMap.get(k) ?? prettifyKey(k));
+
+    const headerRow = [...BASE_HEADERS.map(h => ({
+        id: 'ID', telefono: 'Teléfono', fecha: 'Fecha', status: 'Estado',
+        campaign_name: 'Campaña', segundos: 'Segundos'
+    })[h] ?? h), ...extraLabels].join(',');
+
+    const dataRows = results.map(r => {
+        const base = [
+            escapeCsvValue(r.id),
+            escapeCsvValue(r.telefono),
+            escapeCsvValue(r.fecha ? new Date(r.fecha).toLocaleString('es-ES') : ''),
+            escapeCsvValue(r.status),
+            escapeCsvValue(r.campaign_name),
+            escapeCsvValue(r.seconds_used ?? ''),
+        ];
+        const extra = extraKeys.map(k => escapeCsvValue(r.datos_extra?.[k]));
+        return [...base, ...extra].join(',');
+    });
+
+    return [headerRow, ...dataRows].join('\n');
+}
+
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 export const AnalyticsDashboard: React.FC<AnalyticsProps> = ({ results, schema }) => {
@@ -342,6 +390,18 @@ export const AnalyticsDashboard: React.FC<AnalyticsProps> = ({ results, schema }
 
     const hasSchema = Array.isArray(schema) && schema.length > 0;
 
+    const handleExportCsv = useCallback(() => {
+        const csv = buildCsv(results, schema);
+        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const ts = new Date().toISOString().slice(0, 10);
+        a.href = url;
+        a.download = `resultados_${ts}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }, [results, schema]);
+
     if (results.length === 0) return null;
 
     return (
@@ -364,6 +424,20 @@ export const AnalyticsDashboard: React.FC<AnalyticsProps> = ({ results, schema }
                     <p className="text-xs text-gray-500 font-medium mb-1">{t('Con Datos Extra')}</p>
                     <h3 className="text-2xl font-bold text-gray-900">{localInsights.length}</h3>
                 </div>
+            </div>
+
+            {/* ── Export CSV ── */}
+            <div className="flex justify-end">
+                <button
+                    onClick={handleExportCsv}
+                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded-xl text-sm font-medium shadow-sm transition-all"
+                >
+                    <Download size={15} />
+                    {t('Exportar CSV', 'Exportar CSV')}
+                    <span className="bg-gray-100 text-gray-500 text-[10px] font-bold px-1.5 py-0.5 rounded-md ml-0.5">
+                        {results.length}
+                    </span>
+                </button>
             </div>
 
             {/* ── Disposition Donut ── */}

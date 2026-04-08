@@ -50,6 +50,8 @@ export interface Empresa {
   enabled_modules?: string[];
   crm_type?: string | null;
   crm_webhook_url?: string | null;
+  /** Generic automation webhook (Zapier, Make, custom). Separate from CRM-specific crm_webhook_url. */
+  webhook_url?: string | null;
   created_at?: string;
   updated_at?: string;
 }
