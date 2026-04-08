@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Bot, Edit2, Trash2, Loader2, Search, Building2, ArrowLeft } from "lucide-react";
+import { Plus, Bot, Edit2, Trash2, Loader2, Search, Building2, ArrowLeft, Coins, AlertTriangle } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useTranslation } from "react-i18next";
 import type { AgentConfig, AIConfig, Empresa } from "../types";
 import AgentFormView from "./AgentFormView";
+import { AgentTemplateGallery } from "../components/AgentTemplateGallery";
+import type { AgentTemplate } from "../components/AgentTemplateGallery";
 
 const AgentManagementView: React.FC = () => {
     const { profile, isRole, isPlatformOwner } = useAuth();
@@ -16,11 +18,30 @@ const AgentManagementView: React.FC = () => {
     const [search, setSearch] = useState("");
     const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
     const [isCreatingAgent, setIsCreatingAgent] = useState(false);
+    const [showTemplateGallery, setShowTemplateGallery] = useState(false);
     const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | "all">("all");
+    const [templatePreload, setTemplatePreload] = useState<Partial<AgentConfig> | null>(null);
+    const [creditBalance, setCreditBalance] = useState<number | null>(null);
 
     useEffect(() => {
         loadData();
     }, []);
+
+    // Load credit balance for non-superadmins
+    useEffect(() => {
+        if (!isPlatformOwner && profile?.empresa_id) {
+            supabase
+                .from("empresas")
+                .select("creditos_llamadas")
+                .eq("id", profile.empresa_id)
+                .single()
+                .then(({ data }) => {
+                    if (data && data.creditos_llamadas !== undefined && data.creditos_llamadas !== null) {
+                        setCreditBalance(data.creditos_llamadas);
+                    }
+                });
+        }
+    }, [isPlatformOwner, profile?.empresa_id]);
 
     const loadData = async () => {
         setLoading(true);
@@ -92,20 +113,46 @@ const AgentManagementView: React.FC = () => {
         .filter(a => selectedEmpresaId === "all" || a.empresa_id === selectedEmpresaId)
         .filter(a => a.name.toLowerCase().includes(search.toLowerCase()) || (a.use_case || "").toLowerCase().includes(search.toLowerCase()));
 
+    const handleTemplateSelected = (config: AgentTemplate['config']) => {
+        setTemplatePreload(config as Partial<AgentConfig>);
+        setShowTemplateGallery(false);
+        setIsCreatingAgent(true);
+    };
+
+    const handleNewAgentClick = () => {
+        if (isSuperadmin && selectedEmpresaId === "all") {
+            alert(t("Select a company before creating an agent", "Selecciona una empresa antes de crear un agente"));
+            return;
+        }
+        setShowTemplateGallery(true);
+    };
+
     // If creating or editing, show the form
     if (isCreatingAgent || editingAgent) {
         const empresaId = editingAgent?.empresa_id || getNewAgentEmpresaId();
+        const baseAgent = editingAgent || {
+            name: "",
+            use_case: "",
+            description: "",
+            instructions: "",
+            critical_rules: "",
+            greeting: "",
+            empresa_id: empresaId,
+            ...(templatePreload || {}),
+        };
         return (
             <AgentFormView
-                agent={editingAgent || { name: "", use_case: "", description: "", instructions: "", critical_rules: "", greeting: "", empresa_id: empresaId }}
+                agent={baseAgent as AgentConfig}
                 onSave={async () => {
                     setEditingAgent(null);
                     setIsCreatingAgent(false);
+                    setTemplatePreload(null);
                     await loadData();
                 }}
                 onCancel={() => {
                     setEditingAgent(null);
                     setIsCreatingAgent(false);
+                    setTemplatePreload(null);
                 }}
             />
         );
@@ -116,6 +163,14 @@ const AgentManagementView: React.FC = () => {
 
     return (
         <div className="space-y-6 relative">
+            {/* Template Gallery Modal */}
+            {showTemplateGallery && (
+                <AgentTemplateGallery
+                    onSelectTemplate={handleTemplateSelected}
+                    onClose={() => setShowTemplateGallery(false)}
+                />
+            )}
+
             {/* Custom Delete Modal */}
             {agentToDelete && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
@@ -161,21 +216,39 @@ const AgentManagementView: React.FC = () => {
                         }
                     </p>
                 </div>
-                {canCreate && (
-                    <button
-                        onClick={() => {
-                            if (isSuperadmin && selectedEmpresaId === "all") {
-                                alert(t("Select a company before creating an agent", "Selecciona una empresa antes de crear un agente"));
-                                return;
+                <div className="flex items-center gap-3">
+                    {/* Credits badge — only for non-superadmins */}
+                    {!isPlatformOwner && creditBalance !== null && (
+                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold border ${
+                            creditBalance === 0
+                                ? 'bg-red-50 text-red-600 border-red-200'
+                                : creditBalance <= 5
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        }`}>
+                            {creditBalance === 0
+                                ? <AlertTriangle size={15} className="shrink-0" />
+                                : <Coins size={15} className="shrink-0" />
                             }
-                            setIsCreatingAgent(true);
-                        }}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-500 shadow-lg shadow-blue-500/20 font-medium text-sm transition-all hover:scale-105"
-                    >
-                        <Plus size={18} />
-                        {t("Create Agent", "Crear Agente")}
-                    </button>
-                )}
+                            <span>
+                                {creditBalance === 0
+                                    ? t('Sin créditos', 'Sin créditos')
+                                    : `${creditBalance} ${t('créditos', 'créditos')}`
+                                }
+                            </span>
+                        </div>
+                    )}
+
+                    {canCreate && (
+                        <button
+                            onClick={handleNewAgentClick}
+                            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-500 shadow-lg shadow-blue-500/20 font-medium text-sm transition-all hover:scale-105"
+                        >
+                            <Plus size={18} />
+                            {t("Create Agent", "Crear Agente")}
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* Filters */}

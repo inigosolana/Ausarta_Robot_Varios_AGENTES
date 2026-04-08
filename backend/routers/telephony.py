@@ -144,6 +144,10 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
             curr_data.get("telefono", ""),
         )
 
+    # --- Deducir 1 crédito al completar la llamada ---
+    if normalized_status == "completed" and curr_data.get("empresa_id"):
+        background_tasks.add_task(_deduct_credit, curr_data["empresa_id"])
+
     return {"status": "ok", "updated": update_data}
 
 
@@ -281,6 +285,58 @@ async def _notify_n8n_post_call(encuesta_id: int, status: str, result_data: dict
                 logger.info(f"📡 n8n results webhook [{status}] → {resp.status}")
     except Exception as e:
         logger.warning(f"⚠️ Error en n8n results webhook: {e}")
+
+
+async def _deduct_credit(empresa_id: int) -> None:
+    """
+    Descuenta 1 crédito de llamada a la empresa.
+    Si los créditos llegan a 0, pausa automáticamente todas sus campañas activas.
+
+    La deducción usa un UPDATE atómico con condición >= 1 para evitar saldos negativos.
+    SQL migration requerida (una sola vez en Supabase):
+        ALTER TABLE empresas ADD COLUMN IF NOT EXISTS creditos_llamadas INTEGER DEFAULT 0;
+    """
+    if not supabase:
+        return
+    try:
+        # Leer créditos actuales
+        emp_res = supabase.table("empresas").select("creditos_llamadas").eq("id", empresa_id).limit(1).execute()
+        if not emp_res.data:
+            return
+
+        current = emp_res.data[0].get("creditos_llamadas")
+        if current is None:
+            # columna no existe aún o no configurada — omitir silenciosamente
+            return
+
+        if current <= 0:
+            # Ya está a 0 — pausar campañas como medida de seguridad
+            await _pause_empresa_campaigns(empresa_id, reason="sin_creditos")
+            return
+
+        # Decrementar (sólo si > 0 para evitar negativos)
+        new_credits = max(0, current - 1)
+        supabase.table("empresas").update({"creditos_llamadas": new_credits}).eq("id", empresa_id).execute()
+        logger.info(f"💳 [Credits] Empresa {empresa_id}: {current} → {new_credits} créditos")
+
+        if new_credits == 0:
+            logger.warning(f"🚫 [Credits] Empresa {empresa_id} sin créditos. Pausando campañas.")
+            await _pause_empresa_campaigns(empresa_id, reason="sin_creditos")
+
+    except Exception as e:
+        logger.warning(f"⚠️ [Credits] Error deduciendo crédito para empresa {empresa_id}: {e}")
+
+
+async def _pause_empresa_campaigns(empresa_id: int, reason: str = "sin_creditos") -> None:
+    """Pausa todas las campañas activas de una empresa por falta de créditos."""
+    if not supabase:
+        return
+    try:
+        res = supabase.table("campaigns").update({"status": "paused"}).eq("empresa_id", empresa_id).in_("status", ["active", "running"]).execute()
+        paused = len(res.data) if res.data else 0
+        logger.warning(f"⏸️ [Credits] {paused} campaña(s) pausadas para empresa {empresa_id} (motivo: {reason})")
+    except Exception as e:
+        logger.error(f"❌ [Credits] Error pausando campañas empresa {empresa_id}: {e}")
 
 
 # ──────────────────────────────────────────────

@@ -150,7 +150,11 @@ const AgentListView: React.FC = () => {
         if (!responsable) return;
 
         try {
-            const { error } = await supabase.from("empresas").insert({ nombre, responsable });
+            const { error } = await supabase.from("empresas").insert({
+                nombre,
+                responsable,
+                creditos_llamadas: 10,   // 10 free credits for new companies
+            });
             if (error) throw error;
             loadEmpresas();
         } catch (err) {

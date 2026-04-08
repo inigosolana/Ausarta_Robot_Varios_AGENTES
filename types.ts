@@ -52,6 +52,8 @@ export interface Empresa {
   crm_webhook_url?: string | null;
   /** Generic automation webhook (Zapier, Make, custom). Separate from CRM-specific crm_webhook_url. */
   webhook_url?: string | null;
+  /** Call credits balance. Each completed call deducts 1 credit. 0 = campaigns paused. */
+  creditos_llamadas?: number | null;
   created_at?: string;
   updated_at?: string;
 }
