@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Save, ArrowLeft, Loader2, Bot, Mic, Speaker, Brain, Sparkles, X } from 'lucide-react';
+import { Save, ArrowLeft, Loader2, Bot, Mic, Speaker, Brain, Sparkles, X, FlaskConical } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { AgentConfig, AIConfig, Empresa } from '../types';
 import DashboardView from './DashboardView';
 import ResultsView from './ResultsView';
+import { TestCallModal } from '../components/TestCallModal';
 
 const AUSARTA_FEMALE_VOICE_ID = 'b5aa8098-49ef-475d-89b0-c9262ecf33fd';  // Chica castellano Cartesia
 
@@ -63,6 +64,9 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
     const [showAiPromptModal, setShowAiPromptModal] = useState(false);
     const [aiPromptRequest, setAiPromptRequest] = useState('');
     const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+
+    // Test Call (Simulator) State
+    const [showTestCallModal, setShowTestCallModal] = useState(false);
 
 
     useEffect(() => {
@@ -255,6 +259,15 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
     return (
         <div className="space-y-6 max-w-4xl mx-auto pb-20">
+            {/* Test Call Simulator Modal */}
+            {showTestCallModal && agent?.id && (
+                <TestCallModal
+                    agentId={Number(agent.id)}
+                    agentName={agent.name || formData.name}
+                    onClose={() => setShowTestCallModal(false)}
+                />
+            )}
+
             {isLoading && (
                 <div className="text-center text-xs text-gray-500">
                     {t('Loading configuration...', 'Cargando configuración...')}
@@ -276,14 +289,25 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                         <p className="text-gray-500 text-sm">{t('Agent and AI Models Configuration', 'Configuración del Agente y Modelos AI')}</p>
                     </div>
                 </div>
-                <button
-                    onClick={handleSave}
-                    disabled={isSaving}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-medium rounded-xl hover:from-blue-500 hover:to-blue-400 transition-all disabled:opacity-50 shadow-lg shadow-blue-500/20"
-                >
-                    {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                    {isEditing ? t('Save Changes', 'Guardar Cambios') : t('Create Agent', 'Crear Agente')}
-                </button>
+                <div className="flex items-center gap-2">
+                    {isEditing && agent?.id && (
+                        <button
+                            onClick={() => setShowTestCallModal(true)}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-green-500 text-white font-medium rounded-xl hover:from-emerald-500 hover:to-green-400 transition-all shadow-lg shadow-green-500/20"
+                        >
+                            <FlaskConical size={17} />
+                            {t('Probar Agente', 'Probar Agente')}
+                        </button>
+                    )}
+                    <button
+                        onClick={handleSave}
+                        disabled={isSaving}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-medium rounded-xl hover:from-blue-500 hover:to-blue-400 transition-all disabled:opacity-50 shadow-lg shadow-blue-500/20"
+                    >
+                        {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                        {isEditing ? t('Save Changes', 'Guardar Cambios') : t('Create Agent', 'Crear Agente')}
+                    </button>
+                </div>
             </header>
 
             {/* Tabs (Only if editing) */}

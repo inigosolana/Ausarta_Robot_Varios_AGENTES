@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, Target, ThumbsDown, Calendar, Sparkles, X, Database } from 'lucide-react';
+import { FileText, Target, ThumbsDown, Calendar, Sparkles, X, Database, Volume2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { SurveyResult } from '../types';
 
@@ -232,6 +232,22 @@ export function CallResultModal({ result, onClose }: CallResultModalProps) {
                         <p className="text-sm text-gray-400 italic">{t('No se recopilaron datos estructurados en esta llamada.')}</p>
                     )}
                 </div>
+
+                {/* Reproductor de audio (si existe recording_url) */}
+                {result.recording_url && (
+                    <div className="px-6 py-3 border-b border-gray-100 bg-gray-50/50 shrink-0">
+                        <div className="flex items-center gap-2 mb-2">
+                            <Volume2 size={14} className="text-blue-500" />
+                            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{t('Grabación de la llamada', 'Grabación de la llamada')}</span>
+                        </div>
+                        <audio
+                            controls
+                            src={result.recording_url}
+                            className="w-full h-9 rounded-lg"
+                            style={{ accentColor: '#2563eb' }}
+                        />
+                    </div>
+                )}
 
                 {/* Transcripción */}
                 <div className="p-6 overflow-y-auto space-y-6 bg-gray-50/20 flex-1">

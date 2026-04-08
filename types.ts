@@ -164,6 +164,7 @@ export interface SurveyResult {
   datos_extra?: Record<string, any> | null;
   customer_name?: string | null;
   empresa_name?: string | null;
+  recording_url?: string | null;
 }
 
 // Mapeo canónico de disposición para gráficos

@@ -392,6 +392,10 @@ async def make_outbound_call(request: dict, _api_key: str = Depends(_outbound_ap
             await _release_room_lock(rname)
 
         asyncio.create_task(clear_lock(room_name))
+
+        # Grabación de audio (solo si ENABLE_RECORDING=true y credenciales configuradas)
+        asyncio.create_task(_safe_start_recording(room_name, encuesta_id))
+
         return {"status": "ok", "roomName": room_name, "callId": encuesta_id}
 
     except Exception as e:
@@ -500,6 +504,32 @@ def _extract_encuesta_id_from_room(room_name: str) -> int | None:
 
 
 
+async def _safe_start_recording(room_name: str, encuesta_id: int) -> None:
+    """Inicia la grabación de audio sin bloquear el flujo principal."""
+    try:
+        from services.recording_service import start_recording
+        await start_recording(room_name, encuesta_id)
+    except Exception as exc:
+        logger.debug(f"[Recording] start_recording ignorado: {exc}")
+
+
+async def _safe_stop_recording(encuesta_id: int) -> None:
+    """Para la grabación y guarda la URL en la encuesta si existe."""
+    try:
+        from services.recording_service import stop_recording
+        recording_url = await stop_recording(encuesta_id)
+        if recording_url and supabase:
+            await asyncio.to_thread(
+                supabase.table("encuestas")
+                    .update({"recording_url": recording_url})
+                    .eq("id", encuesta_id)
+                    .execute
+            )
+            logger.info(f"🎵 [Recording] URL guardada para encuesta {encuesta_id}: {recording_url}")
+    except Exception as exc:
+        logger.debug(f"[Recording] stop_recording ignorado: {exc}")
+
+
 async def _handle_room_finished(encuesta_id: int, room_name: str, room_metadata: dict | None = None):
     """
     La sala se cerró. Si el estado en BD todavía no es terminal,
@@ -507,6 +537,10 @@ async def _handle_room_finished(encuesta_id: int, room_name: str, room_metadata:
     """
     if not supabase:
         return
+
+    # Parar grabación (si estaba activa) antes de cualquier otra cosa
+    asyncio.create_task(_safe_stop_recording(encuesta_id))
+
     try:
         res = await asyncio.to_thread(
             supabase.table("encuestas")
