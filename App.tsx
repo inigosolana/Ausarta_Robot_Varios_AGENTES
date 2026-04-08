@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, Suspense, lazy } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   Bot,
@@ -22,7 +23,6 @@ import {
   Settings,
   Share2
 } from 'lucide-react';
-import { ViewState } from './types';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Toaster, toast } from 'react-hot-toast';
@@ -58,7 +58,8 @@ const ViewLoader = () => (
 const App: React.FC = () => {
   const { user, profile, realProfile, loading, signOut, hasPermission, isRole, refreshProfile, isPlatformOwner, setSpoofedRole, setSpoofedEmpresa } = useAuth();
   const { t, i18n } = useTranslation();
-  const [currentView, setCurrentView] = useState<ViewState | 'results' | 'admin' | 'crm' | 'profile'>('overview');
+  const navigate = useNavigate();
+  const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isCalling, setIsCalling] = useState(false);
@@ -72,16 +73,24 @@ const App: React.FC = () => {
   const isAusartaAdmin = realProfile?.empresas?.nombre?.toLowerCase() === 'ausarta' && realProfile?.role === 'admin';
   const canSimulation = realProfile?.role === 'superadmin' || isRootUser || isAusartaAdmin;
 
-  // Auto-redirect if role change makes current view inaccessible
+  // Auto-redirect if role change makes current path inaccessible
   useEffect(() => {
-    if (currentView === 'profile') return;
-    if (currentView === 'overview') return;
-
-    // Check if the current view is still accessible
-    if (!hasPermission(currentView)) {
-      setCurrentView('overview');
+    const pathToPermission: Record<string, string> = {
+      '/campaigns': 'campaigns',
+      '/empresas': 'empresas',
+      '/agents': 'agents',
+      '/test-call': 'test-call',
+      '/results': 'results',
+      '/usage': 'usage',
+      '/admin': 'admin',
+      '/crm': 'crm',
+      '/copilot': 'assistant',
+    };
+    const perm = pathToPermission[location.pathname];
+    if (perm && !hasPermission(perm)) {
+      navigate('/', { replace: true });
     }
-  }, [profile?.role, currentView, profile?.empresa_id]);
+  }, [profile?.role, location.pathname, profile?.empresa_id]);
 
   useEffect(() => {
     setIsDarkMode(document.documentElement.classList.contains('dark'));
@@ -149,52 +158,24 @@ const App: React.FC = () => {
     return <LoginView />;
   }
 
-  const renderContent = () => {
-    return (
-      <Suspense fallback={<ViewLoader />}>
-        {(() => {
-          switch (currentView) {
-
-            case 'campaigns':
-              return <PermissionGate view="campaigns"><CampaignsView /></PermissionGate>;
-            case 'create-agents':
-            case 'empresas':
-              return <PermissionGate view="empresas"><AgentListView /></PermissionGate>;
-            case 'agents':
-              return <PermissionGate view="agents"><AgentManagementView /></PermissionGate>;
-            case 'test-call':
-              return <PermissionGate view="test-call"><TestCallView /></PermissionGate>;
-            case 'overview':
-              return <PermissionGate view="overview"><DashboardView /></PermissionGate>;
-            case 'results':
-              return <PermissionGate view="results"><ResultsView /></PermissionGate>;
-            case 'usage':
-              return <PermissionGate view="usage"><UsageView /></PermissionGate>;
-
-            case 'admin':
-              return <PermissionGate view="admin"><UserManagementView /></PermissionGate>;
-            case 'crm':
-              return <CrmIntegrationView />;
-            case 'assistant':
-              return <PermissionGate view="assistant"><AssistantView /></PermissionGate>;
-            case 'profile':
-              return <ProfileView />;
-            case 'automation':
-            case 'tools':
-            default:
-              return (
-                <div className="flex items-center justify-center h-full text-gray-400">
-                  <div className="text-center">
-                    <BarChart3 size={48} className="mx-auto mb-4 opacity-20" />
-                    <p>{t('Module in development', 'Módulo en desarrollo')} - {currentView}</p>
-                  </div>
-                </div>
-              );
-          }
-        })()}
-      </Suspense>
-    );
-  };
+  const renderContent = () => (
+    <Suspense fallback={<ViewLoader />}>
+      <Routes>
+        <Route path="/" element={<PermissionGate view="overview"><DashboardView /></PermissionGate>} />
+        <Route path="/campaigns" element={<PermissionGate view="campaigns"><CampaignsView /></PermissionGate>} />
+        <Route path="/empresas" element={<PermissionGate view="empresas"><AgentListView /></PermissionGate>} />
+        <Route path="/agents" element={<PermissionGate view="agents"><AgentManagementView /></PermissionGate>} />
+        <Route path="/test-call" element={<PermissionGate view="test-call"><TestCallView /></PermissionGate>} />
+        <Route path="/results" element={<PermissionGate view="results"><ResultsView /></PermissionGate>} />
+        <Route path="/copilot" element={<PermissionGate view="assistant"><AssistantView /></PermissionGate>} />
+        <Route path="/usage" element={<PermissionGate view="usage"><UsageView /></PermissionGate>} />
+        <Route path="/admin" element={<PermissionGate view="admin"><UserManagementView /></PermissionGate>} />
+        <Route path="/crm" element={<CrmIntegrationView />} />
+        <Route path="/profile" element={<ProfileView />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
+  );
 
 
   const resolveAlert = async (id: number) => {
@@ -236,8 +217,8 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<LayoutDashboard size={18} />}
                 label={t('Dashboard')}
-                isActive={currentView === 'overview'}
-                onClick={() => setCurrentView('overview')}
+                isActive={location.pathname === '/'}
+                onClick={() => navigate('/')}
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -249,8 +230,8 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Building2 size={18} />}
                 label={t('Companies', 'Empresas')}
-                isActive={currentView === 'empresas'}
-                onClick={() => setCurrentView('empresas')}
+                isActive={location.pathname === '/empresas'}
+                onClick={() => navigate('/empresas')}
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -259,8 +240,8 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Bot size={18} />}
                 label={t('Agentes', 'Agentes')}
-                isActive={currentView === 'agents'}
-                onClick={() => setCurrentView('agents')}
+                isActive={location.pathname === '/agents'}
+                onClick={() => navigate('/agents')}
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -269,8 +250,8 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Phone size={18} />}
                 label={t('Test Call', 'Llamada Prueba')}
-                isActive={currentView === 'test-call'}
-                onClick={() => setCurrentView('test-call')}
+                isActive={location.pathname === '/test-call'}
+                onClick={() => navigate('/test-call')}
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -279,8 +260,8 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Megaphone size={18} />}
                 label={t('Campaigns', 'Campañas')}
-                isActive={currentView === 'campaigns'}
-                onClick={() => setCurrentView('campaigns')}
+                isActive={location.pathname === '/campaigns'}
+                onClick={() => navigate('/campaigns')}
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -292,8 +273,8 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<BarChart3 size={18} />}
                 label={t('Results', 'Resultados')}
-                isActive={currentView === 'results'}
-                onClick={() => setCurrentView('results')}
+                isActive={location.pathname === '/results'}
+                onClick={() => navigate('/results')}
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -302,8 +283,8 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<BotMessageSquare size={18} />}
                 label={t('Ausarta Copilot', 'Ausarta Copilot')}
-                isActive={currentView === 'assistant'}
-                onClick={() => setCurrentView('assistant')}
+                isActive={location.pathname === '/copilot'}
+                onClick={() => navigate('/copilot')}
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -312,8 +293,8 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Zap size={18} />}
                 label={t('Usage', 'Uso')}
-                isActive={currentView === 'usage'}
-                onClick={() => setCurrentView('usage')}
+                isActive={location.pathname === '/usage'}
+                onClick={() => navigate('/usage')}
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -322,8 +303,8 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Settings size={18} />}
                 label={t('Admin', 'Administración')}
-                isActive={currentView === 'admin'}
-                onClick={() => setCurrentView('admin')}
+                isActive={location.pathname === '/admin'}
+                onClick={() => navigate('/admin')}
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -332,8 +313,8 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Share2 size={18} />}
                 label={t('CRM Integration', 'Integración CRM')}
-                isActive={currentView === 'crm'}
-                onClick={() => setCurrentView('crm')}
+                isActive={location.pathname === '/crm'}
+                onClick={() => navigate('/crm')}
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -342,7 +323,7 @@ const App: React.FC = () => {
           {/* User info + Logout */}
           <div className="p-4 border-t border-gray-50 dark:border-gray-700 space-y-2">
             <div
-              onClick={() => setCurrentView('profile')}
+              onClick={() => navigate('/profile')}
               className={`flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded-xl transition-all ${!isSidebarOpen && 'justify-center'}`}
             >
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
