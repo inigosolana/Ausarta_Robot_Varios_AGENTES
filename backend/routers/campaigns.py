@@ -90,6 +90,27 @@ async def _get_active_call_count() -> int:
         return len(_empresas_en_llamada_fallback)
 
 
+async def _get_active_call_count_for_empresa(empresa_id: int) -> int:
+    """
+    Retorna el número de llamadas activas (status calling/initiated/called)
+    para una empresa específica. Usado por el rate limiter por empresa.
+    """
+    if not supabase or not empresa_id:
+        return 0
+    try:
+        res = await asyncio.to_thread(
+            supabase.table("encuestas")
+                .select("id", count="exact")
+                .eq("empresa_id", empresa_id)
+                .in_("status", ["calling", "initiated", "called"])
+                .execute
+        )
+        return res.count or 0
+    except Exception as e:
+        logger.warning(f"[RateLimit] Error contando llamadas activas para empresa {empresa_id}: {e}")
+        return 0
+
+
 async def _enqueue_scheduler_tick() -> None:
     """
     Encola una ejecución inmediata del scheduler ARQ.

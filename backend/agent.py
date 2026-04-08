@@ -138,6 +138,90 @@ Reglas para sonar humano:
 13) ANTE AUDIO CORTADO O INCOMPRENSIBLE: usa una frase breve y natural ("Perdona, se ha cortado un poco, ¿qué decías?"). NUNCA uses "dime algo".
 """
 
+# ─── Language Auto-Detection ──────────────────────────────────────────────────
+# Tokens mínimos para declarar un idioma. Basta con que el cliente diga
+# "Hello?" o "Bonjour!" para detectarlo.
+
+_LANG_TOKENS: list[tuple[str, frozenset[str], int]] = [
+    # (código BCP-47, tokens, mínimo de coincidencias para declarar)
+    ("en", frozenset({
+        "hello", "hi", "hey", "yes", "no", "not", "okay", "ok", "sure",
+        "sorry", "thanks", "thank", "what", "who", "please", "speak",
+        "english", "good", "morning", "afternoon", "evening", "moment",
+        "dont", "don't", "i'm", "i am", "can", "you", "me",
+    }), 1),
+    ("fr", frozenset({
+        "allô", "allo", "bonjour", "bonsoir", "salut", "oui", "non",
+        "merci", "qui", "quoi", "je", "vous", "parle", "français",
+        "francais", "pardon", "comment", "excusez",
+    }), 1),
+    ("de", frozenset({
+        "hallo", "guten", "ja", "nein", "bitte", "danke", "wer",
+        "was", "ich", "deutsch", "sprechen", "morgen", "tag",
+    }), 1),
+    ("it", frozenset({
+        "ciao", "salve", "pronto", "sì", "prego", "grazie", "chi",
+        "cosa", "italiano", "buongiorno", "buonasera", "scusi",
+    }), 1),
+    ("pt", frozenset({
+        "olá", "ola", "oi", "sim", "não", "nao", "obrigado", "obrigada",
+        "quem", "português", "portugues", "bom", "boa",
+    }), 1),
+]
+
+# Mensajes de override para inyectar en el chat context al detectar idioma
+_LANG_OVERRIDE_MSGS: dict[str, str] = {
+    "en": (
+        "CRITICAL LANGUAGE OVERRIDE: The caller is speaking ENGLISH. "
+        "From this point on you MUST respond EXCLUSIVELY in English. "
+        "Switch your entire script, greeting, and questions to English immediately."
+    ),
+    "fr": (
+        "CHANGEMENT DE LANGUE CRITIQUE : Le client parle FRANÇAIS. "
+        "À partir de maintenant, répondez EXCLUSIVEMENT en français. "
+        "Traduisez votre script et vos questions en français immédiatement."
+    ),
+    "de": (
+        "KRITISCHER SPRACHENWECHSEL: Der Anrufer spricht DEUTSCH. "
+        "Ab sofort antworten Sie AUSSCHLIESSLICH auf Deutsch. "
+        "Übersetzen Sie Ihr Skript und Ihre Fragen sofort ins Deutsche."
+    ),
+    "it": (
+        "CAMBIO LINGUA CRITICO: Il chiamante parla ITALIANO. "
+        "Da questo momento in poi rispondere ESCLUSIVAMENTE in italiano. "
+        "Traducete immediatamente il vostro script e le vostre domande in italiano."
+    ),
+    "pt": (
+        "MUDANÇA DE IDIOMA CRÍTICA: O chamador fala PORTUGUÊS. "
+        "A partir de agora responda EXCLUSIVAMENTE em português. "
+        "Traduza imediatamente o seu guião e perguntas para português."
+    ),
+}
+
+
+def _detect_language(text: str) -> str | None:
+    """
+    Detecta el idioma de una frase corta usando tokens léxicos.
+    Retorna el código BCP-47 detectado (ej: 'en', 'fr') o None si no hay
+    suficiente evidencia para cambiar el idioma configurado.
+    """
+    if not text:
+        return None
+
+    # Normalizar: minúsculas, eliminar puntuación salvo acentos
+    normalized = re.sub(r"[^\w\s\u00c0-\u017e]", " ", text.lower())
+    words = set(normalized.split())
+    if not words:
+        return None
+
+    for lang_code, tokens, min_hits in _LANG_TOKENS:
+        hits = len(words & tokens)
+        if hits >= min_hits:
+            return lang_code
+
+    return None
+
+
 ENTHUSIASM_INSTRUCTIONS = {
     "Bajo": "Mantén un tono calmado, pausado y profesional. Evita sonar efusivo.",
     "Normal": "Mantén un tono cercano, claro y profesional con energía equilibrada.",
@@ -1245,6 +1329,71 @@ async def entrypoint(ctx: JobContext):
         interruption_acks = ["Uy, perdona, dime.", "Sí, dime."]
         max_short_interrupt_words = int(os.getenv("AGENT_INTERRUPT_MIN_WORDS", "3"))
 
+        # ── Language auto-detection state ──────────────────────────────────────
+        lang_state = {
+            "detected": False,      # True once we've run the detector (regardless of outcome)
+            "switched": False,      # True if we actually changed the language
+            "original_lang": language,
+            "active_lang": language,
+        }
+
+        async def _try_switch_language(user_text: str) -> None:
+            """
+            Detecta el idioma del primer mensaje real del usuario.
+            Si difiere del configurado, inyecta un override de sistema en el
+            chat context del LLM y actualiza el plugin TTS.
+            Solo actúa UNA VEZ por llamada (primera intervención humana real).
+            """
+            if lang_state["detected"]:
+                return
+            lang_state["detected"] = True
+
+            detected = _detect_language(user_text)
+            if not detected or detected == lang_state["original_lang"]:
+                return
+
+            lang_state["switched"] = True
+            lang_state["active_lang"] = detected
+            logger.info(
+                f"🌐 [{job_id}] Idioma detectado: '{detected}' "
+                f"(configurado: '{lang_state['original_lang']}'). Cambiando idioma."
+            )
+
+            override_msg = _LANG_OVERRIDE_MSGS.get(detected)
+            if not override_msg:
+                return
+
+            # 1. Inyectar instrucción en el chat context del LLM
+            try:
+                chat_ctx = getattr(session, "chat_ctx", getattr(session, "chat_context", None))
+                if chat_ctx is not None:
+                    # API moderna: add_message directamente
+                    if hasattr(chat_ctx, "add_message"):
+                        chat_ctx.add_message(role="system", content=override_msg)
+                    # API alternativa: shallow_copy + update_chat_ctx
+                    elif hasattr(session, "update_chat_ctx"):
+                        from livekit.agents.llm import ChatContext, ChatMessage
+                        new_ctx = chat_ctx.copy() if hasattr(chat_ctx, "copy") else chat_ctx
+                        new_ctx.messages.append(ChatMessage.create(text=override_msg, role="system"))
+                        await session.update_chat_ctx(new_ctx)
+                    logger.info(f"🌐 [{job_id}] Instrucción de idioma '{detected}' inyectada en chat context.")
+            except Exception as ctx_err:
+                logger.warning(f"⚠️ [{job_id}] No se pudo inyectar override de idioma: {ctx_err}")
+
+            # 2. Actualizar plugin TTS al idioma detectado (sonic-multilingual soporta múltiples idiomas)
+            try:
+                new_tts = _build_tts_plugin(
+                    voice_id=voice_id,
+                    language=detected,
+                    speaking_speed=speaking_speed,
+                    tts_model=tts_model,
+                )
+                await session.update_options(tts=new_tts)
+                logger.info(f"🎙️ [{job_id}] TTS actualizado a idioma '{detected}'.")
+            except Exception as tts_err:
+                logger.warning(f"⚠️ [{job_id}] No se pudo actualizar TTS al idioma '{detected}': {tts_err}")
+        # ── fin language detection ──────────────────────────────────────────────
+
         @session.on("user_input_transcribed")
         def _on_user_input_transcribed(ev):
             try:
@@ -1260,6 +1409,10 @@ async def entrypoint(ctx: JobContext):
 
                 word_count = _count_words(content)
                 runtime_state["last_user_text"] = content
+
+                # Detección de idioma en la primera intervención real del usuario
+                if not lang_state["detected"] and word_count >= 1:
+                    asyncio.create_task(_try_switch_language(content))
 
                 # Anti-falsas interrupciones: no considerar interrupción real si son muy pocas palabras.
                 if runtime_state["agent_state"] in ("speaking", "thinking") and word_count < max_short_interrupt_words:

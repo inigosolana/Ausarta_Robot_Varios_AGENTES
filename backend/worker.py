@@ -114,7 +114,10 @@ async def campaign_scheduler_task(ctx: dict[str, Any]) -> None:
     el siguiente ciclo de 30s retoma el trabajo sin pérdida de estado.
     """
     from services.supabase_service import supabase
-    from routers.campaigns import _is_empresa_locked, _acquire_empresa_lock, _check_campaign_completion, _get_active_call_count
+    from routers.campaigns import (
+        _is_empresa_locked, _acquire_empresa_lock, _check_campaign_completion,
+        _get_active_call_count, _get_active_call_count_for_empresa,
+    )
 
     if not supabase:
         logger.warning("[ARQ] Supabase no disponible en scheduler")
@@ -141,6 +144,9 @@ async def campaign_scheduler_task(ctx: dict[str, Any]) -> None:
         logger.warning(f"[ARQ] Límite global de canales SIP alcanzado ({max_concurrent_calls}).")
         return
 
+    # Rate limit por empresa: máximo de llamadas concurrentes por tenant
+    max_calls_per_empresa = int(os.getenv("MAX_CALLS_PER_EMPRESA", "5"))
+
     for camp in campaigns:
         campaign_id = camp["id"]
         empresa_id = camp.get("empresa_id") or 0
@@ -153,6 +159,16 @@ async def campaign_scheduler_task(ctx: dict[str, Any]) -> None:
             pass
 
         if await _is_empresa_locked(empresa_id):
+            continue
+
+        # Per-empresa concurrent call rate limit
+        empresa_active = await _get_active_call_count_for_empresa(empresa_id)
+        if empresa_active >= max_calls_per_empresa:
+            logger.info(
+                f"[ARQ] Rate limit empresa {empresa_id}: "
+                f"{empresa_active}/{max_calls_per_empresa} llamadas activas. "
+                f"Skipping campaña {campaign_id}."
+            )
             continue
 
         try:
