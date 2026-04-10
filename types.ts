@@ -35,6 +35,8 @@ export interface Empresa {
   webhook_url?: string | null;
   /** Call credits balance. Each completed call deducts 1 credit. 0 = campaigns paused. */
   creditos_llamadas?: number | null;
+  /** Public URL of the company logo stored in Supabase Storage. */
+  logo_url?: string | null;
   created_at?: string;
   updated_at?: string;
 }

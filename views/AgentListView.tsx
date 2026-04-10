@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Bot, Loader2, Search, Building2, ChevronRight, ArrowLeft, Users, Mail, Trash2, Settings, Phone, Megaphone, BarChart3, Zap } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { Bot, Loader2, Search, Building2, ChevronRight, ArrowLeft, Users, Mail, Trash2, Settings, Phone, Megaphone, BarChart3, Zap, Upload, X, ImageIcon } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useTranslation } from "react-i18next";
@@ -32,6 +32,96 @@ const AgentListView: React.FC = () => {
     const [search, setSearch] = useState("");
     const [selectedResponsable, setSelectedResponsable] = useState<string>("all");
     const [saving, setSaving] = useState(false);
+
+    // ── Empresa Modal ──────────────────────────────────────────────────────────
+    type ModalMode = 'create' | 'edit';
+    const [modalOpen, setModalOpen] = useState(false);
+    const [modalMode, setModalMode] = useState<ModalMode>('create');
+    const [modalTarget, setModalTarget] = useState<Empresa | null>(null);
+    const [modalForm, setModalForm] = useState({ nombre: '', responsable: '', max_admins: '1' });
+    const [logoFile, setLogoFile] = useState<File | null>(null);
+    const [logoPreview, setLogoPreview] = useState<string | null>(null);
+    const [uploadingLogo, setUploadingLogo] = useState(false);
+    const logoInputRef = useRef<HTMLInputElement>(null);
+
+    const openCreateModal = () => {
+        setModalMode('create');
+        setModalTarget(null);
+        setModalForm({ nombre: '', responsable: '', max_admins: '1' });
+        setLogoFile(null);
+        setLogoPreview(null);
+        setModalOpen(true);
+    };
+
+    const openEditModal = (e: React.MouseEvent, emp: Empresa) => {
+        e.stopPropagation();
+        setModalMode('edit');
+        setModalTarget(emp);
+        setModalForm({ nombre: emp.nombre, responsable: emp.responsable, max_admins: String(emp.max_admins || 1) });
+        setLogoFile(null);
+        setLogoPreview(emp.logo_url || null);
+        setModalOpen(true);
+    };
+
+    const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setLogoFile(file);
+        setLogoPreview(URL.createObjectURL(file));
+    };
+
+    const uploadLogo = async (empresaId: number): Promise<string | null> => {
+        if (!logoFile) return null;
+        setUploadingLogo(true);
+        try {
+            const ext = logoFile.name.split('.').pop() || 'png';
+            const path = `empresa-${empresaId}-${Date.now()}.${ext}`;
+            const { data, error } = await supabase.storage
+                .from('empresa-logos')
+                .upload(path, logoFile, { contentType: logoFile.type, upsert: true });
+            if (error) throw error;
+            const { data: urlData } = supabase.storage.from('empresa-logos').getPublicUrl(data.path);
+            return urlData.publicUrl;
+        } catch (err) {
+            console.error('Error uploading logo:', err);
+            return null;
+        } finally {
+            setUploadingLogo(false);
+        }
+    };
+
+    const handleModalSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const { nombre, responsable, max_admins } = modalForm;
+        setSaving(true);
+        try {
+            if (modalMode === 'create') {
+                const { data, error } = await supabase.from('empresas').insert({
+                    nombre,
+                    responsable,
+                    creditos_llamadas: 10,
+                }).select().single();
+                if (error) throw error;
+                const logo_url = await uploadLogo(data.id);
+                if (logo_url) {
+                    await supabase.from('empresas').update({ logo_url }).eq('id', data.id);
+                }
+            } else if (modalTarget) {
+                const updates: Partial<Empresa> = { nombre, responsable, max_admins: parseInt(max_admins) };
+                const logo_url = await uploadLogo(modalTarget.id!);
+                if (logo_url) updates.logo_url = logo_url;
+                const { error } = await supabase.from('empresas').update(updates).eq('id', modalTarget.id!);
+                if (error) throw error;
+            }
+            setModalOpen(false);
+            loadEmpresas();
+        } catch (err) {
+            alert(t('Error saving company', 'Error al guardar la empresa'));
+        } finally {
+            setSaving(false);
+        }
+    };
+    // ──────────────────────────────────────────────────────────────────────────
 
     useEffect(() => {
         loadEmpresas();
@@ -143,45 +233,8 @@ const AgentListView: React.FC = () => {
         }
     };
 
-    const handleCreateEmpresa = async () => {
-        const nombre = prompt(t("New Company / Project Name:", "Nombre de la nueva Empresa / Proyecto:"));
-        if (!nombre) return;
-        const responsable = prompt(t("Manager Name:", "Nombre del Responsable:"));
-        if (!responsable) return;
-
-        try {
-            const { error } = await supabase.from("empresas").insert({
-                nombre,
-                responsable,
-                creditos_llamadas: 10,   // 10 free credits for new companies
-            });
-            if (error) throw error;
-            loadEmpresas();
-        } catch (err) {
-            alert(t("Error creating company", "Error al crear la empresa"));
-        }
-    };
-
-    const handleEditEmpresa = async (e: React.MouseEvent, emp: Empresa) => {
-        e.stopPropagation();
-        const nombre = prompt(t("Edit company name:", "Editar nombre de la empresa:"), emp.nombre);
-        if (nombre === null) return;
-        const responsable = prompt(t("Edit manager:", "Editar responsable:"), emp.responsable);
-        if (responsable === null) return;
-        const maxAdminsVal = prompt(t("Edit admin limit:", "Editar límite de administradores:"), String(emp.max_admins || 1));
-        if (maxAdminsVal === null) return;
-        const max_admins = parseInt(maxAdminsVal);
-
-        try {
-            const { error } = await supabase.from("empresas")
-                .update({ nombre, responsable, max_admins })
-                .eq("id", emp.id);
-            if (error) throw error;
-            loadEmpresas();
-        } catch (err) {
-            alert(t("Error updating company", "Error al actualizar la empresa"));
-        }
-    };
+    const handleCreateEmpresa = () => openCreateModal();
+    const handleEditEmpresa = (e: React.MouseEvent, emp: Empresa) => openEditModal(e, emp);
 
     const handleDeleteEmpresa = async (id: number) => {
         if (!confirm(t("Are you sure you want to delete this company and ALL its agents?", "¿Seguro que quieres eliminar esta empresa y TODOS sus agentes?"))) return;
@@ -466,8 +519,11 @@ const AgentListView: React.FC = () => {
                                     </div>
                                 )}
 
-                                <div className="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center group-hover:bg-blue-600 group-hover:rotate-6 transition-all duration-500 shadow-inner">
-                                    <Building2 size={32} className="text-blue-500 group-hover:text-white transition-colors" />
+                                <div className="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center group-hover:rotate-6 transition-all duration-500 shadow-inner overflow-hidden">
+                                    {empresa.logo_url
+                                        ? <img src={empresa.logo_url} alt={empresa.nombre} className="w-full h-full object-cover" />
+                                        : <Building2 size={32} className="text-blue-500 group-hover:text-white transition-colors" />
+                                    }
                                 </div>
 
                                 <div>
@@ -485,6 +541,127 @@ const AgentListView: React.FC = () => {
                         ))
                 )}
             </div>
+
+            {/* ── Empresa Modal ── */}
+            {modalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between p-6 border-b border-gray-100">
+                            <h2 className="text-lg font-bold text-gray-900">
+                                {modalMode === 'create' ? t('Create New Company', 'Crear Nueva Empresa') : t('Edit Company', 'Editar Empresa')}
+                            </h2>
+                            <button onClick={() => setModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-xl transition-colors text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleModalSubmit} className="p-6 space-y-5">
+                            {/* Logo upload */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    {t('Company Logo', 'Logo de la empresa')} <span className="text-gray-400 font-normal">({t('optional', 'opcional')})</span>
+                                </label>
+                                <div className="flex items-center gap-4">
+                                    <div
+                                        onClick={() => logoInputRef.current?.click()}
+                                        className="w-20 h-20 rounded-2xl border-2 border-dashed border-gray-200 flex items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all overflow-hidden flex-shrink-0"
+                                    >
+                                        {logoPreview
+                                            ? <img src={logoPreview} alt="preview" className="w-full h-full object-cover" />
+                                            : <ImageIcon size={24} className="text-gray-300" />
+                                        }
+                                    </div>
+                                    <div className="flex-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => logoInputRef.current?.click()}
+                                            className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all"
+                                        >
+                                            <Upload size={16} />
+                                            {logoFile ? t('Change image', 'Cambiar imagen') : t('Upload logo', 'Subir logo')}
+                                        </button>
+                                        {logoPreview && (
+                                            <button
+                                                type="button"
+                                                onClick={() => { setLogoFile(null); setLogoPreview(null); }}
+                                                className="mt-1 flex items-center gap-1 text-xs text-red-400 hover:text-red-600 transition-colors"
+                                            >
+                                                <X size={12} /> {t('Remove', 'Eliminar')}
+                                            </button>
+                                        )}
+                                        <p className="text-xs text-gray-400 mt-1">PNG, JPG, WEBP · max 2 MB</p>
+                                    </div>
+                                </div>
+                                <input
+                                    ref={logoInputRef}
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/webp"
+                                    className="hidden"
+                                    onChange={handleLogoChange}
+                                />
+                            </div>
+
+                            {/* Nombre */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('Company Name', 'Nombre de la empresa')} *</label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={modalForm.nombre}
+                                    onChange={e => setModalForm(f => ({ ...f, nombre: e.target.value }))}
+                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl outline-none focus:border-blue-400 transition-all text-sm"
+                                    placeholder={t('e.g. Acme Corp', 'ej. Acme Corp')}
+                                />
+                            </div>
+
+                            {/* Responsable */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('Manager', 'Responsable')} *</label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={modalForm.responsable}
+                                    onChange={e => setModalForm(f => ({ ...f, responsable: e.target.value }))}
+                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl outline-none focus:border-blue-400 transition-all text-sm"
+                                    placeholder={t('e.g. John Smith', 'ej. Juan García')}
+                                />
+                            </div>
+
+                            {/* Max admins — only on edit */}
+                            {modalMode === 'edit' && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('Admin limit', 'Límite de administradores')}</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        value={modalForm.max_admins}
+                                        onChange={e => setModalForm(f => ({ ...f, max_admins: e.target.value }))}
+                                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl outline-none focus:border-blue-400 transition-all text-sm"
+                                    />
+                                </div>
+                            )}
+
+                            <div className="flex gap-3 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setModalOpen(false)}
+                                    className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all"
+                                >
+                                    {t('Cancel', 'Cancelar')}
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={saving || uploadingLogo}
+                                    className="flex-1 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-800 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                                >
+                                    {(saving || uploadingLogo) && <Loader2 size={16} className="animate-spin" />}
+                                    {modalMode === 'create' ? t('Create', 'Crear') : t('Save', 'Guardar')}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
