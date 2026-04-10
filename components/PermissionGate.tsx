@@ -1,11 +1,10 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { ViewState } from '../types';
 import { useTranslation } from 'react-i18next';
 import { BarChart3 } from 'lucide-react';
 
 interface PermissionGateProps {
-    view: ViewState | 'results' | 'admin';
+    view: string;
     children: React.ReactNode;
 }
 
@@ -13,7 +12,11 @@ export const PermissionGate: React.FC<PermissionGateProps> = ({ view, children }
     const { hasPermission, isRole } = useAuth();
     const { t } = useTranslation();
 
-    if (!hasPermission(view as ViewState) && view !== 'admin') {
+    if (view === 'admin' && !isRole('superadmin', 'admin')) {
+        return null;
+    }
+
+    if (view !== 'admin' && !hasPermission(view)) {
         return (
             <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-500">
                 <div className="text-center">
@@ -23,10 +26,6 @@ export const PermissionGate: React.FC<PermissionGateProps> = ({ view, children }
                 </div>
             </div>
         );
-    }
-
-    if (view === 'admin' && !isRole('superadmin', 'admin')) {
-        return null;
     }
 
     return <>{children}</>;

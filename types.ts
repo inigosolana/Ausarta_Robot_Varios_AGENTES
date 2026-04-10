@@ -1,23 +1,4 @@
 
-export type ViewState =
-  | 'overview'
-  | 'create-agents'
-  | 'empresas'
-  | 'agents'
-  | 'test-call'
-  | 'campaigns'
-  | 'automation'
-  | 'models'
-  | 'telephony'
-  | 'tools'
-  | 'files'
-  | 'developers'
-  | 'usage'
-  | 'results'
-  | 'admin'
-  | 'assistant'
-  | 'profile';
-
 export type UserRole = 'superadmin' | 'admin' | 'user';
 
 export interface UserProfile {
