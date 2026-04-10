@@ -93,3 +93,37 @@ class AssistantChatRequest(BaseModel):
 
 class AssistantToolResponse(BaseModel):
     response: str
+
+
+# ── Yeastar PBX integration ────────────────────────────────────────────────────
+
+class YeastarConfigBase(BaseModel):
+    """Fields shared between create and update."""
+    api_url: str
+    api_port: int = 8088
+    api_username: str
+    is_active: bool = True
+
+
+class YeastarConfigCreate(YeastarConfigBase):
+    """Used on POST — includes the password (write-only)."""
+    api_password: str
+
+
+class YeastarConfigTest(BaseModel):
+    """Payload for the /test endpoint — never persisted."""
+    api_url: str
+    api_port: int = 8088
+    api_username: str
+    api_password: str
+
+
+class YeastarConfigResponse(YeastarConfigBase):
+    """Returned by GET — password is never exposed."""
+    id: str
+    empresa_id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

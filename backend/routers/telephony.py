@@ -1,5 +1,5 @@
 """
-telephony.py — Gestión de llamadas y webhooks entrantes.
+telephony.py — Gestión de llamadas, webhooks entrantes e integración Yeastar PBX.
 
 Responsabilidades:
   - /colgar: cierra una sala de LiveKit.
@@ -7,12 +7,16 @@ Responsabilidades:
   - /api/calls/outbound: inicia una llamada SIP individual (test o desde campaña).
   - /api/livekit/webhook: recibe eventos de LiveKit (room_finished, participant_left)
     para actualizar el estado de los leads sin polling.
+  - /api/telephony/yeastar: CRUD de la configuración Yeastar PBX por empresa.
+  - /api/telephony/yeastar/test: prueba la conexión en tiempo real sin persistir.
 """
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, HTTPException
 from fastapi.responses import JSONResponse
-from models.schemas import CallEndRequest, EncuestaData
+from models.schemas import CallEndRequest, EncuestaData, YeastarConfigCreate, YeastarConfigResponse, YeastarConfigTest
 from services.supabase_service import supabase
 from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
+from services.yeastar_service import YeastarClient
+from services.auth import get_current_user, CurrentUser, require_admin, require_api_key as _outbound_api_key
 from livekit import api
 import aiohttp
 import asyncio
@@ -20,11 +24,110 @@ import os
 from datetime import datetime, timedelta, timezone
 import random
 import logging
-from services.auth import require_api_key as _outbound_api_key
 
 logger = logging.getLogger("api-backend")
 
 router = APIRouter(tags=["telephony"])
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Yeastar PBX — configuración multi-tenant
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.get("/api/telephony/yeastar", response_model=YeastarConfigResponse | None)
+async def get_yeastar_config(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Devuelve la configuración Yeastar de la empresa del usuario autenticado.
+    Retorna null (204) si no hay configuración guardada todavía.
+    La contraseña NUNCA se incluye en la respuesta.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    empresa_id = current_user.empresa_id
+    if not empresa_id:
+        raise HTTPException(status_code=403, detail="Usuario sin empresa asignada")
+
+    res = (
+        supabase.table("company_yeastar_configs")
+        .select("id, empresa_id, api_url, api_port, api_username, is_active, created_at, updated_at")
+        .eq("empresa_id", empresa_id)
+        .limit(1)
+        .execute()
+    )
+
+    if not res.data:
+        return JSONResponse(status_code=204, content=None)
+
+    return res.data[0]
+
+
+@router.post("/api/telephony/yeastar", response_model=YeastarConfigResponse)
+async def save_yeastar_config(
+    payload: YeastarConfigCreate,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """
+    Guarda (upsert) la configuración Yeastar de la empresa.
+    Solo accesible para roles admin y superadmin.
+    La contraseña se almacena tal cual (protegida por RLS y service-role key).
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    empresa_id = current_user.empresa_id
+    if not empresa_id:
+        raise HTTPException(status_code=403, detail="Usuario sin empresa asignada")
+
+    row = {
+        "empresa_id": empresa_id,
+        "api_url": payload.api_url.strip(),
+        "api_port": payload.api_port,
+        "api_username": payload.api_username.strip(),
+        "api_password": payload.api_password,
+        "is_active": payload.is_active,
+    }
+
+    # UPSERT — constraint uq_yeastar_empresa ensures one row per company
+    res = (
+        supabase.table("company_yeastar_configs")
+        .upsert(row, on_conflict="empresa_id")
+        .execute()
+    )
+
+    if not res.data:
+        raise HTTPException(status_code=500, detail="Error al guardar la configuración")
+
+    saved = res.data[0]
+    # Strip password before returning
+    saved.pop("api_password", None)
+    return saved
+
+
+@router.post("/api/telephony/yeastar/test")
+async def test_yeastar_connection(
+    payload: YeastarConfigTest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """
+    Prueba la conexión con la centralita Yeastar usando las credenciales
+    proporcionadas en tiempo real, sin guardar nada en base de datos.
+
+    Devuelve:
+        {"ok": true,  "message": "..."} si la conexión es exitosa.
+        {"ok": false, "message": "..."} si falla.
+    """
+    client = YeastarClient(
+        api_url=payload.api_url,
+        api_port=payload.api_port,
+        username=payload.api_username,
+        password=payload.api_password,
+    )
+
+    ok, message = await client.test_connection()
+    return {"ok": ok, "message": message}
 
 # ──────────────────────────────────────────────
 # Colgar sala
