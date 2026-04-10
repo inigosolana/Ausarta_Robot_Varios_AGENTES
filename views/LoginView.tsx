@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Loader2, LogIn, Eye, EyeOff, ArrowLeft, Mail, CheckCircle, KeyRound } from 'lucide-react';
 
 type ViewMode = 'login' | 'forgot' | 'forgot-sent' | 'update-password';
 
 const LoginView: React.FC = () => {
-    const { signIn } = useAuth();
+    const { signIn, user, profile, loading: authLoading } = useAuth();
+    const navigate = useNavigate();
+    const location = useLocation();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
@@ -15,6 +18,7 @@ const LoginView: React.FC = () => {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState<ViewMode>('login');
+    const redirectTo = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/';
 
     // Check URL params for password recovery or invitation
     React.useEffect(() => {
@@ -23,6 +27,13 @@ const LoginView: React.FC = () => {
             setViewMode('update-password');
         }
     }, []);
+
+    // Redirect authenticated users away from login screen.
+    React.useEffect(() => {
+        if (!authLoading && user && profile) {
+            navigate(redirectTo, { replace: true });
+        }
+    }, [authLoading, user, profile, navigate, redirectTo]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
