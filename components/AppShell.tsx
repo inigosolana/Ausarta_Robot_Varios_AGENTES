@@ -249,7 +249,12 @@ const AppShell: React.FC = () => {
                       <button
                         key={r}
                         title={r}
-                        onClick={() => { setSpoofedRole(r === realProfile?.role ? null : r); toast.success(`${t('Simulating')} ${r}`); }}
+                        onClick={() => {
+                          // If already viewing as this role, restore the natural role; otherwise switch to it
+                          const isActive = profile?.role === r;
+                          setSpoofedRole(isActive && r === realProfile?.role ? null : r);
+                          toast.success(isActive && r === realProfile?.role ? t('Role restored', 'Rol restaurado') : `${t('Simulating', 'Simulando')} ${r}`);
+                        }}
                         className={`text-[9px] flex-1 py-1 rounded transition-all font-bold ${profile?.role === r ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white dark:bg-gray-800 text-gray-500 hover:bg-indigo-50'}`}
                       >
                         {r.charAt(0).toUpperCase()}
@@ -261,11 +266,10 @@ const AppShell: React.FC = () => {
                   value={profile?.empresa_id || ''}
                   onChange={e => {
                     const val = e.target.value === '' ? null : Number(e.target.value);
-                    const isReturningToSelf = val === realProfile?.empresa_id || val === null;
+                    // Only clear empresa spoof if returning to own company; never auto-change the role
                     setSpoofedEmpresa(val === realProfile?.empresa_id ? null : val);
-                    if (!isReturningToSelf && realProfile?.role === 'admin') setSpoofedRole('user');
-                    else if (isReturningToSelf) setSpoofedRole(null);
-                    toast.success(t('Viewing company context'));
+                    if (val === realProfile?.empresa_id || val === null) setSpoofedEmpresa(null);
+                    toast.success(t('Viewing company context', 'Viendo contexto de empresa'));
                   }}
                   className="w-full text-[10px] py-1 px-1 border border-indigo-100 dark:border-indigo-800 dark:bg-gray-800 rounded outline-none focus:ring-1 focus:ring-indigo-500 font-medium"
                 >
