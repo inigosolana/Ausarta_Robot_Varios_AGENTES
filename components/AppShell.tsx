@@ -47,6 +47,7 @@ const AppShell: React.FC = () => {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isCalling, setIsCalling] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [hiddenAlerts, setHiddenAlerts] = useState<Set<number>>(new Set());
   const queryClient = useQueryClient();
   const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
@@ -80,6 +81,17 @@ const AppShell: React.FC = () => {
   useEffect(() => {
     setIsDarkMode(document.documentElement.classList.contains('dark'));
   }, []);
+
+  // Auto-hide alert banners after 8 seconds
+  useEffect(() => {
+    if (!alerts.length) return;
+    const timers = alerts
+      .filter((a: any) => !hiddenAlerts.has(a.id))
+      .map((a: any) =>
+        setTimeout(() => setHiddenAlerts(prev => new Set([...prev, a.id])), 8000)
+      );
+    return () => timers.forEach(clearTimeout);
+  }, [alerts]);
 
   const toggleDarkMode = () => {
     const nextDark = document.documentElement.classList.toggle('dark');
@@ -309,22 +321,32 @@ const AppShell: React.FC = () => {
         {/* ── Main Content — renders the matched child route ── */}
         <main className={`flex-1 overflow-y-auto p-4 md:p-8 relative transition-all duration-300 ${isChatOpen ? 'mr-0 sm:mr-[400px]' : 'mr-0'}`}>
           <div className="w-full max-w-6xl mx-auto">
-            {alerts.length > 0 && (
+            {alerts.filter((a: any) => !hiddenAlerts.has(a.id)).length > 0 && (
               <div className="mb-6 space-y-2">
-                {alerts.map((alert: any) => (
-                  <div key={alert.id} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 p-4 rounded-xl flex items-center justify-between shadow-sm animate-pulse">
-                    <div className="flex items-center gap-3">
-                      <div className="bg-red-100 dark:bg-red-800/40 p-2 rounded-full">
-                        <Zap className="w-5 h-5 text-red-600 dark:text-red-400" />
+                {alerts
+                  .filter((a: any) => !hiddenAlerts.has(a.id))
+                  .map((alert: any) => (
+                    <div key={alert.id} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 p-4 rounded-xl flex items-center justify-between shadow-sm">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-red-100 dark:bg-red-800/40 p-2 rounded-full">
+                          <Zap className="w-5 h-5 text-red-600 dark:text-red-400" />
+                        </div>
+                        <div>
+                          <p className="font-bold text-sm">{alert.type === 'error' ? t('Critical System Error', 'Error Crítico del Sistema') : t('System Alert', 'Alerta del Sistema')}</p>
+                          <p className="text-xs opacity-80">{alert.message}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-bold text-sm">{alert.type === 'error' ? t('Critical System Error', 'Error Crítico del Sistema') : t('System Alert', 'Alerta del Sistema')}</p>
-                        <p className="text-xs opacity-80">{alert.message}</p>
-                      </div>
+                      <button
+                        onClick={() => {
+                          setHiddenAlerts(prev => new Set([...prev, alert.id]));
+                          resolveAlert(alert.id);
+                        }}
+                        className="text-xs font-bold hover:underline"
+                      >
+                        {t('Resolve', 'Resolver')}
+                      </button>
                     </div>
-                    <button onClick={() => resolveAlert(alert.id)} className="text-xs font-bold hover:underline">{t('Resolve', 'Resolver')}</button>
-                  </div>
-                ))}
+                  ))}
               </div>
             )}
 

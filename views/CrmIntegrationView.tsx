@@ -73,18 +73,22 @@ const CrmIntegrationView: React.FC = () => {
     };
 
     const loadIntegrationConfig = async (empresaId: number) => {
-        const { data, error } = await supabase
-            .from('empresas')
-            .select('crm_type, crm_webhook_url, webhook_url')
-            .eq('id', empresaId)
-            .single();
+        try {
+            const { data, error } = await supabase
+                .from('empresas')
+                .select('crm_type, crm_webhook_url, webhook_url')
+                .eq('id', empresaId)
+                .single();
 
-        if (error) {
-            console.error('Error loading integration config:', error);
-        } else if (data) {
-            setCrmType(data.crm_type || 'hubspot');
-            setWebhookUrl(data.crm_webhook_url || '');
-            setAutomationWebhookUrl(data.webhook_url || '');
+            if (error) {
+                console.error('Error loading integration config:', error);
+            } else if (data) {
+                setCrmType(data.crm_type || 'hubspot');
+                setWebhookUrl(data.crm_webhook_url || '');
+                setAutomationWebhookUrl(data.webhook_url || '');
+            }
+        } finally {
+            setIsLoading(false);
         }
     };
 
