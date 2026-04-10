@@ -217,8 +217,8 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<LayoutDashboard size={18} />}
                 label={t('Dashboard')}
-                isActive={location.pathname === '/'}
-                onClick={() => navigate('/')}
+                to="/"
+                end
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -230,8 +230,7 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Building2 size={18} />}
                 label={t('Companies', 'Empresas')}
-                isActive={location.pathname === '/empresas'}
-                onClick={() => navigate('/empresas')}
+                to="/empresas"
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -240,8 +239,7 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Bot size={18} />}
                 label={t('Agentes', 'Agentes')}
-                isActive={location.pathname === '/agents'}
-                onClick={() => navigate('/agents')}
+                to="/agents"
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -250,8 +248,7 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Phone size={18} />}
                 label={t('Test Call', 'Llamada Prueba')}
-                isActive={location.pathname === '/test-call'}
-                onClick={() => navigate('/test-call')}
+                to="/test-call"
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -260,8 +257,7 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Megaphone size={18} />}
                 label={t('Campaigns', 'Campañas')}
-                isActive={location.pathname === '/campaigns'}
-                onClick={() => navigate('/campaigns')}
+                to="/campaigns"
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -273,8 +269,7 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<BarChart3 size={18} />}
                 label={t('Results', 'Resultados')}
-                isActive={location.pathname === '/results'}
-                onClick={() => navigate('/results')}
+                to="/results"
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -283,8 +278,7 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<BotMessageSquare size={18} />}
                 label={t('Ausarta Copilot', 'Ausarta Copilot')}
-                isActive={location.pathname === '/copilot'}
-                onClick={() => navigate('/copilot')}
+                to="/copilot"
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -293,8 +287,7 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Zap size={18} />}
                 label={t('Usage', 'Uso')}
-                isActive={location.pathname === '/usage'}
-                onClick={() => navigate('/usage')}
+                to="/usage"
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -303,8 +296,7 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Settings size={18} />}
                 label={t('Admin', 'Administración')}
-                isActive={location.pathname === '/admin'}
-                onClick={() => navigate('/admin')}
+                to="/admin"
                 collapsed={!isSidebarOpen}
               />
             )}
@@ -313,8 +305,7 @@ const App: React.FC = () => {
               <SidebarItem
                 icon={<Share2 size={18} />}
                 label={t('CRM Integration', 'Integración CRM')}
-                isActive={location.pathname === '/crm'}
-                onClick={() => navigate('/crm')}
+                to="/crm"
                 collapsed={!isSidebarOpen}
               />
             )}
