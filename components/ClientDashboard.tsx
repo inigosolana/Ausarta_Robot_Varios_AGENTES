@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     Phone,
     CheckCircle,
@@ -14,9 +14,10 @@ import {
     Download,
     RefreshCw
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
+import { supabase } from '../lib/supabase';
 import { DateRangePicker, getDatesFromRange, DateRange } from './DateRangePicker';
 import { LiveMonitoring } from './LiveMonitoring';
 
@@ -79,6 +80,8 @@ const ClientDashboard: React.FC<Props> = ({ empresaId }) => {
     const [dateRange, setDateRange] = useState<DateRange>('7d');
 
     const finalEmpresaId = empresaId || profile?.empresa_id;
+    const queryClient = useQueryClient();
+    const clientQueryKey = ['client-dashboard', finalEmpresaId, dateRange] as const;
 
     const fetchClientData = async () => {
         const params = new URLSearchParams();
@@ -104,7 +107,7 @@ const ClientDashboard: React.FC<Props> = ({ empresaId }) => {
     };
 
     const { data, isLoading, refetch: loadData } = useQuery({
-        queryKey: ['client-dashboard', finalEmpresaId, dateRange],
+        queryKey: clientQueryKey,
         queryFn: fetchClientData,
         enabled: !!finalEmpresaId,
         staleTime: 30_000,
@@ -114,6 +117,22 @@ const ClientDashboard: React.FC<Props> = ({ empresaId }) => {
     const usage = data?.usage ?? null;
     const agents = data?.agents ?? [];
     const recentCalls = data?.recentCalls ?? [];
+
+    // Supabase Realtime: auto-refresh when new calls land for this empresa
+    useEffect(() => {
+        if (!finalEmpresaId) return;
+
+        const channel = supabase
+            .channel('client-dashboard-realtime')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'encuestas', filter: `empresa_id=eq.${finalEmpresaId}` },
+                () => { queryClient.invalidateQueries({ queryKey: clientQueryKey }); }
+            )
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, [finalEmpresaId, clientQueryKey, queryClient]);
 
     const exportCSV = () => {
         const headers = [

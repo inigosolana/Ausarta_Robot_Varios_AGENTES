@@ -1574,8 +1574,14 @@ async def entrypoint(ctx: JobContext):
                                 "2. 'puntos_clave' (array de strings): Los 3 puntos más importantes de la conversación.\n"
                             )
                         else:
-                            # Para encuesta numérica no necesitamos datos extra del LLM
-                            disposition_prompt += "No incluyas campos adicionales para encuesta numérica.\n"
+                            disposition_prompt += ""
+
+                        # Sentiment extraction (universal, applies to all agent types)
+                        disposition_prompt += (
+                            "\nAdemás, SIEMPRE incluye este campo obligatorio:\n"
+                            "- 'sentimiento_cliente': Clasifica estrictamente como 'Positivo', 'Neutral' o 'Negativo' "
+                            "basándote en el tono general del cliente durante la llamada.\n"
+                        )
                     
                         groq_api_key = os.getenv("GROQ_API_KEY")
                         if groq_api_key:
@@ -1604,12 +1610,24 @@ async def entrypoint(ctx: JobContext):
                                         valid_dispositions = ("completada", "parcial", "rechazada", "no_contesta")
                                         if call_disposition not in valid_dispositions:
                                             call_disposition = "completada" if data_saved else "parcial"
-                                    
+
+                                        # Extraer sentimiento (si el LLM lo devolvió)
+                                        sentimiento = parsed.pop("sentimiento_cliente", None)
+                                        valid_sentimientos = ("Positivo", "Neutral", "Negativo")
+                                        if sentimiento not in valid_sentimientos:
+                                            sentimiento = "Neutral"
+
                                         # El resto del JSON son datos_extra
                                         if parsed:
                                             datos_extra = parsed
-                                    
-                                        logger.info(f"✅ Disposición: {call_disposition} | datos_extra: {datos_extra}")
+
+                                        # Inyectar sentimiento + idioma en datos_extra
+                                        if datos_extra is None:
+                                            datos_extra = {}
+                                        datos_extra["sentimiento_cliente"] = sentimiento
+                                        datos_extra["idioma"] = lang_state.get("active_lang", language)
+
+                                        logger.info(f"✅ Disposición: {call_disposition} | Sentimiento: {sentimiento} | Idioma: {datos_extra['idioma']} | datos_extra: {datos_extra}")
                                     else:
                                         logger.error(f"Error HTTP del LLM al clasificar: {llm_resp.status}")
                     except Exception as e:
@@ -1617,6 +1635,7 @@ async def entrypoint(ctx: JobContext):
                 else:
                     # Sin transcripción = no hubo interacción (buzón, timeout, SIP error)
                     call_disposition = "no_contesta"
+                    datos_extra = {"sentimiento_cliente": "Neutral", "idioma": lang_state.get("active_lang", language)}
                     logger.info(f"📵 Sin transcripción para encuesta {survey_id} → disposición: no_contesta")
 
                 # Determinar status final

@@ -133,6 +133,8 @@ export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'premium_voice', label: 'Voz Ausarta (Acceso Premium)' },
 ];
 
+export type Sentimiento = 'Positivo' | 'Neutral' | 'Negativo';
+
 export interface SurveyResult {
   id: number;
   telefono: string;
@@ -152,6 +154,16 @@ export interface SurveyResult {
   customer_name?: string | null;
   empresa_name?: string | null;
   recording_url?: string | null;
+}
+
+export function getSentimiento(r: SurveyResult): Sentimiento {
+  const val = r.datos_extra?.sentimiento_cliente;
+  if (val === 'Positivo' || val === 'Neutral' || val === 'Negativo') return val;
+  return 'Neutral';
+}
+
+export function getIdioma(r: SurveyResult): string | null {
+  return r.datos_extra?.idioma ?? null;
 }
 
 // Mapeo canónico de disposición para gráficos

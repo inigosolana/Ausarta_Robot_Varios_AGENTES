@@ -5,7 +5,7 @@ import {
     ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import { Database, Hash, ToggleLeft, AlignLeft, List, Download } from 'lucide-react';
-import { SurveyResult, getCallDisposition, ExtractionSchemaProperty } from '../types';
+import { SurveyResult, getCallDisposition, ExtractionSchemaProperty, getSentimiento, getIdioma, Sentimiento } from '../types';
 
 interface AnalyticsProps {
     tipoResultados: string;
@@ -388,6 +388,32 @@ export const AnalyticsDashboard: React.FC<AnalyticsProps> = ({ results, schema }
             }));
     }, [results]);
 
+    // Sentiment breakdown
+    const sentimentData = useMemo(() => {
+        const counts: Record<Sentimiento, number> = { Positivo: 0, Neutral: 0, Negativo: 0 };
+        results.forEach(r => { counts[getSentimiento(r)]++; });
+        return [
+            { name: 'Positivo', value: counts.Positivo, key: 'Positivo' as const },
+            { name: 'Neutral',  value: counts.Neutral,  key: 'Neutral'  as const },
+            { name: 'Negativo', value: counts.Negativo,  key: 'Negativo' as const },
+        ].filter(d => d.value > 0);
+    }, [results]);
+
+    const SENTIMENT_COLORS: Record<string, string> = { Positivo: '#10B981', Neutral: '#9CA3AF', Negativo: '#EF4444' };
+    const SENTIMENT_ICONS: Record<string, string> = { Positivo: '😊', Neutral: '😐', Negativo: '😠' };
+
+    // Language breakdown
+    const languageData = useMemo(() => {
+        const counts: Record<string, number> = {};
+        results.forEach(r => {
+            const lang = getIdioma(r);
+            if (lang) counts[lang] = (counts[lang] || 0) + 1;
+        });
+        return Object.entries(counts)
+            .map(([name, value]) => ({ name: name.toUpperCase(), value }))
+            .sort((a, b) => b.value - a.value);
+    }, [results]);
+
     const hasSchema = Array.isArray(schema) && schema.length > 0;
 
     const handleExportCsv = useCallback(() => {
@@ -470,6 +496,81 @@ export const AnalyticsDashboard: React.FC<AnalyticsProps> = ({ results, schema }
                         <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">{t('Total')}</span>
                     </div>
                 </div>
+            </div>
+
+            {/* ── Sentiment + Language Row ── */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Sentiment Donut */}
+                {sentimentData.length > 0 && (
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                        <h3 className="text-base font-bold text-gray-900 mb-4">{t('Sentimiento del Cliente')}</h3>
+                        <div className="flex items-center gap-6">
+                            <div className="h-40 w-40 flex-shrink-0">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={sentimentData}
+                                            cx="50%" cy="50%"
+                                            innerRadius={45} outerRadius={62}
+                                            paddingAngle={3}
+                                            dataKey="value"
+                                            stroke="none"
+                                        >
+                                            {sentimentData.map(entry => (
+                                                <Cell key={entry.key} fill={SENTIMENT_COLORS[entry.key]} />
+                                            ))}
+                                        </Pie>
+                                        <RechartsTooltip
+                                            contentStyle={{ borderRadius: '10px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                            formatter={(value: number) => [`${value} llamadas`, '']}
+                                        />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div className="flex flex-col gap-3 flex-1">
+                                {sentimentData.map(d => (
+                                    <div key={d.key} className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-lg">{SENTIMENT_ICONS[d.key]}</span>
+                                            <span className="text-sm text-gray-700 font-medium">{d.name}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="text-xl font-bold text-gray-900">{d.value}</span>
+                                            <span className="text-xs text-gray-400">
+                                                ({totalCalls > 0 ? Math.round((d.value / totalCalls) * 100) : 0}%)
+                                            </span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Language Breakdown */}
+                {languageData.length > 0 && (
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                        <h3 className="text-base font-bold text-gray-900 mb-4">{t('Idiomas de las Llamadas')}</h3>
+                        <div className="space-y-3">
+                            {languageData.map((d, i) => {
+                                const pct = totalCalls > 0 ? Math.round((d.value / totalCalls) * 100) : 0;
+                                return (
+                                    <div key={d.name} className="flex items-center gap-3">
+                                        <span className="text-sm font-bold text-gray-700 w-10 text-right">{d.name}</span>
+                                        <div className="flex-1 h-6 bg-gray-100 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full rounded-full transition-all"
+                                                style={{ width: `${Math.max(pct, 3)}%`, background: CHART_COLORS[i % CHART_COLORS.length] }}
+                                            />
+                                        </div>
+                                        <span className="text-sm font-bold text-gray-900 w-12 text-right">{d.value}</span>
+                                        <span className="text-xs text-gray-400 w-10">({pct}%)</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* ── Dynamic Schema Widgets ── */}

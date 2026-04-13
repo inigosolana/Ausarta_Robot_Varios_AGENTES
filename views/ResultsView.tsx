@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase';
 import { AnalyticsDashboard } from '../components/AnalyticsDashboard';
 import { DateRangePicker, getDatesFromRange, DateRange } from '../components/DateRangePicker';
 import { CallResultModal } from '../components/CallResultModal';
-import { SurveyResult, ExtractionSchemaProperty } from '../types';
+import { SurveyResult, ExtractionSchemaProperty, getSentimiento, getIdioma, Sentimiento } from '../types';
 
 interface Props {
     empresaId?: number;
@@ -368,6 +368,8 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                 )}
                                 <th className="px-6 py-3">{t('Date')}</th>
                                 <th className="px-6 py-3 text-center">{t('Status')}</th>
+                                <th className="px-6 py-3 text-center w-20">{t('Sent.', 'Sent.')}</th>
+                                <th className="px-6 py-3 text-center w-16">{t('Lang', 'Idioma')}</th>
                                 <th className="px-6 py-3 text-center">{t('Results / Scores')}</th>
                                 <th className="px-6 py-3">{t('Model')}</th>
                                 <th className="px-6 py-3">{t('Comments')}</th>
@@ -377,7 +379,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                         <tbody className="divide-y divide-gray-100">
                             {filteredResults.length === 0 ? (
                                 <tr>
-                                    <td colSpan={effectiveEmpresaId === 'all' && isPlatformOwner ? 9 : 8} className="px-6 py-12 text-center text-gray-400">
+                                    <td colSpan={effectiveEmpresaId === 'all' && isPlatformOwner ? 11 : 10} className="px-6 py-12 text-center text-gray-400">
                                         {t('No results found')}
                                     </td>
                                 </tr>
@@ -415,6 +417,38 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                             } else {
                                                 return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-gray-400 text-white uppercase shadow-sm">{t('Pendiente')}</span>;
                                             }
+                                        })()}
+                                    </td>
+                                    {/* Sentimiento */}
+                                    <td className="px-6 py-4 text-center">
+                                        {(() => {
+                                            const sent = getSentimiento(row);
+                                            const cfg: Record<Sentimiento, { icon: string; cls: string; label: string }> = {
+                                                Positivo: { icon: '😊', cls: 'bg-green-50 text-green-700 border-green-200', label: 'Positivo' },
+                                                Neutral:  { icon: '😐', cls: 'bg-gray-50 text-gray-600 border-gray-200', label: 'Neutral' },
+                                                Negativo: { icon: '😠', cls: 'bg-red-50 text-red-700 border-red-200', label: 'Negativo' },
+                                            };
+                                            const s = cfg[sent];
+                                            return (
+                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${s.cls}`} title={s.label}>
+                                                    <span>{s.icon}</span>{s.label}
+                                                </span>
+                                            );
+                                        })()}
+                                    </td>
+                                    {/* Idioma */}
+                                    <td className="px-6 py-4 text-center">
+                                        {(() => {
+                                            const lang = getIdioma(row);
+                                            if (!lang) return <span className="text-gray-300">—</span>;
+                                            const LANG_FLAGS: Record<string, string> = { es: '🇪🇸', en: '🇬🇧', fr: '🇫🇷', de: '🇩🇪', it: '🇮🇹', pt: '🇵🇹', eu: '🇪🇸', ca: '🇪🇸', gl: '🇪🇸', nl: '🇳🇱', ja: '🇯🇵', zh: '🇨🇳', ar: '🇸🇦', ru: '🇷🇺' };
+                                            const flag = LANG_FLAGS[lang] || '🌐';
+                                            return (
+                                                <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-600" title={lang.toUpperCase()}>
+                                                    <span className="text-base">{flag}</span>
+                                                    <span className="uppercase">{lang}</span>
+                                                </span>
+                                            );
                                         })()}
                                     </td>
                                     <td className="px-6 py-4 text-center">

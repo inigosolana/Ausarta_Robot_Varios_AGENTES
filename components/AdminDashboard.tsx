@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     Phone,
     CheckCircle,
@@ -15,9 +15,10 @@ import {
 import {
     PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend
 } from 'recharts';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
+import { supabase } from '../lib/supabase';
 import { DateRangePicker, getDatesFromRange, DateRange } from './DateRangePicker';
 import { LiveMonitoring } from './LiveMonitoring';
 
@@ -177,10 +178,33 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         staleTime: 30_000,
     });
 
+    const queryClient = useQueryClient();
     const stats = data?.stats ?? null;
     const recentCalls = data?.recentCalls ?? [];
     const topPerformers = data?.topPerformers ?? { top_campaign: null, top_agent: null };
     const integrations = data?.integrations ?? [];
+
+    // Supabase Realtime: auto-refresh dashboard when calls arrive or campaigns change
+    useEffect(() => {
+        const finalEmpresaId = empresaId || (isPlatformOwner ? undefined : profile?.empresa_id);
+        const filterStr = finalEmpresaId ? `empresa_id=eq.${finalEmpresaId}` : undefined;
+
+        const channel = supabase
+            .channel('admin-dashboard-realtime')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'encuestas', filter: filterStr },
+                () => { queryClient.invalidateQueries({ queryKey: dashboardQueryKey }); }
+            )
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'campaigns', filter: filterStr },
+                () => { queryClient.invalidateQueries({ queryKey: dashboardQueryKey }); }
+            )
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, [empresaId, profile?.empresa_id, isPlatformOwner, dashboardQueryKey, queryClient]);
 
     const exportCSV = () => {
         const headers = [t("ID"), t("Teléfono"), t("Campaña"), t("Empresa"), t("Tipo"), t("Fecha"), t("Estado"), t("Modelo")];
