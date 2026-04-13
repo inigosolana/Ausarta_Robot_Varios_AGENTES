@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-import aiohttp
+import jwt as pyjwt
 from fastapi import Security, HTTPException, status, Depends
 from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 
@@ -71,34 +71,35 @@ async def require_api_key(api_key: str | None = Security(_API_KEY_HEADER)) -> st
     return api_key
 
 
-async def _get_user_from_supabase_jwt(token: str) -> dict:
-    supabase_url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
-    if not supabase_url:
-        raise HTTPException(status_code=500, detail="SUPABASE_URL no configurada")
+def _get_user_from_supabase_jwt(token: str) -> dict:
+    """
+    Valida el JWT de Supabase de forma local usando SUPABASE_JWT_SECRET (HS256).
+    Evita una petición HTTP a Supabase por cada request, eliminando latencia
+    y el riesgo de Rate Limit contra la Auth API.
+    """
+    jwt_secret = os.getenv("SUPABASE_JWT_SECRET", "")
+    if not jwt_secret:
+        raise HTTPException(status_code=500, detail="SUPABASE_JWT_SECRET no configurada")
 
-    apikey = (
-        os.getenv("SUPABASE_ANON_KEY")
-        or os.getenv("SUPABASE_KEY")
-        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        or ""
-    )
-    if not apikey:
-        raise HTTPException(status_code=500, detail="Supabase API key no configurada")
+    try:
+        payload = pyjwt.decode(
+            token,
+            jwt_secret,
+            algorithms=["HS256"],
+            # Supabase usa "authenticated" como audience; lo verificamos opcionalmente.
+            options={"verify_aud": False},
+        )
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirado")
+    except pyjwt.InvalidTokenError as exc:
+        logger.warning(f"[Auth] JWT inválido: {exc}")
+        raise HTTPException(status_code=401, detail="Token inválido o expirado")
 
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "apikey": apikey,
-    }
-    url = f"{supabase_url}/auth/v1/user"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            if resp.status == 200:
-                return await resp.json()
-            if resp.status in (401, 403):
-                raise HTTPException(status_code=401, detail="Token inválido o expirado")
-            body = await resp.text()
-            logger.error(f"[Auth] Error validando JWT en Supabase ({resp.status}): {body[:300]}")
-            raise HTTPException(status_code=500, detail="No se pudo validar el token")
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token sin user_id (sub)")
+
+    return {"id": user_id, "email": payload.get("email")}
 
 
 async def get_current_user(
@@ -111,7 +112,7 @@ async def get_current_user(
         raise HTTPException(status_code=500, detail="No hay conexión con Supabase")
 
     token = creds.credentials
-    auth_user = await _get_user_from_supabase_jwt(token)
+    auth_user = _get_user_from_supabase_jwt(token)
     user_id = auth_user.get("id")
     if not user_id:
         raise HTTPException(status_code=401, detail="Token sin user_id")

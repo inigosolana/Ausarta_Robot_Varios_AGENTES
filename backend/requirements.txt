@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+PyJWT>=2.8.0
 livekit-agents
 livekit-plugins-openai
 livekit-plugins-deepgram

@@ -49,7 +49,7 @@ services:
       - AUSARTA_API_KEY=${AUSARTA_API_KEY:-}
       - SIP_TRANSFER_NUMBER=${SIP_TRANSFER_NUMBER:-}
       - AGENT_AMD_WINDOW_SECONDS=${AGENT_AMD_WINDOW_SECONDS:-15}
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - ENABLE_RECORDING=${ENABLE_RECORDING:-false}
       - RECORDING_BUCKET=${RECORDING_BUCKET:-call-recordings}
       - SUPABASE_S3_ACCESS_KEY=${SUPABASE_S3_ACCESS_KEY:-}
@@ -101,7 +101,7 @@ services:
       - DRIP_COOLDOWN_MAX_SECONDS=${DRIP_COOLDOWN_MAX_SECONDS:-180}
       - DRIP_ANSWER_TIMEOUT_SECONDS=${DRIP_ANSWER_TIMEOUT_SECONDS:-30}
       - DRIP_AGENT_JOIN_DELAY_SECONDS=${DRIP_AGENT_JOIN_DELAY_SECONDS:-3}
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - ARQ_MAX_JOBS=${ARQ_MAX_JOBS:-10}
       - ARQ_JOB_TIMEOUT=${ARQ_JOB_TIMEOUT:-660}
       - PYTHONUNBUFFERED=1
@@ -118,7 +118,7 @@ services:
     restart: unless-stopped
     networks:
       - ausarta-network
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass $${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
 
