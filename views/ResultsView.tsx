@@ -358,22 +358,22 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
             {/* Desktop table */}
             <div className="hidden lg:block bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
-                    <table className="w-full min-w-[1100px] text-sm text-left text-gray-700">
+                    <table className="w-full min-w-[1300px] text-sm text-left text-gray-700">
                         <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-100">
                             <tr>
-                                <th className="px-6 py-3 w-16">{t('ID')}</th>
-                                <th className="px-6 py-3">{t('Phone / Campaign')}</th>
+                                <th className="px-4 py-3 w-14">{t('ID')}</th>
+                                <th className="px-4 py-3">{t('Phone / Campaign')}</th>
                                 {effectiveEmpresaId === 'all' && isPlatformOwner && (
-                                    <th className="px-6 py-3">{t('Empresa')}</th>
+                                    <th className="px-4 py-3">{t('Empresa')}</th>
                                 )}
-                                <th className="px-6 py-3">{t('Date')}</th>
-                                <th className="px-6 py-3 text-center">{t('Status')}</th>
-                                <th className="px-6 py-3 text-center w-20">{t('Sent.', 'Sent.')}</th>
-                                <th className="px-6 py-3 text-center w-16">{t('Lang', 'Idioma')}</th>
-                                <th className="px-6 py-3 text-center">{t('Results / Scores')}</th>
-                                <th className="px-6 py-3">{t('Model')}</th>
-                                <th className="px-6 py-3">{t('Comments')}</th>
-                                <th className="px-6 py-3 text-right sticky right-0 bg-gray-50">{t('More')}</th>
+                                <th className="px-4 py-3">{t('Date')}</th>
+                                <th className="px-3 py-3 text-center">{t('Status')}</th>
+                                <th className="px-2 py-3 text-center">{t('Sent.')}</th>
+                                <th className="px-2 py-3 text-center">{t('Idioma')}</th>
+                                <th className="px-4 py-3 text-center">{t('Results / Scores')}</th>
+                                <th className="px-4 py-3">{t('Model')}</th>
+                                <th className="px-4 py-3">{t('Comments')}</th>
+                                <th className="px-4 py-3 text-right sticky right-0 bg-gray-50">{t('More')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -385,73 +385,62 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                 </tr>
                             ) : filteredResults.map((row) => (
                                 <tr key={row.id} className="hover:bg-gray-50/50 transition-colors">
-                                    <td className="px-6 py-4 font-mono text-xs text-gray-400">#{row.id}</td>
-                                    <td className="px-6 py-4">
+                                    <td className="px-4 py-4 font-mono text-xs text-gray-400">#{row.id}</td>
+                                    <td className="px-4 py-4">
                                         <div className="flex flex-col">
                                             <span className="font-medium text-gray-900">{row.telefono}</span>
                                             <span className="text-[10px] text-blue-600 font-bold uppercase tracking-tighter">{row.campaign_name}</span>
                                         </div>
                                     </td>
                                     {effectiveEmpresaId === 'all' && isPlatformOwner && (
-                                        <td className="px-6 py-4">
+                                        <td className="px-4 py-4">
                                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
                                                 {row.empresa_name || '—'}
                                             </span>
                                         </td>
                                     )}
-                                    <td className="px-6 py-4 text-gray-500">
+                                    <td className="px-4 py-4 text-gray-500">
                                         {new Date(row.fecha).toLocaleDateString()} <span className="text-xs text-gray-400">{new Date(row.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                     </td>
-                                    <td className="px-6 py-4 text-center">
+                                    <td className="px-3 py-4 text-center">
                                         {(() => {
                                             if (row.status === 'completada' || row.status === 'completed') {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-green-500 text-white uppercase shadow-sm">{t('Completada')}</span>;
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold bg-green-500 text-white uppercase shadow-sm">{t('Completada')}</span>;
                                             } else if (row.status === 'parcial' || row.status === 'incomplete') {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-orange-400 text-white uppercase shadow-sm">{t('Parcial')}</span>;
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold bg-orange-400 text-white uppercase shadow-sm">{t('Parcial')}</span>;
                                             } else if (row.status === 'rechazada' || row.status === 'rejected_opt_out' || row.status === 'rejected') {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-red-700 text-white uppercase shadow-sm" title="No reintentar">{t('Rechazada')}</span>;
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold bg-red-700 text-white uppercase shadow-sm" title="No reintentar">{t('Rechazada')}</span>;
                                             } else if (row.status === 'fallida' || row.status === 'failed') {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-purple-500 text-white uppercase shadow-sm">{t('Fallida')}</span>;
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold bg-purple-500 text-white uppercase shadow-sm">{t('Fallida')}</span>;
                                             } else if (row.status === 'no_contesta' || row.status === 'unreached') {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-amber-400 text-white uppercase shadow-sm">{t('No Contesta')}</span>;
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold bg-amber-400 text-white uppercase shadow-sm">{t('No Contesta')}</span>;
                                             } else {
-                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-gray-400 text-white uppercase shadow-sm">{t('Pendiente')}</span>;
+                                                return <span className="inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold bg-gray-400 text-white uppercase shadow-sm">{t('Pendiente')}</span>;
                                             }
                                         })()}
                                     </td>
-                                    {/* Sentimiento */}
-                                    <td className="px-6 py-4 text-center">
+                                    <td className="px-2 py-4 text-center">
                                         {(() => {
                                             const sent = getSentimiento(row);
-                                            const cfg: Record<Sentimiento, { icon: string; cls: string; label: string }> = {
-                                                Positivo: { icon: '😊', cls: 'bg-green-50 text-green-700 border-green-200', label: 'Positivo' },
-                                                Neutral:  { icon: '😐', cls: 'bg-gray-50 text-gray-600 border-gray-200', label: 'Neutral' },
-                                                Negativo: { icon: '😠', cls: 'bg-red-50 text-red-700 border-red-200', label: 'Negativo' },
+                                            const cfg: Record<Sentimiento, { icon: string; cls: string }> = {
+                                                Positivo: { icon: '😊', cls: 'text-green-600' },
+                                                Neutral:  { icon: '😐', cls: 'text-gray-400' },
+                                                Negativo: { icon: '😠', cls: 'text-red-600' },
                                             };
                                             const s = cfg[sent];
-                                            return (
-                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${s.cls}`} title={s.label}>
-                                                    <span>{s.icon}</span>{s.label}
-                                                </span>
-                                            );
+                                            return <span className={`text-lg ${s.cls}`} title={sent}>{s.icon}</span>;
                                         })()}
                                     </td>
-                                    {/* Idioma */}
-                                    <td className="px-6 py-4 text-center">
+                                    <td className="px-2 py-4 text-center">
                                         {(() => {
                                             const lang = getIdioma(row);
                                             if (!lang) return <span className="text-gray-300">—</span>;
                                             const LANG_FLAGS: Record<string, string> = { es: '🇪🇸', en: '🇬🇧', fr: '🇫🇷', de: '🇩🇪', it: '🇮🇹', pt: '🇵🇹', eu: '🇪🇸', ca: '🇪🇸', gl: '🇪🇸', nl: '🇳🇱', ja: '🇯🇵', zh: '🇨🇳', ar: '🇸🇦', ru: '🇷🇺' };
                                             const flag = LANG_FLAGS[lang] || '🌐';
-                                            return (
-                                                <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-600" title={lang.toUpperCase()}>
-                                                    <span className="text-base">{flag}</span>
-                                                    <span className="uppercase">{lang}</span>
-                                                </span>
-                                            );
+                                            return <span className="text-base" title={lang.toUpperCase()}>{flag}</span>;
                                         })()}
                                     </td>
-                                    <td className="px-6 py-4 text-center">
+                                    <td className="px-4 py-4 text-center">
                                         {(() => {
                                             const type = row.tipo_resultados;
                                             const badgeClass = type === 'ENCUESTA_NUMERICA' ? 'bg-green-50 text-green-700 border-green-200' :
@@ -579,7 +568,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                             }
                                         })()}
                                     </td>
-                                    <td className="px-6 py-4">
+                                    <td className="px-4 py-4">
                                         <div className="flex flex-col">
                                             <span className="text-[10px] text-blue-600 font-mono font-bold tracking-tighter uppercase whitespace-nowrap">
                                                 {row.llm_model?.split(' ')[0] || 'Primary'}
@@ -589,16 +578,16 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                             </span>
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4">
+                                    <td className="px-4 py-4">
                                         {row.comentarios && row.comentarios !== "Sin comentarios" ? (
-                                            <div className="bg-yellow-50 border border-yellow-100 p-2 rounded-lg text-xs text-gray-800 italic max-w-xs truncate">
+                                            <div className="bg-yellow-50 border border-yellow-100 p-2 rounded-lg text-xs text-gray-800 italic max-w-[180px] truncate">
                                                 "{row.comentarios}"
                                             </div>
                                         ) : (
                                             <span className="text-gray-300 italic text-xs">{t('None')}</span>
                                         )}
                                     </td>
-                                    <td className="px-6 py-4 text-right sticky right-0 bg-white">
+                                    <td className="px-4 py-4 text-right sticky right-0 bg-white">
                                         <div className="flex justify-end items-center gap-2">
                                             {(row.status === 'failed' || row.status === 'incomplete') && (
                                                 <button
