@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Plus, Upload, Clock, AlertCircle, History, Trash2, X, Edit2, Building2, FileText, Target, ThumbsDown, Calendar
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
@@ -154,19 +155,18 @@ export function CampaignsView() {
       });
 
       if (res.ok) {
-        alert(t("Campaign updated!", "¡Campaña actualizada!"));
+        toast.success(t("Campaign updated!", "¡Campaña actualizada!"));
         setEditingCampaign(null);
         loadCampaigns();
         if (selectedCampaign && selectedCampaign.id === editingCampaign.id) {
-          // Reload details if we are viewing the edited campaign
           const updatedCamp = await (await fetch(`${API_URL}/api/campaigns/${editingCampaign.id}`)).json();
           setSelectedCampaign(updatedCamp.campaign);
         }
       } else {
-        alert(t("Update failed", "Error al actualizar"));
+        toast.error(t("Update failed", "Error al actualizar"));
       }
     } catch (e) {
-      alert(t("Error updating campaign", "Error al actualizar la campaña"));
+      toast.error(t("Error updating campaign", "Error al actualizar la campaña"));
     }
   };
 
@@ -310,7 +310,7 @@ export function CampaignsView() {
         setActiveTab('leads');
       }
     } catch (e) {
-      alert(t("Error loading details", "Error al cargar detalles"));
+      toast.error(t("Error loading details", "Error al cargar detalles"));
     } finally {
       setLoading(false);
     }
@@ -413,7 +413,7 @@ export function CampaignsView() {
       setCsvFile(null);
       setExtractionSchema([]);
       loadCampaigns();
-      alert(t('Campaign created successfully!', '¡Campaña creada exitosamente!'));
+      toast.success(t('Campaign created successfully!', '¡Campaña creada exitosamente!'));
 
     } catch (err: any) {
       setError(err.message);
@@ -429,7 +429,7 @@ export function CampaignsView() {
       loadCampaigns();
       if (selectedCampaign?.id === id) setShowDetails(false);
     } catch (e) {
-      alert(t("Error deleting campaign", "Error al eliminar la campaña"));
+      toast.error(t("Error deleting campaign", "Error al eliminar la campaña"));
     }
   };
 
@@ -440,14 +440,14 @@ export function CampaignsView() {
       const data = await res.json();
 
       if (res.ok && data.status === 'success') {
-        alert(t(`Successfully queued ${data.retried_count} failed calls for retry.`, `Se han encolado exitosamente ${data.retried_count} llamadas fallidas para reintento.`));
+        toast.success(t(`Successfully queued ${data.retried_count} failed calls for retry.`, `Se han encolado exitosamente ${data.retried_count} llamadas fallidas para reintento.`));
         if (selectedCampaign) loadCampaignDetails(selectedCampaign);
         loadCampaigns();
       } else {
-        alert(t("Failed to retry calls.", "Error al reintentar llamadas."));
+        toast.error(t("Failed to retry calls.", "Error al reintentar llamadas."));
       }
     } catch (e) {
-      alert(t("Error connecting to server", "Error al conectar con el servidor"));
+      toast.error(t("Error connecting to server", "Error al conectar con el servidor"));
     }
   };
 
@@ -459,12 +459,12 @@ export function CampaignsView() {
         setCampaignLeads(prev => prev.map(l =>
           l.id === leadId ? { ...l, status: 'pending', retries_attempted: 0 } : l
         ));
-        alert(t("Lead requeued successfully!", "Lead encolado exitosamente!"));
+        toast.success(t("Lead requeued successfully!", "Lead encolado exitosamente!"));
       } else {
-        alert(t("Failed to retry lead", "Error al reintentar lead"));
+        toast.error(t("Failed to retry lead", "Error al reintentar lead"));
       }
     } catch (e) {
-      alert(t("Error connecting to server", "Error al conectar con el servidor"));
+      toast.error(t("Error connecting to server", "Error al conectar con el servidor"));
     }
   };
 
@@ -472,11 +472,11 @@ export function CampaignsView() {
     try {
       const res = await fetch(`${API_URL}/api/campaigns/${campaignId}/start`, { method: 'POST' });
       if (res.ok) {
-        alert(t("Campaign started (Drip mode active)", "Campaña iniciada (Modo Goteo activo)"));
+        toast.success(t("Campaign started (Drip mode active)", "Campaña iniciada (Modo Goteo activo)"));
         loadCampaigns();
         if (selectedCampaign?.id === campaignId) loadCampaignDetails(selectedCampaign);
       } else {
-        alert(t("Error starting campaign", "Error al iniciar campaña"));
+        toast.error(t("Error starting campaign", "Error al iniciar campaña"));
       }
     } catch (e) {
       console.error(e);
@@ -487,11 +487,11 @@ export function CampaignsView() {
     try {
       const res = await fetch(`${API_URL}/api/campaigns/${campaignId}/stop`, { method: 'POST' });
       if (res.ok) {
-        alert(t("Campaign paused", "Campaña pausada"));
+        toast.success(t("Campaign paused", "Campaña pausada"));
         loadCampaigns();
         if (selectedCampaign?.id === campaignId) loadCampaignDetails(selectedCampaign);
       } else {
-        alert(t("Error pausing campaign", "Error al pausar campaña"));
+        toast.error(t("Error pausing campaign", "Error al pausar campaña"));
       }
     } catch (e) {
       console.error(e);

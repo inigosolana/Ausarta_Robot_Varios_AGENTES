@@ -1,4 +1,4 @@
-import React, { lazy } from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { PermissionGate } from './components/PermissionGate';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -17,7 +17,17 @@ const CrmIntegrationView = lazy(() => import('./views/CrmIntegrationView'));
 const AssistantView      = lazy(() => import('./views/AssistantView'));
 const ProfileView        = lazy(() => import('./views/ProfileView'));
 
+const LoadingFallback = () => (
+  <div className="flex items-center justify-center min-h-[60vh]">
+    <div className="flex flex-col items-center gap-3">
+      <div className="w-8 h-8 border-[3px] border-gray-200 border-t-gray-800 rounded-full animate-spin" />
+      <span className="text-sm text-gray-400 font-medium">Cargando...</span>
+    </div>
+  </div>
+);
+
 const App: React.FC = () => (
+  <Suspense fallback={<LoadingFallback />}>
   <Routes>
     {/* Public */}
     <Route path="/login" element={<LoginView />} />
@@ -42,6 +52,7 @@ const App: React.FC = () => (
     {/* Fallback */}
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes>
+  </Suspense>
 );
 
 export default App;

@@ -118,7 +118,7 @@ services:
     restart: unless-stopped
     networks:
       - ausarta-network
-    command: redis-server --appendonly yes --requirepass $${REDIS_PASSWORD}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
 

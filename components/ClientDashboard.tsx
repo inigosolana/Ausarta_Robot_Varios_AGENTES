@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
     Phone,
     CheckCircle,
@@ -14,6 +14,7 @@ import {
     Download,
     RefreshCw
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { DateRangePicker, getDatesFromRange, DateRange } from './DateRangePicker';
@@ -75,55 +76,44 @@ const KPICard = ({ title, value, subValue, icon: Icon, color }: any) => (
 const ClientDashboard: React.FC<Props> = ({ empresaId }) => {
     const { profile } = useAuth();
     const { t } = useTranslation();
-    const [stats, setStats] = useState<DashboardStats | null>(null);
-    const [usage, setUsage] = useState<UsageStats | null>(null);
-    const [agents, setAgents] = useState<Agent[]>([]);
-    const [recentCalls, setRecentCalls] = useState<Call[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
     const [dateRange, setDateRange] = useState<DateRange>('7d');
 
     const finalEmpresaId = empresaId || profile?.empresa_id;
 
-    useEffect(() => {
-        if (finalEmpresaId) {
-            loadData();
-        }
-    }, [finalEmpresaId, dateRange]);
+    const fetchClientData = async () => {
+        const params = new URLSearchParams();
+        if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
+        const dates = getDatesFromRange(dateRange);
+        if (dates.start) params.append('start_date', dates.start);
+        if (dates.end) params.append('end_date', dates.end);
+        const queryStr = params.toString() ? `?${params.toString()}` : '';
 
-    const loadData = async () => {
-        try {
-            setIsLoading(true);
-            const params = new URLSearchParams();
-            if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
+        const [statsRes, usageRes, agentsRes, callsRes] = await Promise.all([
+            fetch(`${API_URL}/api/dashboard/stats${queryStr}`),
+            fetch(`${API_URL}/api/dashboard/usage-stats${queryStr}`),
+            fetch(`${API_URL}/api/agents?empresa_id=${finalEmpresaId}`),
+            fetch(`${API_URL}/api/dashboard/recent-calls${queryStr}`)
+        ]);
 
-            // Date filtering
-            const dates = getDatesFromRange(dateRange);
-            if (dates.start) params.append('start_date', dates.start);
-            if (dates.end) params.append('end_date', dates.end);
-
-            const queryStr = params.toString() ? `?${params.toString()}` : '';
-
-            const [statsRes, usageRes, agentsRes, callsRes] = await Promise.all([
-                fetch(`${API_URL}/api/dashboard/stats${queryStr}`),
-                fetch(`${API_URL}/api/dashboard/usage-stats${queryStr}`),
-                fetch(`${API_URL}/api/agents?empresa_id=${finalEmpresaId}`), // Agents don't need date filter usually
-                fetch(`${API_URL}/api/dashboard/recent-calls${queryStr}`)
-            ]);
-
-            if (statsRes.ok) setStats(await statsRes.json());
-            if (usageRes.ok) setUsage(await usageRes.json());
-            if (agentsRes.ok) setAgents(await agentsRes.json());
-            if (callsRes.ok) {
-                const calls = await callsRes.json();
-                setRecentCalls(calls.slice(0, 5)); // Only last 5
-            }
-
-        } catch (error) {
-            console.error('Error loading client dashboard:', error);
-        } finally {
-            setIsLoading(false);
-        }
+        return {
+            stats: statsRes.ok ? (await statsRes.json()) as DashboardStats : null,
+            usage: usageRes.ok ? (await usageRes.json()) as UsageStats : null,
+            agents: agentsRes.ok ? (await agentsRes.json()) as Agent[] : [],
+            recentCalls: callsRes.ok ? ((await callsRes.json()) as Call[]).slice(0, 5) : [],
+        };
     };
+
+    const { data, isLoading, refetch: loadData } = useQuery({
+        queryKey: ['client-dashboard', finalEmpresaId, dateRange],
+        queryFn: fetchClientData,
+        enabled: !!finalEmpresaId,
+        staleTime: 30_000,
+    });
+
+    const stats = data?.stats ?? null;
+    const usage = data?.usage ?? null;
+    const agents = data?.agents ?? [];
+    const recentCalls = data?.recentCalls ?? [];
 
     const exportCSV = () => {
         const headers = [

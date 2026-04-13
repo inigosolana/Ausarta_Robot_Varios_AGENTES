@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Download, Search, RefreshCw, FileText, Target, ThumbsDown, Clock, Calendar, Database, Sparkles } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -21,15 +23,13 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     const { profile, isRole, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
 
-    const [results, setResults] = useState<SurveyResult[]>([]);
-    const [loading, setLoading] = useState(true);
+    const queryClient = useQueryClient();
     const [searchTerm, setSearchTerm] = useState('');
     const [viewingTranscript, setViewingTranscript] = useState<SurveyResult | null>(null);
     const [empresas, setEmpresas] = useState<any[]>([]);
     const [agents, setAgents] = useState<any[]>([]);
     const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | 'all'>(empresaId || 'all');
 
-    // Para usuarios no-platformOwner, forzar siempre su empresa_id
     const effectiveEmpresaId = !isPlatformOwner && profile?.empresa_id
         ? profile.empresa_id
         : selectedEmpresaId;
@@ -37,34 +37,29 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     const [selectedTipo, setSelectedTipo] = useState<string | 'all'>('all');
     const [dateRange, setDateRange] = useState<DateRange>('all');
 
-    const loadResults = async () => {
-        setLoading(true);
-        try {
-            const BASE_URL = import.meta.env.VITE_API_URL || '';
-            const params = new URLSearchParams();
+    const resultsQueryKey = ['results', effectiveEmpresaId, selectedAgentId, agentId, campaignId, dateRange] as const;
 
-            if (effectiveEmpresaId !== 'all') params.append('empresa_id', String(effectiveEmpresaId));
-            if (selectedAgentId !== 'all') params.append('agent_id', String(selectedAgentId));
-            if (agentId) params.append('agent_id', String(agentId));
-            if (campaignId) params.append('campaign_id', String(campaignId));
-
-            // Date filtering
-            const dates = getDatesFromRange(dateRange);
-            if (dates.start) params.append('start_date', dates.start);
-            if (dates.end) params.append('end_date', dates.end);
-
-            const queryStr = params.toString() ? `?${params.toString()}` : '';
-            const res = await fetch(`${BASE_URL}/api/results${queryStr}`);
-            if (res.ok) {
-                const data = await res.json();
-                setResults(data);
-            }
-        } catch (e) {
-            console.error("Error loading results", e);
-        } finally {
-            setLoading(false);
-        }
+    const fetchResults = async (): Promise<SurveyResult[]> => {
+        const BASE_URL = import.meta.env.VITE_API_URL || '';
+        const params = new URLSearchParams();
+        if (effectiveEmpresaId !== 'all') params.append('empresa_id', String(effectiveEmpresaId));
+        if (selectedAgentId !== 'all') params.append('agent_id', String(selectedAgentId));
+        if (agentId) params.append('agent_id', String(agentId));
+        if (campaignId) params.append('campaign_id', String(campaignId));
+        const dates = getDatesFromRange(dateRange);
+        if (dates.start) params.append('start_date', dates.start);
+        if (dates.end) params.append('end_date', dates.end);
+        const queryStr = params.toString() ? `?${params.toString()}` : '';
+        const res = await fetch(`${BASE_URL}/api/results${queryStr}`);
+        if (!res.ok) throw new Error('Failed to load results');
+        return res.json();
     };
+
+    const { data: results = [], isLoading: loading, refetch: loadResults } = useQuery({
+        queryKey: resultsQueryKey,
+        queryFn: fetchResults,
+        staleTime: 30_000,
+    });
 
     useEffect(() => {
         const fetchEmpresas = async () => {
@@ -86,10 +81,8 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
         fetchAgents();
     }, [effectiveEmpresaId]);
 
+    // Supabase Realtime: invalidate React Query cache on DB changes
     useEffect(() => {
-        loadResults();
-
-        // 1. Canal para actualizaciones en la tabla 'encuestas' (Resultados detallados)
         const filterStrEncuestas = campaignId
             ? `campaign_id=eq.${campaignId}`
             : (effectiveEmpresaId !== 'all' ? `empresa_id=eq.${effectiveEmpresaId}` : undefined);
@@ -98,52 +91,17 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
             .channel('results-live-updates-encuestas')
             .on(
                 'postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'encuestas',
-                    filter: filterStrEncuestas
-                },
-                (payload) => {
-                    if (payload.eventType === 'INSERT') {
-                        const newRes = payload.new as SurveyResult;
-                        setResults(prev => {
-                            if (prev.some(r => r.id === newRes.id)) return prev;
-                            return [newRes, ...prev];
-                        });
-                    } else if (payload.eventType === 'UPDATE') {
-                        const updatedRes = payload.new as SurveyResult;
-                        setResults(prev => prev.map(r =>
-                            r.id === updatedRes.id ? { ...r, ...updatedRes } : r
-                        ));
-                    }
-                }
+                { event: '*', schema: 'public', table: 'encuestas', filter: filterStrEncuestas },
+                () => { queryClient.invalidateQueries({ queryKey: resultsQueryKey }); }
             )
             .subscribe();
 
-        // 2. Canal para actualizaciones en la tabla 'campaign_leads' (Progreso de la campaña)
-        // Esto es útil para ver cuando un lead cambia a 'calling' o 'failed' incluso antes de que haya encuesta
         const channelLeads = supabase
             .channel('leads-live-updates')
             .on(
                 'postgres_changes',
-                {
-                    event: 'UPDATE',
-                    schema: 'public',
-                    table: 'campaign_leads',
-                    filter: campaignId ? `campaign_id=eq.${campaignId}` : undefined
-                },
-                (payload) => {
-                    const updatedLead = payload.new as any;
-                    if (updatedLead.call_id) {
-                        // Si el lead ya tiene call_id, intentamos actualizar el resultado correspondiente
-                        setResults(prev => prev.map(r =>
-                            r.id === updatedLead.call_id
-                                ? { ...r, status: updatedLead.status, transcription: updatedLead.transcription || r.transcription }
-                                : r
-                        ));
-                    }
-                }
+                { event: 'UPDATE', schema: 'public', table: 'campaign_leads', filter: campaignId ? `campaign_id=eq.${campaignId}` : undefined },
+                () => { queryClient.invalidateQueries({ queryKey: resultsQueryKey }); }
             )
             .subscribe();
 
@@ -151,7 +109,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
             supabase.removeChannel(channelEncuestas);
             supabase.removeChannel(channelLeads);
         };
-    }, [profile, effectiveEmpresaId, selectedAgentId, agentId, campaignId, dateRange]);
+    }, [profile, effectiveEmpresaId, selectedAgentId, agentId, campaignId, dateRange, queryClient]);
 
     const filteredResults = results.filter(r => {
         const matchesSearch = r.telefono.includes(searchTerm) ||
@@ -220,15 +178,13 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
             body: JSON.stringify({ phoneNumber: phone })
         })
             .then(res => {
-                if (res.ok) alert(t("Retrying call to {{phone}}...", { phone, defaultValue: `Reintentando llamada a ${phone}...` }));
-                else alert(t("Error retrying", "Error al reintentar"));
+                if (res.ok) toast.success(t("Retrying call to {{phone}}...", { phone, defaultValue: `Reintentando llamada a ${phone}...` }));
+                else toast.error(t("Error retrying", "Error al reintentar"));
             })
             .catch(e => console.error(e));
     };
 
     const openTranscript = async (row: SurveyResult) => {
-        // Siempre cargamos la transcripción fresca desde la API para mostrar incluso
-        // las parciales (llamadas incompletas, cortes, etc.)
         let freshTranscription = row.transcription ?? null;
         try {
             const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
@@ -237,8 +193,9 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                 const data = await res.json();
                 if (data.transcription) {
                     freshTranscription = data.transcription;
-                    // Actualizar en el estado global para que no se pierda al reabrir
-                    setResults(prev => prev.map(r => r.id === row.id ? { ...r, transcription: freshTranscription } : r));
+                    queryClient.setQueryData<SurveyResult[]>(resultsQueryKey, (old) =>
+                        old?.map(r => r.id === row.id ? { ...r, transcription: freshTranscription } : r)
+                    );
                 }
             }
         } catch (e) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
     Phone,
     CheckCircle,
@@ -15,6 +15,7 @@ import {
 import {
     PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend
 } from 'recharts';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { DateRangePicker, getDatesFromRange, DateRange } from './DateRangePicker';
@@ -136,48 +137,50 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 }) => {
     const { profile, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
-    const [stats, setStats] = useState<DashboardStats | null>(null);
-    const [recentCalls, setRecentCalls] = useState<Call[]>([]);
-    const [topPerformers, setTopPerformers] = useState<TopPerformers>({ top_campaign: null, top_agent: null });
-    const [integrations, setIntegrations] = useState<Integration[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
     const [dateRange, setDateRange] = useState<DateRange>('7d');
 
-    // Determinar si la vista es "global" (Ausarta ve todas las empresas)
     const isGlobalView = isPlatformOwner && !empresaId;
 
-    useEffect(() => { loadData(); }, [profile, dateRange]);
-
-    const loadData = async () => {
-        try {
-            setIsLoading(true);
-            const params = new URLSearchParams();
-            const finalEmpresaId = empresaId || (isPlatformOwner ? undefined : profile?.empresa_id);
-            if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
-            if (agentId) params.append('agent_id', String(agentId));
-            if (campaignId) params.append('campaign_id', String(campaignId));
-            const dates = getDatesFromRange(dateRange);
-            if (dates.start) params.append('start_date', dates.start);
-            if (dates.end) params.append('end_date', dates.end);
-            const queryStr = params.toString() ? `?${params.toString()}` : '';
-
-            const [statsRes, callsRes, topRes, intRes] = await Promise.all([
-                fetch(`${API_URL}/api/dashboard/stats${queryStr}`),
-                fetch(`${API_URL}/api/dashboard/recent-calls${queryStr}`),
-                fetch(`${API_URL}/api/dashboard/top-performers${queryStr}`),
-                hideIntegrations ? Promise.resolve({ ok: true, json: () => [] }) : fetch(`${API_URL}/api/dashboard/integrations`)
-            ]);
-
-            if (statsRes.ok) setStats(await statsRes.json());
-            if (callsRes.ok) setRecentCalls(await callsRes.json());
-            if (topRes.ok) setTopPerformers(await topRes.json());
-            if (intRes.ok && !hideIntegrations) setIntegrations(await intRes.json());
-        } catch (error) {
-            console.error('Error loading dashboard data:', error);
-        } finally {
-            setIsLoading(false);
-        }
+    const buildQueryStr = () => {
+        const params = new URLSearchParams();
+        const finalEmpresaId = empresaId || (isPlatformOwner ? undefined : profile?.empresa_id);
+        if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
+        if (agentId) params.append('agent_id', String(agentId));
+        if (campaignId) params.append('campaign_id', String(campaignId));
+        const dates = getDatesFromRange(dateRange);
+        if (dates.start) params.append('start_date', dates.start);
+        if (dates.end) params.append('end_date', dates.end);
+        return params.toString() ? `?${params.toString()}` : '';
     };
+
+    const dashboardQueryKey = ['admin-dashboard', empresaId, agentId, campaignId, dateRange, profile?.empresa_id] as const;
+
+    const fetchDashboardData = async () => {
+        const queryStr = buildQueryStr();
+        const [statsRes, callsRes, topRes, intRes] = await Promise.all([
+            fetch(`${API_URL}/api/dashboard/stats${queryStr}`),
+            fetch(`${API_URL}/api/dashboard/recent-calls${queryStr}`),
+            fetch(`${API_URL}/api/dashboard/top-performers${queryStr}`),
+            hideIntegrations ? Promise.resolve({ ok: true, json: () => [] } as Response) : fetch(`${API_URL}/api/dashboard/integrations`)
+        ]);
+        return {
+            stats: statsRes.ok ? (await statsRes.json()) as DashboardStats : null,
+            recentCalls: callsRes.ok ? (await callsRes.json()) as Call[] : [],
+            topPerformers: topRes.ok ? (await topRes.json()) as TopPerformers : { top_campaign: null, top_agent: null },
+            integrations: (intRes.ok && !hideIntegrations) ? (await intRes.json()) as Integration[] : [],
+        };
+    };
+
+    const { data, isLoading, refetch: loadData } = useQuery({
+        queryKey: dashboardQueryKey,
+        queryFn: fetchDashboardData,
+        staleTime: 30_000,
+    });
+
+    const stats = data?.stats ?? null;
+    const recentCalls = data?.recentCalls ?? [];
+    const topPerformers = data?.topPerformers ?? { top_campaign: null, top_agent: null };
+    const integrations = data?.integrations ?? [];
 
     const exportCSV = () => {
         const headers = [t("ID"), t("Teléfono"), t("Campaña"), t("Empresa"), t("Tipo"), t("Fecha"), t("Estado"), t("Modelo")];
