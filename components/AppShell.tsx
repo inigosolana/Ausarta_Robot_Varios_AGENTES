@@ -82,17 +82,6 @@ const AppShell: React.FC = () => {
     setIsDarkMode(document.documentElement.classList.contains('dark'));
   }, []);
 
-  // Auto-hide alert banners after 8 seconds
-  useEffect(() => {
-    if (!alerts.length) return;
-    const timers = alerts
-      .filter((a: any) => !hiddenAlerts.has(a.id))
-      .map((a: any) =>
-        setTimeout(() => setHiddenAlerts(prev => new Set([...prev, a.id])), 8000)
-      );
-    return () => timers.forEach(clearTimeout);
-  }, [alerts]);
-
   const toggleDarkMode = () => {
     const nextDark = document.documentElement.classList.toggle('dark');
     setIsDarkMode(nextDark);
@@ -117,6 +106,17 @@ const AppShell: React.FC = () => {
     },
     enabled: canSimulation,
   });
+
+  // Auto-hide alert banners after 8 seconds
+  useEffect(() => {
+    if (!alerts.length) return;
+    const timers = alerts
+      .filter((a: any) => !hiddenAlerts.has(a.id))
+      .map((a: any) =>
+        setTimeout(() => setHiddenAlerts(prev => new Set([...prev, a.id])), 8000)
+      );
+    return () => timers.forEach(clearTimeout);
+  }, [alerts]);
 
   useEffect(() => {
     const channel = supabase
