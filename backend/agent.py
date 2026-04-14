@@ -70,6 +70,15 @@ async def get_vad_model(min_silence_duration: float):
     return _GLOBAL_VAD_MODEL
 
 
+def anonymize_text(text: str) -> str:
+    if not text:
+        return ""
+    anon = re.sub(r'\b\d{4,}\b', '[REDACTED_NUM]', text)
+    if len(anon) > 120:
+        return anon[:120] + "... [TRUNCATED]"
+    return anon
+
+
 ROOM_PREFIX = os.getenv("LIVEKIT_ROOM_PREFIX", "llamada_ausarta_")
 DEFAULT_CARTESIA_VOICE = os.getenv("VOICE_ID_AUSARTA", "b5aa8098-49ef-475d-89b0-c9262ecf33fd")
 DISPATCH_AGENT_NAME = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
@@ -989,7 +998,7 @@ async def entrypoint(ctx: JobContext):
                     for pattern in VOICEMAIL_PATTERNS:
                         if pattern in text:
                             amd_state["detected"] = True
-                            logger.warning(f"📵 [{job_id}] AMD: BUZÓN DETECTADO — patrón '{pattern}' en '{text[:80]}'")
+                            logger.warning(f"📵 [{job_id}] AMD: BUZÓN DETECTADO — patrón '{pattern}' en '{anonymize_text(text)}'")
 
                             # Guardar como no_contesta y colgar
                             try:
@@ -1319,7 +1328,8 @@ async def entrypoint(ctx: JobContext):
 
                 # Filtro anti-basura por ruido o falsas detecciones del STT
                 if _is_likely_noise_transcript(content):
-                    logger.info(f"🔇 [{job_id}] Transcripción descartada como ruido: '{content}'")
+                    logger.debug(f"🔇 [{job_id}] Transcripción descartada como ruido: '{anonymize_text(content)}'")
+
                     return
 
                 word_count = _count_words(content)
@@ -1331,7 +1341,8 @@ async def entrypoint(ctx: JobContext):
 
                 # Anti-falsas interrupciones: no considerar interrupción real si son muy pocas palabras.
                 if runtime_state["agent_state"] in ("speaking", "thinking") and word_count < max_short_interrupt_words:
-                    logger.info(f"🛡️ [{job_id}] Interrupción corta ignorada ({word_count} palabras): '{content}'")
+                    logger.debug(f"🛡️ [{job_id}] Interrupción corta ignorada ({word_count} palabras): '{anonymize_text(content)}'")
+
                     return
 
                 # Interrupción real: acknowledge instantáneo para sonar humano.
@@ -1643,7 +1654,7 @@ async def entrypoint(ctx: JobContext):
                                         datos_extra["sentimiento_cliente"] = sentimiento
                                         datos_extra["idioma"] = lang_state.get("active_lang", language)
 
-                                        logger.info(f"✅ Disposición: {call_disposition} | Sentimiento: {sentimiento} | Idioma: {datos_extra['idioma']} | datos_extra: {datos_extra}")
+                                        logger.info(f"✅ Disposición: {call_disposition} | Sentimiento: {sentimiento} | Idioma: {datos_extra['idioma']} | datos_extra_keys: {list(datos_extra.keys())}")
                                     else:
                                         logger.error(f"Error HTTP del LLM al clasificar: {llm_resp.status}")
                     except Exception as e:

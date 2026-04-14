@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from typing import Optional, Any
 from collections import defaultdict
-from services.supabase_service import supabase, get_ui_cache
+from services.supabase_service import supabase, get_ui_cache, sb_query
 from services.livekit_service import lkapi
 import os
 import asyncio
@@ -149,24 +149,26 @@ async def get_recent_calls(
 ):
     if not supabase: return []
     try:
-        cols = "id, telefono, campaign_name, campaign_id, nombre_cliente, fecha, status, llm_model, empresa_id, agent_id"
-        query = supabase.table("encuestas").select(cols)
-        if empresa_id: query = query.eq("empresa_id", empresa_id)
-        if agent_id: query = query.eq("agent_id", agent_id)
-        if campaign_id: query = query.eq("campaign_id", campaign_id)
-        if start_date: query = query.gte("fecha", start_date)
-        if end_date: query = query.lte("fecha", end_date)
-        response = query.order("fecha", desc=True).limit(50).execute()
+        def _fetch_recent():
+            cols = "id, telefono, campaign_name, campaign_id, nombre_cliente, fecha, status, llm_model, empresa_id, agent_id"
+            query = supabase.table("encuestas").select(cols)
+            if empresa_id: query = query.eq("empresa_id", empresa_id)
+            if agent_id: query = query.eq("agent_id", agent_id)
+            if campaign_id: query = query.eq("campaign_id", campaign_id)
+            if start_date: query = query.gte("fecha", start_date)
+            if end_date: query = query.lte("fecha", end_date)
+            return query.order("fecha", desc=True).limit(50).execute()
 
-        # Lookup de empresas y agentes para enriquecer
+        response = await sb_query(_fetch_recent)
+
         empresas_map = {}
         agent_types_map = {}
         try:
-            emp_res = supabase.table("empresas").select("id, nombre").execute()
+            emp_res = await sb_query(lambda: supabase.table("empresas").select("id, nombre").execute())
             empresas_map = {e["id"]: e.get("nombre", "—") for e in (emp_res.data or [])}
         except: pass
         try:
-            agents_res = supabase.table("agent_config").select("id, tipo_resultados, name").execute()
+            agents_res = await sb_query(lambda: supabase.table("agent_config").select("id, tipo_resultados, name").execute())
             agent_types_map = {str(a["id"]): {"tipo": a.get("tipo_resultados"), "name": a.get("name")} for a in (agents_res.data or [])}
         except: pass
 
@@ -341,7 +343,7 @@ async def get_users_list():
     if cached: return cached
     if not supabase: return []
     try:
-        res = supabase.table("user_profiles").select("*, empresas(*)").order("created_at", desc=True).execute()
+        res = await sb_query(lambda: supabase.table("user_profiles").select("*, empresas(*)").order("created_at", desc=True).execute())
         return res.data
     except Exception as e:
         logger.error(f"Error users list: {e}")
@@ -353,7 +355,7 @@ async def get_empresas_list():
     if cached: return cached
     if not supabase: return []
     try:
-        res = supabase.table("empresas").select("*").order("nombre").execute()
+        res = await sb_query(lambda: supabase.table("empresas").select("*").order("nombre").execute())
         return res.data
     except Exception as e:
         logger.error(f"Error empresas list: {e}")

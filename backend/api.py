@@ -14,6 +14,9 @@ import sys
 import json
 from openai import AsyncOpenAI
 from concurrent.futures import ThreadPoolExecutor
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 # --- CONFIGURACIÓN DE LOGS ---
 logging.basicConfig(
@@ -35,10 +38,22 @@ from services.livekit_service import lkapi
 app = FastAPI(title="Ausarta Voice Agent API", version="2.0.0")
 executor = ThreadPoolExecutor(max_workers=20)
 
-# CORS
+# Rate Limiting
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS — orígenes explícitos en lugar de wildcard
+ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:5173,https://app.ausarta.net,https://www.ausarta.net"
+    ).split(",") if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
