@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from typing import Optional
-from services.supabase_service import supabase
+from services.supabase_service import supabase, sb_query
 from models.schemas import AIPromptRequest
 from datetime import datetime
 import os
@@ -136,7 +136,9 @@ async def generate_company_context(payload: dict):
 
         if not company_name and empresa_id and supabase:
             try:
-                emp_res = supabase.table("empresas").select("nombre").eq("id", int(empresa_id)).limit(1).execute()
+                emp_res = await sb_query(
+                    lambda: supabase.table("empresas").select("nombre").eq("id", int(empresa_id)).limit(1).execute()
+                )
                 if emp_res.data:
                     company_name = (emp_res.data[0].get("nombre") or "").strip()
             except Exception as e_emp:
@@ -166,7 +168,9 @@ async def generate_ai_prompt(req: AIPromptRequest):
         empresa_name = "la empresa"
         if req.empresa_id and supabase:
             try:
-                emp_res = supabase.table("empresas").select("nombre").eq("id", req.empresa_id).execute()
+                emp_res = await sb_query(
+                    lambda: supabase.table("empresas").select("nombre").eq("id", req.empresa_id).execute()
+                )
                 if emp_res.data:
                     empresa_name = emp_res.data[0]["nombre"]
             except Exception as e_emp:
@@ -230,7 +234,7 @@ IMPORTANTE: El usuario quiere ACTUALIZAR este agente con el nuevo request. Modif
 async def get_ai_config():
     if not supabase: return {"llm_provider": "groq"}
     try:
-        res = supabase.table("ai_config").select("*").limit(1).execute()
+        res = await sb_query(lambda: supabase.table("ai_config").select("*").limit(1).execute())
         return res.data[0] if res.data else {}
     except Exception as e:
         logger.error(f"Error AI config: {e}")
@@ -240,18 +244,16 @@ async def get_ai_config():
 async def update_ai_config(config: dict):
     if not supabase: return {"error": "No DB"}
     try:
-        curr = supabase.table("ai_config").select("id").limit(1).execute()
+        curr = await sb_query(lambda: supabase.table("ai_config").select("id").limit(1).execute())
         if not curr.data:
-            supabase.table("ai_config").insert(config).execute()
+            await sb_query(lambda: supabase.table("ai_config").insert(config).execute())
         else:
             first_id = curr.data[0]['id']
-            # Filtrar
             valid_fields = ["llm_provider", "llm_model", "tts_provider", "tts_model", "tts_voice", "stt_provider", "stt_model"]
             clean_config = {k: v for k, v in config.items() if k in valid_fields}
             clean_config["updated_at"] = datetime.utcnow().isoformat()
-            
-            supabase.table("ai_config").update(clean_config).eq("id", first_id).execute()
-            
+            await sb_query(lambda: supabase.table("ai_config").update(clean_config).eq("id", first_id).execute())
+
         return {"status": "ok", "message": "Modelos actualizados"}
     except Exception as e:
         logger.error(f"Error updating AI config: {e}")

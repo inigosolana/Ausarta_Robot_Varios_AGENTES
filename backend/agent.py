@@ -1203,11 +1203,18 @@ async def entrypoint(ctx: JobContext):
             return raw, ("\n".join(lines).strip() + ("\n" if lines else ""))
 
         async def _save_transcript_snapshot(reason: str = "auto"):
-            """Extrae y persiste la transcripción actual en Supabase."""
+            """
+            Extrae y persiste la transcripción actual.
+            Orden de prioridad:
+              1. event_buffer (en memoria, siempre disponible, más fiable en desconexiones bruscas)
+              2. chat_ctx de LiveKit (puede estar limpio al colgar)
+            """
             try:
-                raw, t = _extract_transcript_from_session(session)
+                # 1. Fuente primaria: buffer de eventos acumulado en tiempo real
+                raw, t = _build_transcript_from_event_buffer()
+                # 2. Fallback: chat_ctx de LiveKit (solo si el buffer está vacío)
                 if not t:
-                    raw, t = _build_transcript_from_event_buffer()
+                    raw, t = _extract_transcript_from_session(session)
                 logger.info(f"📝 [{job_id}] Snapshot transcripción ({reason}): {len(t)} chars, {len(raw)} mensajes")
                 if t:
                     transcript_snapshot["transcript"] = t

@@ -13,7 +13,7 @@ Responsabilidades:
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, HTTPException
 from fastapi.responses import JSONResponse
 from models.schemas import CallEndRequest, EncuestaData, YeastarConfigCreate, YeastarConfigResponse, YeastarConfigTest
-from services.supabase_service import supabase
+from services.supabase_service import supabase, sb_query
 from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
 from services.yeastar_service import YeastarClient
 from services.auth import get_current_user, CurrentUser, require_admin, require_api_key as _outbound_api_key
@@ -50,8 +50,8 @@ async def get_yeastar_config(
     if not empresa_id:
         raise HTTPException(status_code=403, detail="Usuario sin empresa asignada")
 
-    res = (
-        supabase.table("company_yeastar_configs")
+    res = await sb_query(
+        lambda: supabase.table("company_yeastar_configs")
         .select("id, empresa_id, api_url, api_port, api_username, is_active, created_at, updated_at")
         .eq("empresa_id", empresa_id)
         .limit(1)
@@ -91,8 +91,8 @@ async def save_yeastar_config(
     }
 
     # UPSERT — constraint uq_yeastar_empresa ensures one row per company
-    res = (
-        supabase.table("company_yeastar_configs")
+    res = await sb_query(
+        lambda: supabase.table("company_yeastar_configs")
         .upsert(row, on_conflict="empresa_id")
         .execute()
     )
@@ -200,7 +200,9 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
         return {"status": "ignored", "message": "No data to update"}
 
     # Leer el estado actual de la encuesta en BD
-    curr = supabase.table("encuestas").select("status, empresa_id, telefono").eq("id", datos.id_encuesta).execute()
+    curr = await sb_query(
+        lambda: supabase.table("encuestas").select("status, empresa_id, telefono").eq("id", datos.id_encuesta).execute()
+    )
     curr_data = curr.data[0] if curr.data else {}
     current_db_status = (curr_data.get("status") or "")
 
@@ -214,7 +216,9 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
     # --- Persistir en encuestas ---
     logger.info(f"📝 [guardar-encuesta] UPDATE encuesta {datos.id_encuesta}: {update_data}")
     try:
-        supabase.table("encuestas").update(update_data).eq("id", datos.id_encuesta).execute()
+        await sb_query(
+            lambda: supabase.table("encuestas").update(update_data).eq("id", datos.id_encuesta).execute()
+        )
         logger.info(f"✅ [guardar-encuesta] Encuesta {datos.id_encuesta} actualizada")
     except Exception as e:
         logger.error(f"❌ [guardar-encuesta] Error DB: {e}")
@@ -269,11 +273,15 @@ async def _propagate_to_lead(encuesta_id: int, final_status: str, enc_curr_data:
         max_retries = 3
         current_retries = 0
         try:
-            lead_res = supabase.table("campaign_leads").select("campaign_id, retries_attempted").eq("call_id", encuesta_id).limit(1).execute()
+            lead_res = await sb_query(
+                lambda: supabase.table("campaign_leads").select("campaign_id, retries_attempted").eq("call_id", encuesta_id).limit(1).execute()
+            )
             if lead_res.data:
                 current_retries = lead_res.data[0].get("retries_attempted", 0) or 0
                 camp_id = lead_res.data[0]["campaign_id"]
-                camp_res = supabase.table("campaigns").select("retry_interval, retries_count").eq("id", camp_id).limit(1).execute()
+                camp_res = await sb_query(
+                    lambda: supabase.table("campaigns").select("retry_interval, retries_count").eq("id", camp_id).limit(1).execute()
+                )
                 if camp_res.data:
                     ri = camp_res.data[0].get("retry_interval")
                     max_retries = camp_res.data[0].get("retries_count", 3) or 3
@@ -294,18 +302,24 @@ async def _propagate_to_lead(encuesta_id: int, final_status: str, enc_curr_data:
             logger.info(f"🚫 Máx. reintentos alcanzado ({new_retries}/{max_retries}) para encuesta {encuesta_id}")
 
     try:
-        result = supabase.table("campaign_leads").update(lead_update).eq("call_id", encuesta_id).execute()
+        result = await sb_query(
+            lambda: supabase.table("campaign_leads").update(lead_update).eq("call_id", encuesta_id).execute()
+        )
         rows = len(result.data) if result.data else 0
         logger.info(f"📊 Lead actualizado (call_id={encuesta_id}): {rows} filas | {lead_update}")
 
         # Fallback: buscar por campaign_id + teléfono si no se encontró por call_id
         if rows == 0 and enc_curr_data.get("telefono"):
             logger.warning(f"⚠️ Fallback por teléfono para encuesta {encuesta_id}")
-            enc_full = supabase.table("encuestas").select("campaign_id, telefono").eq("id", encuesta_id).execute()
+            enc_full = await sb_query(
+                lambda: supabase.table("encuestas").select("campaign_id, telefono").eq("id", encuesta_id).execute()
+            )
             if enc_full.data and enc_full.data[0].get("campaign_id"):
                 camp_id = enc_full.data[0]["campaign_id"]
                 tel = enc_full.data[0].get("telefono", "")
-                supabase.table("campaign_leads").update({**lead_update, "call_id": encuesta_id}).eq("campaign_id", camp_id).eq("phone_number", tel).execute()
+                await sb_query(
+                    lambda: supabase.table("campaign_leads").update({**lead_update, "call_id": encuesta_id}).eq("campaign_id", camp_id).eq("phone_number", tel).execute()
+                )
     except Exception as e:
         logger.error(f"❌ Error propagando lead para encuesta {encuesta_id}: {e}")
 
@@ -318,7 +332,9 @@ async def _notify_n8n_post_call(encuesta_id: int, status: str, result_data: dict
       3. N8N_WEBHOOK_URL_RESULTS  (webhook global de plataforma, si existe)
     """
     try:
-        emp_res = supabase.table("empresas").select("crm_webhook_url, crm_type, webhook_url").eq("id", empresa_id).execute()
+        emp_res = await sb_query(
+            lambda: supabase.table("empresas").select("crm_webhook_url, crm_type, webhook_url").eq("id", empresa_id).execute()
+        )
         emp_cfg = emp_res.data[0] if (emp_res.data) else {}
     except Exception as e:
         logger.warning(f"⚠️ No se pudo leer config de empresa {empresa_id}: {e}")
@@ -403,7 +419,9 @@ async def _deduct_credit(empresa_id: int) -> None:
         return
     try:
         # Leer créditos actuales
-        emp_res = supabase.table("empresas").select("creditos_llamadas").eq("id", empresa_id).limit(1).execute()
+        emp_res = await sb_query(
+            lambda: supabase.table("empresas").select("creditos_llamadas").eq("id", empresa_id).limit(1).execute()
+        )
         if not emp_res.data:
             return
 
@@ -419,7 +437,9 @@ async def _deduct_credit(empresa_id: int) -> None:
 
         # Decrementar (sólo si > 0 para evitar negativos)
         new_credits = max(0, current - 1)
-        supabase.table("empresas").update({"creditos_llamadas": new_credits}).eq("id", empresa_id).execute()
+        await sb_query(
+            lambda: supabase.table("empresas").update({"creditos_llamadas": new_credits}).eq("id", empresa_id).execute()
+        )
         logger.info(f"💳 [Credits] Empresa {empresa_id}: {current} → {new_credits} créditos")
 
         if new_credits == 0:
@@ -435,7 +455,9 @@ async def _pause_empresa_campaigns(empresa_id: int, reason: str = "sin_creditos"
     if not supabase:
         return
     try:
-        res = supabase.table("campaigns").update({"status": "paused"}).eq("empresa_id", empresa_id).in_("status", ["active", "running"]).execute()
+        res = await sb_query(
+            lambda: supabase.table("campaigns").update({"status": "paused"}).eq("empresa_id", empresa_id).in_("status", ["active", "running"]).execute()
+        )
         paused = len(res.data) if res.data else 0
         logger.warning(f"⏸️ [Credits] {paused} campaña(s) pausadas para empresa {empresa_id} (motivo: {reason})")
     except Exception as e:
@@ -492,7 +514,9 @@ async def make_outbound_call(request: dict, _api_key: str = Depends(_outbound_ap
             emp_id = request.get("empresa_id")
             if not emp_id and agent_id:
                 try:
-                    agent_res = supabase.table("agent_config").select("empresa_id").eq("id", agent_id).execute()
+                    agent_res = await sb_query(
+                        lambda: supabase.table("agent_config").select("empresa_id").eq("id", agent_id).execute()
+                    )
                     if agent_res.data:
                         emp_id = agent_res.data[0].get("empresa_id")
                 except Exception as e:
@@ -501,13 +525,15 @@ async def make_outbound_call(request: dict, _api_key: str = Depends(_outbound_ap
             campaign_name = request.get("campaignName")
             if campaign_id and not campaign_name:
                 try:
-                    camp_res = supabase.table("campaigns").select("name").eq("id", campaign_id).execute()
+                    camp_res = await sb_query(
+                        lambda: supabase.table("campaigns").select("name").eq("id", campaign_id).execute()
+                    )
                     if camp_res.data:
                         campaign_name = camp_res.data[0].get("name")
                 except Exception as e:
                     logger.warning(f"⚠️ [telephony] No se pudo resolver nombre de campaña {campaign_id}: {e}")
 
-            res_enc = supabase.table("encuestas").insert({
+            res_enc = await sb_query(lambda: supabase.table("encuestas").insert({
                 "telefono": phone,
                 "nombre_cliente": request.get("customerName", "Prueba Dashboard"),
                 "fecha": datetime.now(timezone.utc).isoformat(),
@@ -517,15 +543,17 @@ async def make_outbound_call(request: dict, _api_key: str = Depends(_outbound_ap
                 "empresa_id": emp_id,
                 "campaign_id": campaign_id,
                 "campaign_name": campaign_name,
-            }).execute()
+            }).execute())
             encuesta_id = res_enc.data[0]["id"]
 
             if lead_id:
-                supabase.table("campaign_leads").update({
-                    "call_id": encuesta_id,
-                    "status": "calling",
-                    "last_call_at": datetime.now(timezone.utc).isoformat(),
-                }).eq("id", lead_id).execute()
+                await sb_query(
+                    lambda: supabase.table("campaign_leads").update({
+                        "call_id": encuesta_id,
+                        "status": "calling",
+                        "last_call_at": datetime.now(timezone.utc).isoformat(),
+                    }).eq("id", lead_id).execute()
+                )
         else:
             encuesta_id = random.randint(1000, 9999)
 
