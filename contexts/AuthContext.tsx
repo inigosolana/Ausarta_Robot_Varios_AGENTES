@@ -19,6 +19,7 @@ interface AuthContextType {
     isPlatformOwner: boolean;
     setSpoofedRole: (role: UserRole | null) => void;
     setSpoofedEmpresa: (empresaId: number | null) => void;
+    setImpersonateToken: (token: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -57,6 +58,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (empresaId) localStorage.setItem('spoofedEmpresa', empresaId.toString());
         else localStorage.removeItem('spoofedEmpresa');
         setSpoofedEmpresaState(empresaId);
+    };
+
+    const setImpersonateToken = (token: string | null) => {
+        if (token) localStorage.setItem('impersonateToken', token);
+        else localStorage.removeItem('impersonateToken');
     };
 
     // Load profile and permissions
@@ -172,6 +178,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setSession(null);
         setProfile(null);
         setPermissions([]);
+        setSpoofedRole(null);
+        setSpoofedEmpresa(null);
+        setImpersonateToken(null);
     };
 
     const hasPermission = (module: string): boolean => {
@@ -213,7 +222,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         <AuthContext.Provider value={{
             user, session, profile, permissions, loading,
             signIn, signUp, signOut, hasPermission, isRole, refreshProfile,
-            realProfile, isPlatformOwner, setSpoofedRole, setSpoofedEmpresa
+            realProfile, isPlatformOwner, setSpoofedRole, setSpoofedEmpresa, setImpersonateToken
         }}>
             {children}
         </AuthContext.Provider>

@@ -40,6 +40,11 @@ export async function apiFetch(
         headers['Authorization'] = `Bearer ${_cachedToken}`;
     }
 
+    const impersonateToken = localStorage.getItem('impersonateToken');
+    if (impersonateToken) {
+        headers['X-Impersonate-Token'] = impersonateToken;
+    }
+
     const fullUrl = url.startsWith('http') ? url : `${API_URL}${url}`;
     return fetch(fullUrl, { ...options, headers });
 }

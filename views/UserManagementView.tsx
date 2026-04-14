@@ -155,23 +155,19 @@ const UserManagementView: React.FC = () => {
         setCreating(true);
         setInviteSuccess(false);
         try {
-            const API_URL = import.meta.env.VITE_API_URL || '';
-            // Revert to n8n webhook proxy as requested
-            const INVITE_URL = `${API_URL}/api/n8n/invite`;
-
-            const res = await fetch(INVITE_URL, {
+            const res = await apiFetch('/api/admin/users', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     email: newEmail,
-                    password: newPassword || undefined, // Send if provided, n8n might use it
+                    password: newPassword || undefined,
                     full_name: newName,
                     role: newRole,
                     empresa_id: finalEmpresaId || null,
-                    redirect_to: window.location.origin.includes('localhost') ? 'https://app.ausarta.net' : window.location.origin
-                })
+                    redirect_to: window.location.origin.includes('localhost')
+                        ? 'https://app.ausarta.net'
+                        : window.location.origin,
+                }),
             });
-
 
             if (!res.ok) {
                 const text = await res.text();
@@ -187,11 +183,9 @@ const UserManagementView: React.FC = () => {
             }
 
             const responseData = await res.json();
-            // n8n might return different structure, handle accordingly
-            const newUserId = responseData.user_id || responseData.id || 'unknown';
-            const invited = true; // Assume n8n always invites or handles it
+            const newUserId = responseData.user_id || 'unknown';
+            const invited: boolean = responseData.invited ?? true;
 
-            // Actualizar estado local (con el tipo correcto que incluye permisos)
             const newUser: UserProfile & { permissions: UserPermission[], empresas?: Empresa | null } = {
                 id: newUserId,
                 email: newEmail,
@@ -209,16 +203,17 @@ const UserManagementView: React.FC = () => {
             setUsers(prev => [newUser, ...prev]);
             setInviteSuccess(true);
 
-            alert(t('Invitation processed by n8n successfully!', '¡Invitación procesada por n8n correctamente!'));
+            alert(invited
+                ? t('Invitation sent successfully!', '¡Invitación enviada correctamente!')
+                : t('User created successfully!', '¡Usuario creado con éxito!'));
 
-            // Reset form and close
             setTimeout(() => {
                 setShowCreate(false);
                 setNewEmail('');
                 setNewName('');
                 setNewPassword('');
                 setInviteSuccess(false);
-                loadUsersAndEmpresas(); // Refrescar para traer permisos completos si el backend los creó
+                loadUsersAndEmpresas();
             }, 1000);
 
         } catch (err: any) {

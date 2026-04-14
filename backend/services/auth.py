@@ -4,14 +4,20 @@ auth.py — Dependencias de autenticación/autorización para FastAPI.
 Incluye:
 - API Key auth (compatibilidad con endpoints legacy).
 - JWT auth (Supabase) para control de roles y aislamiento multi-tenant.
+- Verificación de token de impersonation (HMAC-SHA256).
 """
 import os
+import hmac
+import json
+import time
+import hashlib
+import base64
 import logging
 from dataclasses import dataclass
 from typing import Optional
 
 import jwt as pyjwt
-from fastapi import Security, HTTPException, status, Depends
+from fastapi import Security, HTTPException, status, Depends, Header
 from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 
 from services.supabase_service import supabase
@@ -102,8 +108,52 @@ def _get_user_from_supabase_jwt(token: str) -> dict:
     return {"id": user_id, "email": payload.get("email")}
 
 
+def _b64url_decode(s: str) -> bytes:
+    padding = 4 - len(s) % 4
+    if padding != 4:
+        s += "=" * padding
+    return base64.urlsafe_b64decode(s)
+
+
+def _verify_impersonation_token(token: str) -> dict:
+    """
+    Valida un token de impersonation firmado con HMAC-SHA256.
+    Formato esperado: base64url(json_payload).base64url(signature)
+    Debe coincidir exactamente con la firma generada en admin.py.
+    """
+    secret = os.getenv("IMPERSONATION_SECRET") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
+    if not secret:
+        raise HTTPException(status_code=500, detail="IMPERSONATION_SECRET no configurado")
+
+    parts = token.split(".")
+    if len(parts) != 2:
+        raise HTTPException(status_code=403, detail="Token de impersonation malformado")
+
+    raw_payload = _b64url_decode(parts[0])
+    provided_sig = _b64url_decode(parts[1])
+
+    expected_sig = hmac.new(secret.encode("utf-8"), raw_payload, hashlib.sha256).digest()
+    if not hmac.compare_digest(provided_sig, expected_sig):
+        raise HTTPException(status_code=403, detail="Token de impersonation: firma inválida")
+
+    try:
+        payload = json.loads(raw_payload)
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=403, detail="Token de impersonation: payload inválido")
+
+    if payload.get("type") != "impersonation":
+        raise HTTPException(status_code=403, detail="Token de impersonation: tipo incorrecto")
+
+    exp = payload.get("exp")
+    if not exp or int(time.time()) > exp:
+        raise HTTPException(status_code=403, detail="Token de impersonation expirado")
+
+    return payload
+
+
 async def get_current_user(
     creds: HTTPAuthorizationCredentials | None = Security(_BEARER),
+    x_impersonate_token: Optional[str] = Header(None, alias="X-Impersonate-Token"),
 ) -> CurrentUser:
     if not creds or not creds.credentials:
         raise HTTPException(status_code=401, detail="Missing Bearer token")
@@ -120,7 +170,7 @@ async def get_current_user(
     try:
         prof_res = (
             supabase.table("user_profiles")
-            .select("id,email,role,empresa_id")
+            .select("id,email,role,empresa_id,is_active")
             .eq("id", user_id)
             .limit(1)
             .execute()
@@ -133,15 +183,31 @@ async def get_current_user(
         raise HTTPException(status_code=403, detail="Perfil no encontrado en user_profiles")
 
     profile = prof_res.data[0]
+
+    if profile.get("is_active") is False:
+        raise HTTPException(status_code=403, detail="Usuario desactivado")
+
     canonical = _canonical_role(profile.get("role"))
     if canonical not in {"superadmin", "admin", "user"}:
         raise HTTPException(status_code=403, detail="Rol no permitido")
 
+    effective_role = canonical
+    effective_empresa_id = profile.get("empresa_id")
+
+    if x_impersonate_token and canonical in {"superadmin", "admin"}:
+        imp = _verify_impersonation_token(x_impersonate_token)
+        effective_role = imp.get("target_role", canonical)
+        effective_empresa_id = imp.get("target_empresa_id", effective_empresa_id)
+        logger.info(
+            f"[Auth] Impersonation activa: user={user_id} -> "
+            f"role={effective_role}, empresa_id={effective_empresa_id}"
+        )
+
     return CurrentUser(
         user_id=user_id,
         email=profile.get("email"),
-        role=canonical,
-        empresa_id=profile.get("empresa_id"),
+        role=effective_role,
+        empresa_id=effective_empresa_id,
     )
 
 
