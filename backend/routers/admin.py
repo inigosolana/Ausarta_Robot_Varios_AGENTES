@@ -245,9 +245,12 @@ async def create_auth_user(request: Request, payload: dict, current_user: Curren
         "redirect_to": payload.get("redirect_to") or os.getenv("INVITE_REDIRECT_TO") or os.getenv("FRONTEND_URL", "https://app.ausarta.net")
     }
 
+    n8n_secret = os.getenv("N8N_PROXY_SECRET", "")
+    n8n_headers = {"X-N8N-Secret": n8n_secret} if n8n_secret else {}
+
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(webhook_url, json=safe_payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.post(webhook_url, json=safe_payload, headers=n8n_headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 response_text = await resp.text()
                 logger.info(f"📡 [admin] n8n respondió HTTP {resp.status}: {response_text[:500]}")
 
