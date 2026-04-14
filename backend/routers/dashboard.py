@@ -97,7 +97,8 @@ async def get_dashboard_stats(
                     has_preguntas = "pregunta 1" in inst or "pregunta 2" in inst or "pregunta:" in inst
                     is_numeric = "1 al 10" in inst or "del uno al diez" in inst or "numérica" in inst or "puntuación" in inst
                     return has_preguntas and not is_numeric
-        except: pass
+        except Exception as e:
+            logger.warning(f"⚠️ [dashboard] check_question_based falló: {e}")
         return False
 
     try:
@@ -166,11 +167,13 @@ async def get_recent_calls(
         try:
             emp_res = await sb_query(lambda: supabase.table("empresas").select("id, nombre").execute())
             empresas_map = {e["id"]: e.get("nombre", "—") for e in (emp_res.data or [])}
-        except: pass
+        except Exception as e:
+            logger.warning(f"⚠️ [dashboard] No se pudo cargar mapa de empresas: {e}")
         try:
             agents_res = await sb_query(lambda: supabase.table("agent_config").select("id, tipo_resultados, name").execute())
             agent_types_map = {str(a["id"]): {"tipo": a.get("tipo_resultados"), "name": a.get("name")} for a in (agents_res.data or [])}
-        except: pass
+        except Exception as e:
+            logger.warning(f"⚠️ [dashboard] No se pudo cargar mapa de agentes: {e}")
 
         mapped = []
         for r in (response.data or []):

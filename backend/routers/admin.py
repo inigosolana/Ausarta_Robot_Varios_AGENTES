@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from supabase import create_client
-from services.supabase_service import supabase, clear_ui_cache
+from services.supabase_service import supabase, clear_ui_cache, sb_query
 from services.auth import CurrentUser, require_admin, require_superadmin
 from services.audit import log_audit_event
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 import os
 import aiohttp
 import logging
@@ -16,6 +18,7 @@ import time
 logger = logging.getLogger("api-backend")
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 def _canonical_role(raw_role: str | None) -> str:
@@ -92,7 +95,8 @@ def _canonical_impersonation_role(raw_role: str | None) -> str:
 
 
 @router.post("/impersonate")
-async def impersonate_tenant(payload: dict, current_user: CurrentUser = Depends(require_superadmin)):
+@limiter.limit("10/minute")
+async def impersonate_tenant(request: Request, payload: dict, current_user: CurrentUser = Depends(require_superadmin)):
     """
     Modo infiltración (soporte): sólo superadmin.
     Recibe empresa_id de destino y devuelve:
@@ -113,8 +117,8 @@ async def impersonate_tenant(payload: dict, current_user: CurrentUser = Depends(
     desired_role = _canonical_impersonation_role(payload.get("role"))
 
     # Validar que la empresa existe
-    empresa_res = (
-        supabase.table("empresas")
+    empresa_res = await sb_query(
+        lambda: supabase.table("empresas")
         .select("id,nombre")
         .eq("id", target_empresa_id)
         .limit(1)
@@ -163,7 +167,8 @@ async def impersonate_tenant(payload: dict, current_user: CurrentUser = Depends(
     }
 
 @router.post("/users")
-async def create_auth_user(payload: dict, current_user: CurrentUser = Depends(require_admin)):
+@limiter.limit("20/minute")
+async def create_auth_user(request: Request, payload: dict, current_user: CurrentUser = Depends(require_admin)):
     """Crea un usuario delegando a n8n (auth + perfil + email) y luego crea permisos localmente."""
     email = payload.get("email")
     password = payload.get("password")
@@ -307,7 +312,7 @@ async def create_auth_user(payload: dict, current_user: CurrentUser = Depends(re
     try:
         modules = ["overview", "agents", "test_call", "campaigns", "ai_models", "telephony", "results", "usage", "users", "billing", "settings"]
         perms = [{"user_id": user_id, "module": m, "enabled": True} for m in modules]
-        supabase.table("user_permissions").insert(perms).execute()
+        await sb_query(lambda: supabase.table("user_permissions").insert(perms).execute())
         logger.info(f"✅ [admin] Permisos creados para {user_id}")
     except Exception as perm_err:
         # No bloquear la respuesta: el usuario se creó, los permisos se pueden arreglar después
@@ -359,20 +364,21 @@ async def _fallback_create_user(payload: dict) -> str:
 
     user_id = res.user.id
 
-    supabase.table("user_profiles").upsert({
+    await sb_query(lambda: supabase.table("user_profiles").upsert({
         "id": user_id,
         "email": email,
         "full_name": full_name,
         "role": role,
         "empresa_id": empresa_id
-    }).execute()
+    }).execute())
 
     logger.info(f"✅ [admin-fallback] Usuario {user_id} creado directamente")
     return user_id
 
 
 @router.delete("/users/{user_id}")
-async def delete_auth_user(user_id: str, current_user: CurrentUser = Depends(require_admin)):
+@limiter.limit("20/minute")
+async def delete_auth_user(request: Request, user_id: str, current_user: CurrentUser = Depends(require_admin)):
     """Elimina un usuario de Supabase Auth (requiere Service Role Key)"""
     if not supabase: 
         return JSONResponse(status_code=500, content={"error": "No hay conexión con la base de datos"})
@@ -383,8 +389,8 @@ async def delete_auth_user(user_id: str, current_user: CurrentUser = Depends(req
 
     try:
         master_empresa_id = _get_master_empresa_id()
-        prof = (
-            supabase.table("user_profiles")
+        prof = await sb_query(
+            lambda: supabase.table("user_profiles")
             .select("id,role,empresa_id")
             .eq("id", user_id)
             .limit(1)
@@ -426,8 +432,8 @@ async def delete_auth_user(user_id: str, current_user: CurrentUser = Depends(req
             })
 
         # 2. Borrar de la base de datos pública tras borrar Auth
-        supabase.table("user_permissions").delete().eq("user_id", user_id).execute()
-        supabase.table("user_profiles").delete().eq("id", user_id).execute()
+        await sb_query(lambda: supabase.table("user_permissions").delete().eq("user_id", user_id).execute())
+        await sb_query(lambda: supabase.table("user_profiles").delete().eq("id", user_id).execute())
         
         # 3. Limpiar cache
         await clear_ui_cache("users_list")

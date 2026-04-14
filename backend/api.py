@@ -38,8 +38,8 @@ from services.livekit_service import lkapi
 app = FastAPI(title="Ausarta Voice Agent API", version="2.0.0")
 executor = ThreadPoolExecutor(max_workers=20)
 
-# Rate Limiting
-limiter = Limiter(key_func=get_remote_address)
+# Rate Limiting — límite global de 120 req/min por IP
+limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -50,6 +50,15 @@ ALLOWED_ORIGINS = [
         "http://localhost:5173,https://app.ausarta.net,https://www.ausarta.net"
     ).split(",") if o.strip()
 ]
+
+# Protección: wildcard + allow_credentials es un error de configuración grave
+if "*" in ALLOWED_ORIGINS:
+    logger.error(
+        "🚨 CORS_ALLOWED_ORIGINS contiene '*' junto con allow_credentials=True. "
+        "Esto es inseguro y los navegadores lo rechazarán. "
+        "Define orígenes explícitos en CORS_ALLOWED_ORIGINS."
+    )
+    raise RuntimeError("CORS misconfiguration: wildcard origin with credentials not allowed")
 
 app.add_middleware(
     CORSMiddleware,

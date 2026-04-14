@@ -25,28 +25,47 @@ supabase.auth.onAuthStateChange((_event, session) => {
     _cachedToken = session?.access_token ?? null;
 });
 
+async function _forceLogout(): Promise<never> {
+    _cachedToken = null;
+    localStorage.removeItem('impersonateToken');
+    localStorage.removeItem('spoofedRole');
+    localStorage.removeItem('spoofedEmpresa');
+    await supabase.auth.signOut();
+    window.location.href = '/login?session_expired=true';
+    throw new Error('Sesión expirada');
+}
+
+async function _resolveToken(): Promise<string> {
+    if (_cachedToken) return _cachedToken;
+
+    // Intento 1: refrescar sesión silenciosamente
+    const { data, error } = await supabase.auth.getSession();
+    _cachedToken = data.session?.access_token ?? null;
+    if (_cachedToken) return _cachedToken;
+
+    // Intento 2: forzar refresh del token
+    const { data: refreshData } = await supabase.auth.refreshSession();
+    _cachedToken = refreshData.session?.access_token ?? null;
+    if (_cachedToken) return _cachedToken;
+
+    // Sin sesión válida → logout
+    return _forceLogout();
+}
+
 export async function apiFetch(
     url: string,
     options: RequestInit = {},
 ): Promise<Response> {
     const API_URL = (import.meta.env.VITE_API_URL as string | undefined) || '';
 
-    if (!_cachedToken) {
-        const { data } = await supabase.auth.getSession();
-        _cachedToken = data.session?.access_token ?? null;
-        if (!_cachedToken) {
-            await supabase.auth.signOut();
-            window.location.href = '/login?session_expired=true';
-            throw new Error('No autorizado');
-        }
-    }
+    const token = await _resolveToken();
 
     const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         ...(options.headers as Record<string, string> | undefined),
     };
 
-    headers['Authorization'] = `Bearer ${_cachedToken}`;
+    headers['Authorization'] = `Bearer ${token}`;
 
     const impersonateToken = localStorage.getItem('impersonateToken');
     if (impersonateToken) {
@@ -57,10 +76,19 @@ export async function apiFetch(
     const response = await fetch(fullUrl, { ...options, headers });
 
     if (response.status === 401) {
-        _cachedToken = null;
-        await supabase.auth.signOut();
-        window.location.href = '/login?session_expired=true';
-        throw new Error('No autorizado');
+        // Intentar refresh una sola vez antes de expulsar
+        const { data: refreshData } = await supabase.auth.refreshSession();
+        const newToken = refreshData.session?.access_token ?? null;
+
+        if (newToken) {
+            _cachedToken = newToken;
+            headers['Authorization'] = `Bearer ${newToken}`;
+            const retryResponse = await fetch(fullUrl, { ...options, headers });
+            if (retryResponse.status !== 401) return retryResponse;
+        }
+
+        // El token definitivamente expiró o fue revocado → logout
+        return _forceLogout();
     }
 
     return response;

@@ -161,7 +161,8 @@ async def update_agent(agent_id: str, config: dict, current_user: CurrentUser = 
                     payload = {"agent_id": agent_id, "instructions": config["instructions"]}
                     async with aiohttp.ClientSession() as sess:
                         await sess.post(url, json=payload)
-                except: pass
+                except Exception as e:
+                    logger.warning(f"⚠️ [agents] Webhook classify-agent falló (update): {e}")
             import asyncio
             asyncio.create_task(call_webhook())
         
@@ -231,7 +232,8 @@ async def create_agent(config: dict, current_user: CurrentUser = Depends(require
                 payload = {"agent_id": str(new_id), "instructions": db_config["instructions"]}
                 async with aiohttp.ClientSession() as sess:
                     await sess.post(url, json=payload)
-            except: pass
+            except Exception as e:
+                logger.warning(f"⚠️ [agents] Webhook classify-agent falló (create): {e}")
         import asyncio
         asyncio.create_task(call_webhook())
 

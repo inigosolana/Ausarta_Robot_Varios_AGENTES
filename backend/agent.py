@@ -71,9 +71,22 @@ async def get_vad_model(min_silence_duration: float):
 
 
 def anonymize_text(text: str) -> str:
+    """
+    Redacta PII del texto antes de loguearlo: teléfonos, emails,
+    NIFs/NIEs, IBANs y secuencias numéricas largas.
+    """
     if not text:
         return ""
-    anon = re.sub(r'\b\d{4,}\b', '[REDACTED_NUM]', text)
+    # Emails
+    anon = re.sub(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}', '[REDACTED_EMAIL]', text)
+    # Teléfonos internacionales y nacionales (con +, espacios, guiones, puntos)
+    anon = re.sub(r'(?<!\w)(\+?[\d][\d\s\-\.()]{7,15}\d)(?!\w)', '[REDACTED_PHONE]', anon)
+    # NIF/NIE/DNI español: 8 dígitos + letra o X/Y/Z + dígitos + letra
+    anon = re.sub(r'\b[XYZxyz]?\d{7,8}[A-Za-z]\b', '[REDACTED_DOC]', anon)
+    # IBAN (2 letras + 2 dígitos + hasta 30 alfanuméricos, con posibles espacios)
+    anon = re.sub(r'\b[A-Z]{2}\d{2}[\s]?[\dA-Z]{4}[\s]?[\dA-Z]{4}[\s]?[\dA-Z]{4}[\s]?[\dA-Z]{0,14}\b', '[REDACTED_IBAN]', anon)
+    # Números largos sueltos (tarjetas, cuentas, etc.)
+    anon = re.sub(r'\b\d{4,}\b', '[REDACTED_NUM]', anon)
     if len(anon) > 120:
         return anon[:120] + "... [TRUNCATED]"
     return anon

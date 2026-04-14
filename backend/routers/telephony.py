@@ -495,7 +495,8 @@ async def make_outbound_call(request: dict, _api_key: str = Depends(_outbound_ap
                     agent_res = supabase.table("agent_config").select("empresa_id").eq("id", agent_id).execute()
                     if agent_res.data:
                         emp_id = agent_res.data[0].get("empresa_id")
-                except: pass
+                except Exception as e:
+                    logger.warning(f"⚠️ [telephony] No se pudo resolver empresa desde agente {agent_id}: {e}")
 
             campaign_name = request.get("campaignName")
             if campaign_id and not campaign_name:
@@ -503,7 +504,8 @@ async def make_outbound_call(request: dict, _api_key: str = Depends(_outbound_ap
                     camp_res = supabase.table("campaigns").select("name").eq("id", campaign_id).execute()
                     if camp_res.data:
                         campaign_name = camp_res.data[0].get("name")
-                except: pass
+                except Exception as e:
+                    logger.warning(f"⚠️ [telephony] No se pudo resolver nombre de campaña {campaign_id}: {e}")
 
             res_enc = supabase.table("encuestas").insert({
                 "telefono": phone,

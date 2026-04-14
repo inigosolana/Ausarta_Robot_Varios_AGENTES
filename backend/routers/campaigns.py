@@ -272,7 +272,8 @@ async def get_campaign_details(campaign_id: int):
                 inst_lower = agent_res.data[0].get("instructions", "").lower()
                 if "pregunta 1" in inst_lower or "pregunta 2" in inst_lower or "pregunta:" in inst_lower:
                     is_question_based = True
-        except: pass
+        except Exception as e:
+            logger.warning(f"⚠️ [campaigns] No se pudo detectar tipo de agente para campaña: {e}")
         campaign["is_question_based"] = is_question_based
 
         # Cargar surveys relacionadas
