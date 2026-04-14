@@ -70,6 +70,17 @@ class YeastarClient:
         self.base_url = f"{scheme}://{host}:{api_port}"
         self.username = username
         self._password = password
+        self._session: aiohttp.ClientSession | None = None
+
+    def get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(timeout=_TIMEOUT)
+        return self._session
+
+    async def close(self) -> None:
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
 
     # ──────────────────────────────────────────────────────────────────────────
     # Private helpers
@@ -83,15 +94,15 @@ class YeastarClient:
     async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Low-level async POST, returns parsed JSON or raises."""
         url = f"{self.base_url}{path}"
+        session = self.get_session()
         try:
-            async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-                async with session.post(url, json=payload, ssl=False) as resp:
-                    if resp.status != 200:
-                        text = await resp.text()
-                        raise YeastarConnectionError(
-                            f"HTTP {resp.status} from {url}: {text[:200]}"
-                        )
-                    return await resp.json(content_type=None)
+            async with session.post(url, json=payload, ssl=False) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise YeastarConnectionError(
+                        f"HTTP {resp.status} from {url}: {text[:200]}"
+                    )
+                return await resp.json(content_type=None)
         except aiohttp.ClientConnectorError as exc:
             raise YeastarConnectionError(
                 f"No se puede conectar a {self.base_url}: {exc}"
@@ -104,17 +115,17 @@ class YeastarClient:
     async def _get(self, path: str, token: str) -> dict[str, Any]:
         """Low-level async GET with token in query-string."""
         url = f"{self.base_url}{path}"
+        session = self.get_session()
         try:
-            async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-                async with session.get(
-                    url, params={"token": token}, ssl=False
-                ) as resp:
-                    if resp.status != 200:
-                        text = await resp.text()
-                        raise YeastarConnectionError(
-                            f"HTTP {resp.status} from {url}: {text[:200]}"
-                        )
-                    return await resp.json(content_type=None)
+            async with session.get(
+                url, params={"token": token}, ssl=False
+            ) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise YeastarConnectionError(
+                        f"HTTP {resp.status} from {url}: {text[:200]}"
+                    )
+                return await resp.json(content_type=None)
         except aiohttp.ClientConnectorError as exc:
             raise YeastarConnectionError(
                 f"No se puede conectar a {self.base_url}: {exc}"

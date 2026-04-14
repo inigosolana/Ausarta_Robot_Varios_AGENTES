@@ -55,6 +55,21 @@ load_dotenv()
 
 from prompts import BASE_RULES, HUMAN_STYLE_RULES, HUMANIZATION_PROMPT, _LANG_OVERRIDE_MSGS
 
+_GLOBAL_VAD_MODEL = None
+_VAD_LOCK = asyncio.Lock()
+
+
+async def get_vad_model(min_silence_duration: float):
+    global _GLOBAL_VAD_MODEL
+    async with _VAD_LOCK:
+        if _GLOBAL_VAD_MODEL is None:
+            _GLOBAL_VAD_MODEL = await asyncio.to_thread(
+                silero.VAD.load, min_silence_duration=min_silence_duration
+            )
+            logger.info("✅ VAD Silero cargado (singleton global)")
+    return _GLOBAL_VAD_MODEL
+
+
 ROOM_PREFIX = os.getenv("LIVEKIT_ROOM_PREFIX", "llamada_ausarta_")
 DEFAULT_CARTESIA_VOICE = os.getenv("VOICE_ID_AUSARTA", "b5aa8098-49ef-475d-89b0-c9262ecf33fd")
 DISPATCH_AGENT_NAME = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
@@ -851,8 +866,8 @@ async def entrypoint(ctx: JobContext):
         # sube a 0.4-0.5 para no interrumpir antes de que acabe.
         min_silence_duration = float(os.getenv("AGENT_MIN_SILENCE_SECONDS", "0.65"))
         min_silence_duration = max(0.55, min(min_silence_duration, 1.0))
-        vad_model = await asyncio.to_thread(silero.VAD.load, min_silence_duration=min_silence_duration)
-        logger.info(f"✅ [{job_id}] VAD y configuración cargados.")
+        vad_model = await get_vad_model(min_silence_duration)
+        logger.info(f"✅ [{job_id}] VAD (singleton) y configuración cargados.")
 
         # --- PASO 4: Crear el asistente ---
         agent_instance = DynamicAgent(room_name=room_name, agent_config=agent_config)
@@ -999,9 +1014,9 @@ async def entrypoint(ctx: JobContext):
                                 logger.error(f"❌ [{job_id}] AMD: Error al cerrar por buzón: {amd_err}")
                             return
 
-                    # Si hay 2+ mensajes del user sin patrón de buzón, es humano
                     user_msgs = [i for i in transcript_event_buffer if i.get("role") == "user"]
-                    if len(user_msgs) >= 2:
+                    total_user_words = sum(_count_words(i.get("content", "")) for i in user_msgs)
+                    if len(user_msgs) >= 2 or total_user_words > 8:
                         amd_state["human_confirmed"] = True
                         return
 
@@ -1603,6 +1618,7 @@ async def entrypoint(ctx: JobContext):
                                     if llm_resp.status == 200:
                                         llm_data = await llm_resp.json()
                                         json_str = llm_data["choices"][0]["message"]["content"]
+                                        json_str = re.sub(r'^```(?:json)?\s*|\s*```$', '', json_str.strip(), flags=re.IGNORECASE)
                                         parsed = json.loads(json_str)
                                     
                                         # Extraer disposición del JSON
