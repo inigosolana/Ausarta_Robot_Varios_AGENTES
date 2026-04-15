@@ -1,19 +1,10 @@
 import os
-import aiohttp
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Union, List
-from dotenv import load_dotenv
-from livekit import api
-from fastapi import FastAPI, Request, Response, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from supabase import create_client, Client
-import logging
 import sys
-import json
-from openai import AsyncOpenAI
-from concurrent.futures import ThreadPoolExecutor
+import logging
+from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -31,12 +22,46 @@ logger = logging.getLogger("api-backend")
 
 load_dotenv()
 
-# --- CONFIGURACIÓN SUPABASE Y LIVEKIT ---
-from services.supabase_service import supabase, get_ui_cache
-from services.livekit_service import lkapi
+# --- Carga de servicios (inicializa cliente Supabase / LiveKit) ---
+import services.supabase_service  # noqa: F401
+import services.livekit_service  # noqa: F401
 
-app = FastAPI(title="Ausarta Voice Agent API", version="2.0.0")
-executor = ThreadPoolExecutor(max_workers=20)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("🌅 Iniciando API Ausarta v2 (scheduler delegado a ARQ worker)...")
+
+    try:
+        from services.redis_service import get_redis
+        await get_redis()
+    except Exception as e:
+        logger.warning(
+            f"⚠️ Redis no disponible al arrancar: {e}. Los locks usarán fallback en memoria."
+        )
+
+    try:
+        from services.queue_service import get_arq_pool
+        await get_arq_pool()
+        logger.info("✅ Cliente ARQ inicializado.")
+    except Exception as e:
+        logger.warning(f"⚠️ ARQ no disponible al arrancar: {e}.")
+
+    yield
+
+    logger.info("🌙 Apagando API Ausarta v2...")
+    try:
+        from services.redis_service import close_redis
+        await close_redis()
+    except Exception:
+        pass
+    try:
+        from services.queue_service import close_arq_pool
+        await close_arq_pool()
+    except Exception:
+        pass
+
+
+app = FastAPI(title="Ausarta Voice Agent API", version="2.0.0", lifespan=lifespan)
 
 # Rate Limiting — límite global de 120 req/min por IP
 limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
@@ -70,12 +95,6 @@ app.add_middleware(
 
 from routers.logs import router as logs_router
 app.include_router(logs_router)
-
-from models.schemas import (
-    VoiceAgentCreate, VoiceAgentUpdate, CampaignCreate, CampaignLeadModel,
-    CampaignModel, LlmConfig, EncuestaData, CallEndRequest, AIPromptRequest,
-    AssistantChatRequest, AssistantToolResponse
-)
 
 
 # --- ENDPOINTS BASE ---
@@ -113,40 +132,3 @@ from routers.n8n_proxy import router as n8n_proxy_router
 from routers.assistant import router as assistant_router
 app.include_router(n8n_proxy_router)
 app.include_router(assistant_router)
-
-
-# --- LIFECYCLE: Arrancar Redis + cliente ARQ al iniciar ---
-
-@app.on_event("startup")
-async def startup_event():
-    logger.info("🌅 Iniciando API Ausarta v2 (scheduler delegado a ARQ worker)...")
-
-    # 1. Inicializar Redis (necesario antes del scheduler para locks distribuidos)
-    try:
-        from services.redis_service import get_redis
-        await get_redis()
-    except Exception as e:
-        logger.warning(f"⚠️ Redis no disponible al arrancar: {e}. Los locks usarán fallback en memoria.")
-
-    # 2. Inicializar cliente ARQ (enqueue de jobs desde endpoints)
-    try:
-        from services.queue_service import get_arq_pool
-        await get_arq_pool()
-        logger.info("✅ Cliente ARQ inicializado.")
-    except Exception as e:
-        logger.warning(f"⚠️ ARQ no disponible al arrancar: {e}.")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("🌙 Apagando API Ausarta v2...")
-    try:
-        from services.redis_service import close_redis
-        await close_redis()
-    except Exception:
-        pass
-    try:
-        from services.queue_service import close_arq_pool
-        await close_arq_pool()
-    except Exception:
-        pass

@@ -12,6 +12,8 @@ import json
 import time
 import hashlib
 import base64
+import binascii
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Optional
@@ -56,11 +58,23 @@ def _get_valid_keys() -> set[str]:
     return {k.strip() for k in raw.split(",") if k.strip()}
 
 
+def _is_development_env() -> bool:
+    return (os.getenv("ENVIRONMENT") or "").strip().lower() == "development"
+
+
 async def require_api_key(api_key: str | None = Security(_API_KEY_HEADER)) -> str:
     valid_keys = _get_valid_keys()
     if not valid_keys:
-        logger.debug("[Auth] AUSARTA_API_KEY no configurada — modo abierto (desarrollo).")
-        return "dev-mode"
+        if _is_development_env():
+            logger.warning(
+                "[Auth] AUSARTA_API_KEY no configurada — permitido solo con ENVIRONMENT=development."
+            )
+            return "dev-mode"
+        logger.error("[Auth] AUSARTA_API_KEY no configurada en entorno no-development — rechazando.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="API key authentication not configured (set AUSARTA_API_KEY)",
+        )
 
     if not api_key:
         raise HTTPException(
@@ -112,7 +126,10 @@ def _b64url_decode(s: str) -> bytes:
     padding = 4 - len(s) % 4
     if padding != 4:
         s += "=" * padding
-    return base64.urlsafe_b64decode(s)
+    try:
+        return base64.urlsafe_b64decode(s)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=403, detail="Token de impersonation malformado") from None
 
 
 def _verify_impersonation_token(token: str) -> dict:
@@ -151,6 +168,99 @@ def _verify_impersonation_token(token: str) -> dict:
     return payload
 
 
+_USER_PROFILE_CACHE_TTL = max(5, int(os.getenv("USER_PROFILE_CACHE_TTL_SECONDS", "60")))
+_MEM_PROFILE_CACHE: dict[str, tuple[float, dict]] = {}
+_MEM_PROFILE_LOCK = asyncio.Lock()
+
+_USER_PROFILE_CACHE_PREFIX = "ausarta:user_profile:"
+
+
+async def _fetch_user_profile_row(user_id: str) -> dict:
+    if not supabase:
+        raise HTTPException(status_code=500, detail="No hay conexión con Supabase")
+    try:
+        prof_res = (
+            supabase.table("user_profiles")
+            .select("id,email,role,empresa_id,is_active")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        logger.error(f"[Auth] Error consultando user_profiles para {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Error cargando perfil de usuario") from e
+
+    if not prof_res.data:
+        raise HTTPException(status_code=403, detail="Perfil no encontrado en user_profiles")
+
+    return prof_res.data[0]
+
+
+def _profile_row_cache_blob(row: dict) -> str:
+    return json.dumps(
+        {
+            "id": row.get("id"),
+            "email": row.get("email"),
+            "role": row.get("role"),
+            "empresa_id": row.get("empresa_id"),
+            "is_active": row.get("is_active"),
+        },
+        separators=(",", ":"),
+    )
+
+
+def _profile_from_cache_blob(raw: str) -> dict:
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise ValueError("cache shape")
+    return data
+
+
+async def get_user_profile_cached(user_id: str) -> dict:
+    """
+    Carga user_profiles con caché Redis (si existe) y fallback en memoria con TTL,
+    para reducir presión sobre Supabase/Postgres bajo alto tráfico.
+    """
+    now = time.monotonic()
+
+    try:
+        from services.redis_service import get_redis
+
+        r = await get_redis()
+        key = f"{_USER_PROFILE_CACHE_PREFIX}{user_id}"
+        cached = await r.get(key)
+        if cached:
+            try:
+                return _profile_from_cache_blob(cached)
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                await r.delete(key)
+    except Exception:
+        pass
+
+    async with _MEM_PROFILE_LOCK:
+        hit = _MEM_PROFILE_CACHE.get(user_id)
+        if hit is not None:
+            expires_at, row = hit
+            if now < expires_at:
+                return row
+
+    row = await asyncio.to_thread(_fetch_user_profile_row, user_id)
+
+    try:
+        from services.redis_service import get_redis
+
+        r = await get_redis()
+        key = f"{_USER_PROFILE_CACHE_PREFIX}{user_id}"
+        await r.set(key, _profile_row_cache_blob(row), ex=_USER_PROFILE_CACHE_TTL)
+    except Exception:
+        pass
+
+    async with _MEM_PROFILE_LOCK:
+        _MEM_PROFILE_CACHE[user_id] = (now + float(_USER_PROFILE_CACHE_TTL), row)
+
+    return row
+
+
 async def get_current_user(
     creds: HTTPAuthorizationCredentials | None = Security(_BEARER),
     x_impersonate_token: Optional[str] = Header(None, alias="X-Impersonate-Token"),
@@ -167,22 +277,7 @@ async def get_current_user(
     if not user_id:
         raise HTTPException(status_code=401, detail="Token sin user_id")
 
-    try:
-        prof_res = (
-            supabase.table("user_profiles")
-            .select("id,email,role,empresa_id,is_active")
-            .eq("id", user_id)
-            .limit(1)
-            .execute()
-        )
-    except Exception as e:
-        logger.error(f"[Auth] Error consultando user_profiles para {user_id}: {e}")
-        raise HTTPException(status_code=500, detail="Error cargando perfil de usuario")
-
-    if not prof_res.data:
-        raise HTTPException(status_code=403, detail="Perfil no encontrado en user_profiles")
-
-    profile = prof_res.data[0]
+    profile = await get_user_profile_cached(user_id)
 
     if profile.get("is_active") is False:
         raise HTTPException(status_code=403, detail="Usuario desactivado")
@@ -195,7 +290,15 @@ async def get_current_user(
     effective_empresa_id = profile.get("empresa_id")
 
     if x_impersonate_token and canonical in {"superadmin", "admin"}:
-        imp = _verify_impersonation_token(x_impersonate_token)
+        try:
+            imp = _verify_impersonation_token(x_impersonate_token)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("[Auth] Token de impersonation no procesable: %s", exc)
+            raise HTTPException(
+                status_code=403, detail="Token de impersonation inválido"
+            ) from None
         effective_role = imp.get("target_role", canonical)
         effective_empresa_id = imp.get("target_empresa_id", effective_empresa_id)
         logger.info(
