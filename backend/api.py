@@ -31,6 +31,18 @@ import services.livekit_service  # noqa: F401
 async def lifespan(app: FastAPI):
     logger.info("🌅 Iniciando API Ausarta v2 (scheduler delegado a ARQ worker)...")
 
+    from services.auth import get_supabase_jwt_secret
+
+    if not get_supabase_jwt_secret():
+        logger.critical(
+            "SUPABASE_JWT_SECRET no definida: el backend no puede validar el Bearer JWT. "
+            "En Portainer: añade la variable al stack (Supabase → Settings → API → JWT Secret), "
+            "asegúrate de que docker-compose pasa SUPABASE_JWT_SECRET al servicio backend, "
+            "y haz Pull/Redeploy. Alternativa: SUPABASE_JWT_SECRET_FILE con ruta a un archivo."
+        )
+    else:
+        logger.info("✅ JWT de sesión: SUPABASE_JWT_SECRET cargada correctamente.")
+
     try:
         from services.redis_service import get_redis
         await get_redis()

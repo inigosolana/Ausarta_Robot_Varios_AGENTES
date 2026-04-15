@@ -91,13 +91,32 @@ async def require_api_key(api_key: str | None = Security(_API_KEY_HEADER)) -> st
     return api_key
 
 
+def get_supabase_jwt_secret() -> str:
+    """
+    JWT Secret HS256 del proyecto (Supabase → Settings → API → JWT Secret).
+    Orden: variable SUPABASE_JWT_SECRET, o contenido del archivo SUPABASE_JWT_SECRET_FILE
+    (útil con Docker / Portainer y montajes de secretos).
+    """
+    raw = os.getenv("SUPABASE_JWT_SECRET", "").strip()
+    if raw:
+        return raw
+    path = os.getenv("SUPABASE_JWT_SECRET_FILE", "").strip()
+    if path and os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return f.read().strip()
+        except OSError as e:
+            logger.warning("[Auth] No se pudo leer SUPABASE_JWT_SECRET_FILE %s: %s", path, e)
+    return ""
+
+
 def _get_user_from_supabase_jwt(token: str) -> dict:
     """
     Valida el JWT de Supabase de forma local usando SUPABASE_JWT_SECRET (HS256).
     Evita una petición HTTP a Supabase por cada request, eliminando latencia
     y el riesgo de Rate Limit contra la Auth API.
     """
-    jwt_secret = os.getenv("SUPABASE_JWT_SECRET", "")
+    jwt_secret = get_supabase_jwt_secret()
     if not jwt_secret:
         raise HTTPException(status_code=500, detail="SUPABASE_JWT_SECRET no configurada")
 

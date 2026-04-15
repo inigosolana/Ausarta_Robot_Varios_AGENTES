@@ -1,6 +1,9 @@
 version: '3.8'
 
 services:
+  # El backend necesita SUPABASE_JWT_SECRET en el entorno del contenedor (validación Bearer).
+  # En Portainer: variables del stack + línea inferior; tras cambiar variables → Pull/Redeploy.
+  # Si el secreto empieza por +, en YAML del stack puedes entrecomillar el valor.
   backend:
     build:
       context: ./backend
@@ -26,6 +29,7 @@ services:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
       - GLPI_URL=${GLPI_URL}
       - GLPI_APP_TOKEN=${GLPI_APP_TOKEN}
       - GLPI_USER_TOKEN=${GLPI_USER_TOKEN}
