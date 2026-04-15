@@ -16,7 +16,7 @@ from models.schemas import CallEndRequest, EncuestaData, YeastarConfigCreate, Ye
 from services.supabase_service import supabase, sb_query
 from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
 from services.yeastar_service import YeastarClient
-from services.auth import get_current_user, CurrentUser, require_admin, require_api_key as _outbound_api_key
+from services.auth import get_current_user, CurrentUser, require_admin, require_outbound_auth
 from livekit import api
 import aiohttp
 import asyncio
@@ -497,7 +497,7 @@ async def _release_room_lock(room_name: str) -> None:
 
 
 @router.post("/api/calls/outbound")
-async def make_outbound_call(request: dict, _api_key: str = Depends(_outbound_api_key)):
+async def make_outbound_call(request: dict, _auth: str = Depends(require_outbound_auth)):
     """Inicia una llamada SIP individual. Usado para pruebas desde el dashboard."""
     phone = request.get("phoneNumber")
     agent_id = request.get("agentId", "1")

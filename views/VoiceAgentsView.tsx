@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Save, Phone, Loader2, Bot, Mic, Speaker, Brain } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { apiFetch } from '../lib/apiFetch';
 
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8001/api';
 
@@ -137,9 +138,8 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
 
     try {
       setIsCalling(true);
-      const response = await fetch(`${API_URL}/calls/outbound`, {
+      const response = await apiFetch('/api/calls/outbound', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           agentId: '1',
           phoneNumber: phoneNumber,
@@ -147,13 +147,15 @@ const VoiceAgentsView: React.FC<{ onStartCall: () => void }> = ({ onStartCall })
         })
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (response.ok) {
         alert(`✅ Llamada iniciada! Sala: ${data.roomName}`);
         setShowCallDialog(false);
         // onStartCall(); // Deshabilitamos el overlay de "Live Call" porque es engañoso para llamadas telefónicas
       } else {
-        alert(`❌ Error: ${data.detail}`);
+        const d = data.detail;
+        const msg = Array.isArray(d) ? d.map((x: { msg?: string }) => x.msg || '').join(' ') : (d || 'Error');
+        alert(`❌ Error: ${msg}`);
       }
     } catch (error) {
       alert('Error de conexión con el backend');

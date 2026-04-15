@@ -9,6 +9,7 @@ import { AnalyticsDashboard } from '../components/AnalyticsDashboard';
 import { DateRangePicker, getDatesFromRange, DateRange } from '../components/DateRangePicker';
 import { CallResultModal } from '../components/CallResultModal';
 import { SurveyResult, ExtractionSchemaProperty, getSentimiento, getIdioma, Sentimiento } from '../types';
+import { apiFetch } from '../lib/apiFetch';
 
 interface Props {
     empresaId?: number;
@@ -171,10 +172,8 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     };
 
     const handleRetry = (phone: string) => {
-        const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
-        fetch(`${API_URL}/api/calls/outbound`, {
+        apiFetch('/api/calls/outbound', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ phoneNumber: phone })
         })
             .then(res => {

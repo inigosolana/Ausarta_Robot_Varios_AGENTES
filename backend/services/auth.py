@@ -327,6 +327,48 @@ async def require_admin(current_user: CurrentUser = Depends(get_current_user)) -
     return current_user
 
 
+async def require_outbound_auth(
+    creds: HTTPAuthorizationCredentials | None = Security(_BEARER),
+    api_key: str | None = Security(_API_KEY_HEADER),
+    x_impersonate_token: Optional[str] = Header(None, alias="X-Impersonate-Token"),
+) -> str:
+    """
+    Para integraciones: X-API-Key válida.
+    Para el SPA (Probar llamada, etc.): Authorization Bearer (misma sesión Supabase que apiFetch).
+    """
+    valid_keys = _get_valid_keys()
+    if not valid_keys:
+        if _is_development_env():
+            return "dev-mode"
+        logger.error("[Auth] AUSARTA_API_KEY no configurada en entorno no-development — rechazando.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="API key authentication not configured (set AUSARTA_API_KEY)",
+        )
+
+    if api_key is not None and str(api_key).strip() != "":
+        if api_key in valid_keys:
+            return "api-key"
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid API Key",
+        )
+
+    if creds and creds.credentials:
+        user = await get_current_user(creds=creds, x_impersonate_token=x_impersonate_token)
+        if user.role not in {"superadmin", "admin"}:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin required for outbound calls",
+            )
+        return "jwt"
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Missing X-API-Key header or Authorization Bearer token",
+    )
+
+
 # Alias de compatibilidad para código existente.
 async def require_admin_empresa(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     return await require_admin(current_user)

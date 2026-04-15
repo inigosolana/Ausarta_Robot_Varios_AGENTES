@@ -24,6 +24,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { SurveyResult } from '../types';
 import { CallResultModal } from './CallResultModal';
+import { apiFetch } from '../lib/apiFetch';
 
 interface Props {
     agentId: number;
@@ -295,14 +296,15 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, onClose }) 
         entryCounter.current = 0;
 
         try {
-            const res = await fetch(`${API_URL}/api/calls/outbound`, {
+            const res = await apiFetch('/api/calls/outbound', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ phoneNumber: cleaned, agentId: String(agentId), customerName: 'Test — Simulador', isTestCall: true }),
             });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || `HTTP ${res.status}`);
+                const d = err.detail;
+                const msg = Array.isArray(d) ? d.map((x: { msg?: string }) => x.msg || '').join(' ') : (d || err.error || `HTTP ${res.status}`);
+                throw new Error(msg);
             }
             const data = await res.json();
             const surveyId: number = data.callId;

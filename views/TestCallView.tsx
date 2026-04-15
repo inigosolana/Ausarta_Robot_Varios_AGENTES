@@ -3,6 +3,7 @@ import { Phone, Loader2, Bot, PhoneCall } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { AgentConfig } from '../types';
+import { apiFetch } from '../lib/apiFetch';
 
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8001/api';
 
@@ -91,9 +92,8 @@ const TestCallView: React.FC = () => {
         try {
             const selectedAgent = agents.find(a => String(a.id) === selectedAgentId);
 
-            const response = await fetch(`${API_URL}/calls/outbound`, {
+            const response = await apiFetch('/api/calls/outbound', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     agentId: selectedAgentId,
                     phoneNumber: phoneNumber,
@@ -101,16 +101,20 @@ const TestCallView: React.FC = () => {
                 })
             });
 
-            const data = await response.json();
+            const data = await response.json().catch(() => ({}));
             if (response.ok) {
                 setCallResult({
                     success: true,
                     message: `✅ Llamada iniciada! Sala: ${data.roomName}`
                 });
             } else {
+                const detail = data.detail;
+                const msg = Array.isArray(detail)
+                    ? detail.map((d: unknown) => (typeof d === 'object' && d && 'msg' in d ? (d as { msg: string }).msg : String(d))).join(' ')
+                    : (detail || data.error || 'Error desconocido');
                 setCallResult({
                     success: false,
-                    message: `❌ Error: ${data.detail || 'Error desconocido'}`
+                    message: `❌ Error: ${msg}`
                 });
             }
         } catch (error) {
