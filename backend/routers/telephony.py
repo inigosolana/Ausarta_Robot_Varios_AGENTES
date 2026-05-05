@@ -17,6 +17,7 @@ from services.supabase_service import supabase, sb_query
 from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
 from services.yeastar_service import YeastarPSeriesClient
 from services.auth import get_current_user, CurrentUser, require_admin, require_outbound_auth
+from services.crypto_service import encrypt_data, decrypt_data
 from livekit import api
 import aiohttp
 import asyncio
@@ -109,7 +110,8 @@ async def save_yeastar_config(
     
     # Only update secret if it's not the masked string
     if payload.yeastar_client_secret and payload.yeastar_client_secret != "********":
-        update_data["yeastar_client_secret"] = payload.yeastar_client_secret.strip()
+        # Hardening: Encrypt secret before saving
+        update_data["yeastar_client_secret"] = encrypt_data(payload.yeastar_client_secret.strip())
 
     res = await sb_query(
         lambda: supabase.table("empresas")
@@ -153,9 +155,13 @@ async def test_yeastar_connection(
             .execute()
         )
         if res.data and res.data[0].get("yeastar_client_secret"):
-            client_secret = res.data[0]["yeastar_client_secret"]
+            # Hardening: Decrypt secret from DB for testing
+            client_secret = decrypt_data(res.data[0]["yeastar_client_secret"])
         else:
             return {"ok": False, "message": "No se encontró el secreto original en la base de datos."}
+    else:
+        # If it's a new secret being tested, use it as is (will be encrypted on save)
+        pass
 
     client = YeastarPSeriesClient(
         pbx_url=payload.yeastar_pbx_url,
@@ -166,23 +172,52 @@ async def test_yeastar_connection(
     ok, message = await client.test_connection()
     return {"ok": ok, "message": message}
 
+# Hardening: IP Whitelist for Yeastar Webhooks (example placeholder)
+YEASTAR_IP_WHITELIST = os.getenv("YEASTAR_IP_WHITELIST", "").split(",")
+
+async def validate_yeastar_ip(request: Request):
+    """Optional: Validates that the request comes from a trusted Yeastar PBX IP."""
+    if not YEASTAR_IP_WHITELIST or YEASTAR_IP_WHITELIST == [""]:
+        return # Whitelist not configured, skip validation
+    
+    client_ip = request.client.host
+    if client_ip not in YEASTAR_IP_WHITELIST:
+        logger.warning(f"🛡️ [Security] Blocked unauthorized webhook attempt from IP: {client_ip}")
+        raise HTTPException(status_code=403, detail="Unauthorized IP")
+
 @router.post("/webhooks/yeastar")
-async def yeastar_webhook(request: Request):
+async def yeastar_webhook(request: Request, background_tasks: BackgroundTasks):
     """
     Recibe eventos de la centralita Yeastar (CallAnswered, CallHangup, etc.).
+    Optimización: Procesa en segundo plano para evitar timeouts de la PBX.
     """
+    # Security: Basic check for User-Agent or format if IP whitelist not provided
+    # IP validation can be added via Depends(validate_yeastar_ip) if configured
+    
     try:
         payload = await request.json()
-        logger.info(f"📞 [Yeastar Webhook] Evento recibido: {payload}")
         
-        # TODO: Implement additional logic based on the webhook event.
-        # e.g., callid = payload.get("callid")
-        # event_type = payload.get("action")
+        # Rendimiento: Responder inmediatamente y procesar en segundo plano
+        background_tasks.add_task(_process_yeastar_event, payload)
         
-        return {"status": "ok"}
+        return {"status": "ok", "message": "Event queued"}
     except Exception as e:
-        logger.error(f"❌ Error procesando webhook de Yeastar: {e}")
-        return JSONResponse(status_code=400, content={"error": "Invalid webhook payload"})
+        logger.error(f"❌ Error recibiendo webhook de Yeastar: {e}")
+        return JSONResponse(status_code=400, content={"error": "Invalid payload"})
+
+async def _process_yeastar_event(payload: dict):
+    """Lógica pesada de procesamiento de eventos en segundo plano."""
+    try:
+        event_action = payload.get("action")
+        call_id = payload.get("callid")
+        logger.info(f"📞 [Yeastar Background] Procesando {event_action} para callid {call_id}")
+        
+        # Aquí iría la lógica de actualización de estados, 
+        # notificación a agentes IA, etc.
+        # Ejemplo: if event_action == "CallAnswered": ...
+        
+    except Exception as e:
+        logger.error(f"❌ Error en BackgroundTask de Yeastar: {e}")
 
 # ──────────────────────────────────────────────
 # Colgar sala

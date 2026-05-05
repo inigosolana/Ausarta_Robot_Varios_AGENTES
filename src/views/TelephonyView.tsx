@@ -139,14 +139,20 @@ const TelephonyView: React.FC = () => {
     setSaving(true);
     setSaveSuccess(false);
     try {
+      const payload: any = {
+        empresa_id: selectedEmpresaId,
+        yeastar_pbx_url: form.yeastar_pbx_url,
+        yeastar_client_id: form.yeastar_client_id,
+      };
+
+      // UX: Only send the secret if it's not empty and not the masked placeholder
+      if (form.yeastar_client_secret && form.yeastar_client_secret !== '********') {
+        payload.yeastar_client_secret = form.yeastar_client_secret;
+      }
+
       const res = await apiFetch('/api/telephony/yeastar', {
         method: 'POST',
-        body: JSON.stringify({
-          empresa_id: selectedEmpresaId,
-          yeastar_pbx_url: form.yeastar_pbx_url,
-          yeastar_client_id: form.yeastar_client_id,
-          yeastar_client_secret: form.yeastar_client_secret,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const saved: YeastarConfig = await res.json();
