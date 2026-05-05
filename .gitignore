@@ -64,3 +64,6 @@ node_modules/
 __pycache__/
 # Configuraciones locales y skills del agente
 .agent/
+
+# Archivos temporales de agentes
+scratch/
