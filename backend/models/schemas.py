@@ -95,35 +95,33 @@ class AssistantToolResponse(BaseModel):
     response: str
 
 
-# ── Yeastar PBX integration ────────────────────────────────────────────────────
+# ── Yeastar PBX integration (P-Series) ─────────────────────────────────────────
 
-class YeastarConfigBase(BaseModel):
+class YeastarPSeriesConfigBase(BaseModel):
     """Fields shared between create and update."""
-    api_url: str
-    api_port: int = 8088
-    api_username: str
-    is_active: bool = True
+    yeastar_pbx_url: str
+    yeastar_client_id: str
 
 
-class YeastarConfigCreate(YeastarConfigBase):
-    """Used on POST — includes the password (write-only)."""
-    api_password: str
+class YeastarPSeriesConfigCreate(YeastarPSeriesConfigBase):
+    """Used on POST — includes the secret (write-only)."""
+    yeastar_client_secret: str
+    empresa_id: Optional[int] = None
 
 
-class YeastarConfigTest(BaseModel):
+class YeastarPSeriesConfigTest(BaseModel):
     """Payload for the /test endpoint — never persisted."""
-    api_url: str
-    api_port: int = 8088
-    api_username: str
-    api_password: str
+    yeastar_pbx_url: str
+    yeastar_client_id: str
+    yeastar_client_secret: str
+    empresa_id: Optional[int] = None
 
 
-class YeastarConfigResponse(YeastarConfigBase):
-    """Returned by GET — password is never exposed."""
-    id: str
+class YeastarPSeriesConfigResponse(YeastarPSeriesConfigBase):
+    """Returned by GET — secret is masked."""
     empresa_id: int
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    yeastar_client_secret: str # Will return '********' if set
 
     class Config:
         from_attributes = True
+

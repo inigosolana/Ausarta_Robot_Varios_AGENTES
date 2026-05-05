@@ -12,10 +12,10 @@ Responsabilidades:
 """
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, HTTPException
 from fastapi.responses import JSONResponse
-from models.schemas import CallEndRequest, EncuestaData, YeastarConfigCreate, YeastarConfigResponse, YeastarConfigTest
+from models.schemas import CallEndRequest, EncuestaData, YeastarPSeriesConfigCreate, YeastarPSeriesConfigResponse, YeastarPSeriesConfigTest
 from services.supabase_service import supabase, sb_query
 from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
-from services.yeastar_service import YeastarClient
+from services.yeastar_service import YeastarPSeriesClient
 from services.auth import get_current_user, CurrentUser, require_admin, require_outbound_auth
 from livekit import api
 import aiohttp
@@ -31,29 +31,33 @@ router = APIRouter(tags=["telephony"])
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Yeastar PBX — configuración multi-tenant
+# Yeastar PBX — configuración multi-tenant (P-Series)
 # ──────────────────────────────────────────────────────────────────────────────
 
-@router.get("/api/telephony/yeastar", response_model=YeastarConfigResponse | None)
+@router.get("/api/telephony/yeastar", response_model=YeastarPSeriesConfigResponse | None)
 async def get_yeastar_config(
+    empresa_id: int | None = None,
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """
-    Devuelve la configuración Yeastar de la empresa del usuario autenticado.
-    Retorna null (204) si no hay configuración guardada todavía.
-    La contraseña NUNCA se incluye en la respuesta.
+    Devuelve la configuración Yeastar de la empresa.
+    Si empresa_id no se especifica, usa la del usuario autenticado.
+    El Client Secret se enmascara si existe.
     """
     if not supabase:
         raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
 
-    empresa_id = current_user.empresa_id
-    if not empresa_id:
+    target_empresa_id = empresa_id if empresa_id else current_user.empresa_id
+    if target_empresa_id != current_user.empresa_id and current_user.role not in ["superadmin", "admin"]:
+        raise HTTPException(status_code=403, detail="No tienes permisos para ver esta configuración")
+
+    if not target_empresa_id:
         raise HTTPException(status_code=403, detail="Usuario sin empresa asignada")
 
     res = await sb_query(
-        lambda: supabase.table("company_yeastar_configs")
-        .select("id, empresa_id, api_url, api_port, api_username, is_active, created_at, updated_at")
-        .eq("empresa_id", empresa_id)
+        lambda: supabase.table("empresas")
+        .select("id, yeastar_pbx_url, yeastar_client_id, yeastar_client_secret")
+        .eq("id", target_empresa_id)
         .limit(1)
         .execute()
     )
@@ -61,73 +65,124 @@ async def get_yeastar_config(
     if not res.data:
         return JSONResponse(status_code=204, content=None)
 
-    return res.data[0]
+    row = res.data[0]
+    
+    # Check if we have Yeastar configured at all
+    if not row.get("yeastar_pbx_url") or not row.get("yeastar_client_id"):
+        return JSONResponse(status_code=204, content=None)
+
+    # Mask the secret
+    secret = row.get("yeastar_client_secret")
+    masked_secret = "********" if secret else ""
+
+    return {
+        "empresa_id": row["id"],
+        "yeastar_pbx_url": row["yeastar_pbx_url"],
+        "yeastar_client_id": row["yeastar_client_id"],
+        "yeastar_client_secret": masked_secret,
+    }
 
 
-@router.post("/api/telephony/yeastar", response_model=YeastarConfigResponse)
+@router.post("/api/telephony/yeastar", response_model=YeastarPSeriesConfigResponse)
 async def save_yeastar_config(
-    payload: YeastarConfigCreate,
+    payload: YeastarPSeriesConfigCreate,
     current_user: CurrentUser = Depends(require_admin),
 ):
     """
-    Guarda (upsert) la configuración Yeastar de la empresa.
+    Guarda la configuración Yeastar de la empresa en la tabla empresas.
     Solo accesible para roles admin y superadmin.
-    La contraseña se almacena tal cual (protegida por RLS y service-role key).
     """
     if not supabase:
         raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
 
-    empresa_id = current_user.empresa_id
-    if not empresa_id:
+    target_empresa_id = payload.empresa_id if payload.empresa_id else current_user.empresa_id
+    if target_empresa_id != current_user.empresa_id and current_user.role not in ["superadmin", "admin"]:
+        raise HTTPException(status_code=403, detail="No tienes permisos para editar esta configuración")
+
+    if not target_empresa_id:
         raise HTTPException(status_code=403, detail="Usuario sin empresa asignada")
 
-    row = {
-        "empresa_id": empresa_id,
-        "api_url": payload.api_url.strip(),
-        "api_port": payload.api_port,
-        "api_username": payload.api_username.strip(),
-        "api_password": payload.api_password,
-        "is_active": payload.is_active,
+    update_data = {
+        "yeastar_pbx_url": payload.yeastar_pbx_url.strip(),
+        "yeastar_client_id": payload.yeastar_client_id.strip(),
     }
+    
+    # Only update secret if it's not the masked string
+    if payload.yeastar_client_secret and payload.yeastar_client_secret != "********":
+        update_data["yeastar_client_secret"] = payload.yeastar_client_secret.strip()
 
-    # UPSERT — constraint uq_yeastar_empresa ensures one row per company
     res = await sb_query(
-        lambda: supabase.table("company_yeastar_configs")
-        .upsert(row, on_conflict="empresa_id")
+        lambda: supabase.table("empresas")
+        .update(update_data)
+        .eq("id", target_empresa_id)
         .execute()
     )
 
     if not res.data:
-        raise HTTPException(status_code=500, detail="Error al guardar la configuración")
+        raise HTTPException(status_code=500, detail="Error al guardar la configuración Yeastar")
 
-    saved = res.data[0]
-    # Strip password before returning
-    saved.pop("api_password", None)
-    return saved
+    row = res.data[0]
+    
+    return {
+        "empresa_id": row["id"],
+        "yeastar_pbx_url": row["yeastar_pbx_url"],
+        "yeastar_client_id": row["yeastar_client_id"],
+        "yeastar_client_secret": "********" if row.get("yeastar_client_secret") else "",
+    }
 
 
 @router.post("/api/telephony/yeastar/test")
 async def test_yeastar_connection(
-    payload: YeastarConfigTest,
+    payload: YeastarPSeriesConfigTest,
     current_user: CurrentUser = Depends(require_admin),
 ):
     """
     Prueba la conexión con la centralita Yeastar usando las credenciales
-    proporcionadas en tiempo real, sin guardar nada en base de datos.
-
-    Devuelve:
-        {"ok": true,  "message": "..."} si la conexión es exitosa.
-        {"ok": false, "message": "..."} si falla.
+    proporcionadas en tiempo real.
     """
-    client = YeastarClient(
-        api_url=payload.api_url,
-        api_port=payload.api_port,
-        username=payload.api_username,
-        password=payload.api_password,
+    client_secret = payload.yeastar_client_secret
+    target_empresa_id = payload.empresa_id if payload.empresa_id else current_user.empresa_id
+
+    # If masked, we need to fetch the real secret from DB
+    if client_secret == "********":
+        res = await sb_query(
+            lambda: supabase.table("empresas")
+            .select("yeastar_client_secret")
+            .eq("id", target_empresa_id)
+            .limit(1)
+            .execute()
+        )
+        if res.data and res.data[0].get("yeastar_client_secret"):
+            client_secret = res.data[0]["yeastar_client_secret"]
+        else:
+            return {"ok": False, "message": "No se encontró el secreto original en la base de datos."}
+
+    client = YeastarPSeriesClient(
+        pbx_url=payload.yeastar_pbx_url,
+        client_id=payload.yeastar_client_id,
+        client_secret=client_secret,
     )
 
     ok, message = await client.test_connection()
     return {"ok": ok, "message": message}
+
+@router.post("/webhooks/yeastar")
+async def yeastar_webhook(request: Request):
+    """
+    Recibe eventos de la centralita Yeastar (CallAnswered, CallHangup, etc.).
+    """
+    try:
+        payload = await request.json()
+        logger.info(f"📞 [Yeastar Webhook] Evento recibido: {payload}")
+        
+        # TODO: Implement additional logic based on the webhook event.
+        # e.g., callid = payload.get("callid")
+        # event_type = payload.get("action")
+        
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"❌ Error procesando webhook de Yeastar: {e}")
+        return JSONResponse(status_code=400, content={"error": "Invalid webhook payload"})
 
 # ──────────────────────────────────────────────
 # Colgar sala

@@ -1,43 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import {
-  ChevronDown, AlertTriangle, Trash2,
+  ChevronDown, AlertTriangle, Trash2, Building2,
   Server, Eye, EyeOff, Wifi, WifiOff,
-  Save, Loader2, CheckCircle2, XCircle,
+  Save, Loader2, CheckCircle2, XCircle, Info
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/apiFetch';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+import type { Empresa } from '../types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface YeastarConfig {
-  id?: string;
-  api_url: string;
-  api_port: number;
-  api_username: string;
-  is_active: boolean;
-  created_at?: string;
-  updated_at?: string;
+  empresa_id?: number;
+  yeastar_pbx_url: string;
+  yeastar_client_id: string;
+  yeastar_client_secret?: string; // only for form input or '********'
 }
 
-interface YeastarForm extends YeastarConfig {
-  api_password: string;
-}
-
-const EMPTY_FORM: YeastarForm = {
-  api_url: '',
-  api_port: 8088,
-  api_username: '',
-  api_password: '',
-  is_active: true,
+const EMPTY_FORM: YeastarConfig = {
+  yeastar_pbx_url: '',
+  yeastar_client_id: '',
+  yeastar_client_secret: '',
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const TelephonyView: React.FC = () => {
   const { t } = useTranslation();
+  const { profile, isPlatformOwner } = useAuth();
 
   // ── Yeastar state ──────────────────────────────────────────────────────────
-  const [form, setForm] = useState<YeastarForm>(EMPTY_FORM);
+  const [form, setForm] = useState<YeastarConfig>(EMPTY_FORM);
   const [savedConfig, setSavedConfig] = useState<YeastarConfig | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(true);
@@ -46,37 +41,67 @@ const TelephonyView: React.FC = () => {
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // ── Load existing config on mount ─────────────────────────────────────────
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await apiFetch('/api/telephony/yeastar');
-        if (res.status === 204 || res.status === 404) {
-          // No config saved yet
-          setLoadingConfig(false);
-          return;
-        }
-        if (res.ok) {
-          const data: YeastarConfig = await res.json();
-          setSavedConfig(data);
-          setForm({
-            api_url: data.api_url,
-            api_port: data.api_port,
-            api_username: data.api_username,
-            api_password: '',   // never returned by the API
-            is_active: data.is_active,
-          });
-        }
-      } catch (err) {
-        console.error('[Yeastar] Error loading config:', err);
-      } finally {
-        setLoadingConfig(false);
-      }
-    };
-    load();
-  }, []);
+  // ── Multi-tenant state ─────────────────────────────────────────────────────
+  const [empresas, setEmpresas] = useState<Empresa[]>([]);
+  const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | null>(null);
 
-  const handleChange = (field: keyof YeastarForm, value: string | number | boolean) => {
+  useEffect(() => {
+    if (isPlatformOwner) {
+      loadEmpresas();
+    } else if (profile?.empresa_id) {
+      setSelectedEmpresaId(profile.empresa_id);
+    } else {
+      setLoadingConfig(false);
+    }
+  }, [profile, isPlatformOwner]);
+
+  useEffect(() => {
+    if (selectedEmpresaId) {
+      loadConfig(selectedEmpresaId);
+    } else {
+      setForm(EMPTY_FORM);
+      setSavedConfig(null);
+    }
+  }, [selectedEmpresaId]);
+
+  const loadEmpresas = async () => {
+    const { data, error } = await supabase.from('empresas').select('*').order('nombre');
+    if (!error && data) {
+      setEmpresas(data);
+      if (data.length > 0 && !selectedEmpresaId) {
+        setSelectedEmpresaId(data[0].id);
+      }
+    }
+  };
+
+  const loadConfig = async (empId: number) => {
+    setLoadingConfig(true);
+    setTestResult(null);
+    setSaveSuccess(false);
+    try {
+      const res = await apiFetch(`/api/telephony/yeastar?empresa_id=${empId}`);
+      if (res.status === 204 || res.status === 404) {
+        setSavedConfig(null);
+        setForm(EMPTY_FORM);
+        return;
+      }
+      if (res.ok) {
+        const data: YeastarConfig = await res.json();
+        setSavedConfig(data);
+        setForm({
+          yeastar_pbx_url: data.yeastar_pbx_url || '',
+          yeastar_client_id: data.yeastar_client_id || '',
+          yeastar_client_secret: '',   // handled dynamically on save
+        });
+      }
+    } catch (err) {
+      console.error('[Yeastar] Error loading config:', err);
+    } finally {
+      setLoadingConfig(false);
+    }
+  };
+
+  const handleChange = (field: keyof YeastarConfig, value: string) => {
     setForm(prev => ({ ...prev, [field]: value }));
     setTestResult(null);
     setSaveSuccess(false);
@@ -84,18 +109,19 @@ const TelephonyView: React.FC = () => {
 
   // ── Test connection ────────────────────────────────────────────────────────
   const handleTest = async () => {
-    if (!form.api_url || !form.api_username) return;
+    if (!form.yeastar_pbx_url || !form.yeastar_client_id || !selectedEmpresaId) return;
     setTesting(true);
     setTestResult(null);
     try {
+      const payload = {
+        empresa_id: selectedEmpresaId,
+        yeastar_pbx_url: form.yeastar_pbx_url,
+        yeastar_client_id: form.yeastar_client_id,
+        yeastar_client_secret: form.yeastar_client_secret || '********',
+      };
       const res = await apiFetch('/api/telephony/yeastar/test', {
         method: 'POST',
-        body: JSON.stringify({
-          api_url: form.api_url,
-          api_port: form.api_port,
-          api_username: form.api_username,
-          api_password: form.api_password || '<<unchanged>>',
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       setTestResult({ ok: data.ok, message: data.message });
@@ -109,24 +135,23 @@ const TelephonyView: React.FC = () => {
   // ── Save config ────────────────────────────────────────────────────────────
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.api_url || !form.api_username) return;
+    if (!form.yeastar_pbx_url || !form.yeastar_client_id || !selectedEmpresaId) return;
     setSaving(true);
     setSaveSuccess(false);
     try {
       const res = await apiFetch('/api/telephony/yeastar', {
         method: 'POST',
         body: JSON.stringify({
-          api_url: form.api_url,
-          api_port: form.api_port,
-          api_username: form.api_username,
-          api_password: form.api_password,
-          is_active: form.is_active,
+          empresa_id: selectedEmpresaId,
+          yeastar_pbx_url: form.yeastar_pbx_url,
+          yeastar_client_id: form.yeastar_client_id,
+          yeastar_client_secret: form.yeastar_client_secret,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const saved: YeastarConfig = await res.json();
       setSavedConfig(saved);
-      setForm(prev => ({ ...prev, api_password: '' }));
+      setForm(prev => ({ ...prev, yeastar_client_secret: '' }));
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
     } catch (err) {
@@ -138,65 +163,44 @@ const TelephonyView: React.FC = () => {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-4xl mx-auto">
       {/* Header */}
       <header>
-        <h1 className="text-2xl font-bold text-gray-900">
-          {t('Telephony Configuration', 'Configuración de Telefonía')}
+        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+          <Server size={24} className="text-indigo-600" />
+          {t('Telephony Configuration', 'Configuración de Telefonía PBX')}
         </h1>
         <p className="text-gray-500 text-sm mt-1">
-          {t('Configure your telephony provider for outbound calls.', 'Configura tu proveedor de telefonía para llamadas salientes.')}
+          {t('Configure your telephony provider for outbound calls and transfers.', 'Configura tu proveedor de telefonía para llamadas salientes y transferencias.')}
         </p>
       </header>
 
-      {/* ── Generic provider card ────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-8 space-y-6">
-        <div>
-          <label className="block text-sm font-semibold text-gray-800 mb-2">
-            {t('Telephony Provider', 'Proveedor de Telefonía')}
+      {/* Empresa Selector */}
+      {isPlatformOwner && (
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+            <Building2 size={15} />
+            {t('Company to configure', 'Empresa a configurar')}
           </label>
-          <div className="relative">
-            <select className="w-full h-10 px-4 pr-10 appearance-none bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all cursor-pointer">
-              <option>LCR (Generic SIP / Asterisk)</option>
-            </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
-          </div>
+          <select
+            value={selectedEmpresaId || ''}
+            onChange={(e) => setSelectedEmpresaId(Number(e.target.value))}
+            className="w-full h-10 px-3 rounded-lg border border-gray-200 bg-white text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+          >
+            <option value="" disabled>{t('Select a company', 'Selecciona una empresa')}</option>
+            {empresas.map(emp => (
+              <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+            ))}
+          </select>
         </div>
-
-        <div className="bg-gray-50/50 rounded-lg p-4 border border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-800 mb-1">
-            {t('LCR Configuration', 'Configuración LCR')}
-          </h3>
-          <p className="text-xs text-gray-500 leading-relaxed">
-            {t(
-              'Using local Asterisk/LCR trunk. No additional credentials required here. Ensure your docker-compose is configured with proper Asterisk/ARI environment variables.',
-              'Usando el troncal local Asterisk/LCR. No se requieren credenciales adicionales aquí. Asegúrate de que tu docker-compose esté configurado con las variables de entorno de Asterisk/ARI adecuadas.'
-            )}
-          </p>
-        </div>
-
-        <div>
-          <label className="block text-sm font-semibold text-gray-800 mb-2">
-            {t('From Numbers (Comma separated)', 'Números de Origen (Separados por coma)')}
-          </label>
-          <input
-            type="text"
-            placeholder={t('e.g. +34944771453, +34988...', 'ej: +34944771453, +34988...')}
-            className="w-full h-10 px-4 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all"
-          />
-          <p className="text-[11px] text-gray-400 mt-2">
-            {t('Numbers that will appear as Caller ID.', 'Números que aparecerán como identificador de llamada (Caller ID).')}
-          </p>
-        </div>
-
-        <div className="flex justify-end pt-4">
-          <button className="px-6 py-2.5 bg-[#121212] text-white text-sm font-medium rounded-lg hover:bg-black transition-colors shadow-sm">
-            {t('Save Configuration', 'Guardar Configuración')}
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* ── Yeastar PBX Integration card ─────────────────────────────────── */}
+      {!selectedEmpresaId ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400 shadow-sm">
+              {t('Select a company to configure telephony.', 'Selecciona una empresa para configurar la telefonía.')}
+          </div>
+      ) : (
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         {/* Card header */}
         <div className="px-8 py-5 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-blue-50 flex items-center justify-between">
@@ -206,12 +210,12 @@ const TelephonyView: React.FC = () => {
             </div>
             <div>
               <h2 className="font-bold text-gray-900">
-                {t('Yeastar PBX Integration', 'Integración Yeastar PBX')}
+                {t('Yeastar P-Series Integration', 'Integración Yeastar P-Series')}
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
                 {t(
-                  'Connect your Yeastar S-Series or P-Series PBX via REST API.',
-                  'Conecta tu centralita Yeastar S-Series o P-Series mediante la API REST.'
+                  'Connect your Yeastar P-Series PBX via REST API v2.0.',
+                  'Conecta tu centralita Yeastar P-Series mediante la API REST v2.0.'
                 )}
               </p>
             </div>
@@ -219,7 +223,7 @@ const TelephonyView: React.FC = () => {
 
           {/* Connection status badge */}
           {!loadingConfig && (
-            savedConfig?.is_active ? (
+            savedConfig?.yeastar_pbx_url ? (
               <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
                 <Wifi size={13} /> {t('Configured', 'Configurado')}
               </span>
@@ -231,6 +235,22 @@ const TelephonyView: React.FC = () => {
           )}
         </div>
 
+        {/* Setup Instructions Block */}
+        <div className="px-8 py-6 bg-blue-50/50 border-b border-blue-100">
+          <h3 className="flex items-center gap-2 text-sm font-bold text-blue-900 mb-3">
+            <Info size={16} className="text-blue-600" />
+            Instrucciones de Configuración en Yeastar
+          </h3>
+          <ol className="list-decimal list-inside space-y-2 text-sm text-blue-800/80">
+            <li>Ve a <strong>Integraciones &gt; API</strong> en tu panel de administración de Yeastar P-Series.</li>
+            <li>Activa la API y copia el <strong>Cliente ID</strong> y el <strong>Secreto del Cliente</strong>.</li>
+            <li>Añade la IP de nuestro servidor (<code>{window.location.hostname}</code>) en <strong>Restricción de IP</strong> para permitir el acceso.</li>
+            <li>En la pestaña Webhooks, activa <strong>Webhook Event Push</strong>.</li>
+            <li>Pega esta URL en el campo destino: <code className="bg-blue-100 px-1.5 py-0.5 rounded text-blue-900 break-all">{window.location.origin}/webhooks/yeastar</code></li>
+            <li>Selecciona los eventos necesarios (ej: CallAnswered, CallHangup).</li>
+          </ol>
+        </div>
+
         {/* Form body */}
         <form onSubmit={handleSave} className="p-8 space-y-5">
           {loadingConfig ? (
@@ -240,65 +260,47 @@ const TelephonyView: React.FC = () => {
             </div>
           ) : (
             <>
-              {/* Row 1: Host + Port */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                    {t('Host / IP', 'Host / IP')} *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={form.api_url}
-                    onChange={e => handleChange('api_url', e.target.value)}
-                    placeholder="192.168.1.100"
-                    className="w-full h-10 px-4 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
-                  />
-                  <p className="text-[11px] text-gray-400 mt-1">
-                    {t('IP address or hostname of the Yeastar PBX.', 'IP o hostname de la centralita Yeastar.')}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                    {t('API Port', 'Puerto API')}
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={65535}
-                    required
-                    value={form.api_port}
-                    onChange={e => handleChange('api_port', parseInt(e.target.value) || 8088)}
-                    className="w-full h-10 px-4 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
-                  />
-                  <p className="text-[11px] text-gray-400 mt-1">{t('Default: 8088', 'Por defecto: 8088')}</p>
-                </div>
+              {/* Row 1: Host URL */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                  {t('PBX URL', 'URL de la Centralita')} *
+                </label>
+                <input
+                  type="url"
+                  required
+                  value={form.yeastar_pbx_url}
+                  onChange={e => handleChange('yeastar_pbx_url', e.target.value)}
+                  placeholder="https://pbx.miempresa.com:8088"
+                  className="w-full h-10 px-4 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  {t('Full URL including protocol and port.', 'URL completa incluyendo protocolo (http/https) y puerto.')}
+                </p>
               </div>
 
-              {/* Row 2: Username + Password */}
+              {/* Row 2: Client ID + Secret */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                    {t('API Username', 'Usuario API')} *
+                    {t('Client ID', 'Client ID')} *
                   </label>
                   <input
                     type="text"
                     required
                     autoComplete="off"
-                    value={form.api_username}
-                    onChange={e => handleChange('api_username', e.target.value)}
-                    placeholder="admin"
+                    value={form.yeastar_client_id}
+                    onChange={e => handleChange('yeastar_client_id', e.target.value)}
+                    placeholder="xxxxxxxxxxxxxxxx"
                     className="w-full h-10 px-4 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                    {t('API Password', 'Contraseña API')}
-                    {savedConfig && (
+                    {t('Client Secret', 'Client Secret')}
+                    {savedConfig?.yeastar_pbx_url && (
                       <span className="ml-2 text-gray-400 normal-case font-normal">
-                        ({t('leave blank to keep current', 'déjala vacía para conservar la actual')})
+                        ({t('leave blank to keep current', 'déjala vacía para conservar el actual')})
                       </span>
                     )}
                   </label>
@@ -306,10 +308,10 @@ const TelephonyView: React.FC = () => {
                     <input
                       type={showPassword ? 'text' : 'password'}
                       autoComplete="new-password"
-                      value={form.api_password}
-                      onChange={e => handleChange('api_password', e.target.value)}
-                      placeholder={savedConfig ? '••••••••' : t('Enter password', 'Introduce la contraseña')}
-                      required={!savedConfig}
+                      value={form.yeastar_client_secret}
+                      onChange={e => handleChange('yeastar_client_secret', e.target.value)}
+                      placeholder={savedConfig?.yeastar_pbx_url ? '••••••••' : t('Enter client secret', 'Introduce el secreto')}
+                      required={!savedConfig?.yeastar_pbx_url}
                       className="w-full h-10 pl-4 pr-11 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
                     />
                     <button
@@ -321,23 +323,6 @@ const TelephonyView: React.FC = () => {
                     </button>
                   </div>
                 </div>
-              </div>
-
-              {/* Active toggle */}
-              <div className="flex items-center gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={() => handleChange('is_active', !form.is_active)}
-                  className={`relative w-10 h-6 rounded-full transition-colors ${form.is_active ? 'bg-indigo-600' : 'bg-gray-300'}`}
-                >
-                  <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all shadow ${form.is_active ? 'right-1' : 'left-1'}`} />
-                </button>
-                <span className="text-sm text-gray-600">
-                  {form.is_active
-                    ? t('Integration enabled', 'Integración habilitada')
-                    : t('Integration disabled', 'Integración deshabilitada')
-                  }
-                </span>
               </div>
 
               {/* Test result banner */}
@@ -368,7 +353,7 @@ const TelephonyView: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleTest}
-                  disabled={testing || !form.api_url || !form.api_username}
+                  disabled={testing || !form.yeastar_pbx_url || !form.yeastar_client_id}
                   className="flex items-center gap-2 px-5 h-10 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {testing ? (
@@ -380,7 +365,7 @@ const TelephonyView: React.FC = () => {
 
                 <button
                   type="submit"
-                  disabled={saving || !form.api_url || !form.api_username}
+                  disabled={saving || !form.yeastar_pbx_url || !form.yeastar_client_id}
                   className="flex items-center gap-2 px-6 h-10 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-sm shadow-indigo-200"
                 >
                   {saving ? (
@@ -394,6 +379,7 @@ const TelephonyView: React.FC = () => {
           )}
         </form>
       </div>
+      )}
 
       {/* ── System maintenance card ───────────────────────────────────────── */}
       <div className="bg-red-50 rounded-xl border border-red-100 p-8 space-y-4">
@@ -440,3 +426,4 @@ const TelephonyView: React.FC = () => {
 };
 
 export default TelephonyView;
+

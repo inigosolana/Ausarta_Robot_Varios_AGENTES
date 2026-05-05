@@ -17,6 +17,7 @@ import {
   BotMessageSquare,
   Settings,
   Share2,
+  Server,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -215,6 +216,9 @@ const AppShell: React.FC = () => {
             )}
             {hasPermission('crm') && (
               <SidebarItem icon={<Share2 size={18} />} label={t('CRM Integration', 'Integración CRM')} to="/crm" collapsed={!isSidebarOpen} />
+            )}
+            {hasPermission('admin') && (
+              <SidebarItem icon={<Server size={18} />} label={t('Telephony PBX', 'Telefonía PBX')} to="/telephony" collapsed={!isSidebarOpen} />
             )}
           </nav>
 
