@@ -95,26 +95,6 @@ export interface Campaign {
   extraction_schema?: ExtractionSchemaProperty[];
 }
 
-export interface VoiceAgent {
-  id: string;
-  name: string;
-  callType: 'Inbound' | 'Outbound';
-  useCase: string;
-  description: string;
-}
-
-export interface TelephonyConfig {
-  provider: string;
-  fromNumbers: string;
-}
-
-export interface ModelConfig {
-  llmProvider: string;
-  voiceProvider: string;
-  transcriberProvider: string;
-  embeddingProvider: string;
-}
-
 // All available modules for permission system
 export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'overview', label: 'Dashboard' },
