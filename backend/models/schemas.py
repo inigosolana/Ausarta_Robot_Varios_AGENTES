@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, Union, List
+from typing import Optional, List
 from datetime import datetime
 
 class VoiceAgentCreate(BaseModel):

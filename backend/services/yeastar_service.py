@@ -9,9 +9,7 @@ Flujo de autenticación (OAuth2 Client Credentials):
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any
-import asyncio
 import time
 
 import aiohttp

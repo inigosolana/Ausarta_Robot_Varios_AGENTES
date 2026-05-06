@@ -20,14 +20,9 @@ from livekit.agents import (
     BuiltinAudioClip,
     JobContext,
     RunContext,
-    ToolError,
     cli,
     function_tool,
-    room_io,
-    utils,
-    stt,
-    AutoSubscribe,
-    llm
+    AutoSubscribe
 )
 from livekit.plugins import (
     silero,
@@ -639,7 +634,7 @@ class DynamicAgent(Agent):
                             break
 
             safe_goodbye = _normalize_goodbye_message(mensaje_despedida_manual)
-            goodbye_l = safe_goodbye.lower()
+            safe_goodbye.lower()
             identity_cues = (
                 "quien eres", "quién eres", "de parte de", "quien llama", "quién llama", "de donde", "de dónde"
             )
@@ -1302,7 +1297,7 @@ async def entrypoint(ctx: JobContext):
                         chat_ctx.add_message(role="system", content=override_msg)
                     # API alternativa: shallow_copy + update_chat_ctx
                     elif hasattr(session, "update_chat_ctx"):
-                        from livekit.agents.llm import ChatContext, ChatMessage
+                        from livekit.agents.llm import ChatMessage
                         new_ctx = chat_ctx.copy() if hasattr(chat_ctx, "copy") else chat_ctx
                         new_ctx.messages.append(ChatMessage.create(text=override_msg, role="system"))
                         await session.update_chat_ctx(new_ctx)

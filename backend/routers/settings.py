@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from typing import Optional
 from services.supabase_service import supabase, sb_query
 from models.schemas import AIPromptRequest
 from datetime import datetime

@@ -302,7 +302,7 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
         lambda: supabase.table("encuestas").select("status, empresa_id, telefono").eq("id", datos.id_encuesta).execute()
     )
     curr_data = curr.data[0] if curr.data else {}
-    current_db_status = (curr_data.get("status") or "")
+    (curr_data.get("status") or "")
 
     # Si llegaron datos pero sin status explícito:
     # Mantenemos el que haya calculado, si no se queda sin tocar.

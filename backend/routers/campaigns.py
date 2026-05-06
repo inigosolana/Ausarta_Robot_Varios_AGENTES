@@ -384,7 +384,7 @@ async def get_agent_config_by_survey(survey_id: int):
         agent_id = res_survey.data[0].get("agent_id")
         nombre_cliente = res_survey.data[0].get("nombre_cliente")
         empresa_id = res_survey.data[0].get("empresa_id")
-        campaign_id = res_survey.data[0].get("campaign_id")
+        res_survey.data[0].get("campaign_id")
 
         if not agent_id:
             return {

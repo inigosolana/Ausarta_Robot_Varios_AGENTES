@@ -5,7 +5,6 @@ from services.supabase_service import supabase, get_ui_cache, clear_ui_cache
 from services.audit import log_audit_event
 from services.auth import CurrentUser, require_admin
 from fastapi import Depends
-from models.schemas import VoiceAgentCreate, VoiceAgentUpdate
 from datetime import datetime
 import logging
 
