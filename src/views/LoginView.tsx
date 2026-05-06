@@ -60,7 +60,7 @@ const LoginView: React.FC = () => {
 
         try {
             // Call Backend Proxy instead of n8n directly to avoid CORS issues
-            const API_URL = import.meta.env.VITE_API_URL || '';
+            const API_URL = (import.meta as any).env.VITE_API_URL || '';
             const PROXY_URL = `${API_URL}/api/n8n/recover`;
 
             const res = await fetch(PROXY_URL, {

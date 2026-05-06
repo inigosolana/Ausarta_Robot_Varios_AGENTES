@@ -99,7 +99,6 @@ const AgentListView: React.FC = () => {
                 const { data, error } = await supabase.from('empresas').insert({
                     nombre,
                     responsable,
-                    creditos_llamadas: 10,
                 }).select().single();
                 if (error) throw error;
                 const logo_url = await uploadLogo(data.id);
@@ -132,7 +131,7 @@ const AgentListView: React.FC = () => {
         try {
             const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000));
             // Use cached API endpoint
-            const fetchPromise = fetch(`${import.meta.env.VITE_API_URL || ''}/api/empresas`);
+            const fetchPromise = fetch(`${(import.meta as any).env.VITE_API_URL || ''}/api/empresas`);
             const res = (await Promise.race([fetchPromise, timeoutPromise])) as Response;
             const data = await res.json();
 
@@ -259,7 +258,7 @@ const AgentListView: React.FC = () => {
 
         try {
             setLoading(true);
-            const API_URL = import.meta.env.VITE_API_URL || '';
+            const API_URL = (import.meta as any).env.VITE_API_URL || '';
             const res = await fetch(`${API_URL}/api/agents/${id}`, {
                 method: 'DELETE'
             });

@@ -49,7 +49,7 @@ const UserManagementView: React.FC = () => {
 
     const loadUsersAndEmpresas = async () => {
         setLoading(true);
-        const API_URL = (import.meta.env.VITE_API_URL as string) || '';
+        const API_URL = ((import.meta as any).env.VITE_API_URL as string) || '';
 
         // Safety: never stay in skeleton more than 10 seconds
         const safetyTimer = setTimeout(() => setLoading(false), 10_000);

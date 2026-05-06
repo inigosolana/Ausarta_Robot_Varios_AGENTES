@@ -33,7 +33,7 @@ import {
     ConnectionState
 } from 'livekit-client';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+const API_URL = (import.meta as any).env.VITE_API_URL || '';
 
 interface LiveSession {
     sid: string;
@@ -307,7 +307,7 @@ export const LiveMonitoring: React.FC = () => {
             });
 
             // 3. Conectar
-            const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || 'wss://ausarta-robot-m7e6v2y5.livekit.cloud';
+            const LIVEKIT_URL = (import.meta as any).env.VITE_LIVEKIT_URL || 'wss://ausarta-robot-m7e6v2y5.livekit.cloud';
             await room.connect(LIVEKIT_URL, token);
             setParticipantCount(room.remoteParticipants.size + 1);
             setConnectionStatus('connected');

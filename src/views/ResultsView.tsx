@@ -41,7 +41,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     const resultsQueryKey = ['results', effectiveEmpresaId, selectedAgentId, agentId, campaignId, dateRange] as const;
 
     const fetchResults = async (): Promise<SurveyResult[]> => {
-        const BASE_URL = import.meta.env.VITE_API_URL || '';
+        const BASE_URL = (import.meta as any).env.VITE_API_URL || '';
         const params = new URLSearchParams();
         if (effectiveEmpresaId !== 'all') params.append('empresa_id', String(effectiveEmpresaId));
         if (selectedAgentId !== 'all') params.append('agent_id', String(selectedAgentId));
@@ -74,7 +74,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
 
     useEffect(() => {
         const fetchAgents = async () => {
-            const BASE_URL = import.meta.env.VITE_API_URL || window.location.origin;
+            const BASE_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
             const url = effectiveEmpresaId !== 'all' ? `${BASE_URL}/api/agents?empresa_id=${effectiveEmpresaId}` : `${BASE_URL}/api/agents`;
             const res = await fetch(url);
             if (res.ok) setAgents(await res.json());
@@ -186,7 +186,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     const openTranscript = async (row: SurveyResult) => {
         let freshTranscription = row.transcription ?? null;
         try {
-            const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+            const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
             const res = await fetch(`${API_URL}/api/results/${row.id}/transcription`);
             if (res.ok) {
                 const data = await res.json();
@@ -213,7 +213,7 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                     </div>
                     <div className="flex flex-wrap gap-2">
                         <button
-                            onClick={loadResults}
+                            onClick={() => loadResults()}
                             className="p-2 bg-white border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
                         >
                             <RefreshCw size={18} className={loading ? "animate-spin" : ""} />

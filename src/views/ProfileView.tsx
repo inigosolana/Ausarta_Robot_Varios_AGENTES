@@ -40,7 +40,7 @@ export const ProfileView: React.FC = () => {
     const loadEmpresas = async () => {
         setLoading(true);
         try {
-            const API_URL = import.meta.env.VITE_API_URL || '';
+            const API_URL = (import.meta as any).env.VITE_API_URL || '';
             const res = await fetch(`${API_URL}/api/empresas`);
             if (res.ok) {
                 const data = await res.json();

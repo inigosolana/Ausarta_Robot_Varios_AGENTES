@@ -3,7 +3,7 @@ import { BarChart3, Globe, Cpu, Mic, Volume2, AlertTriangle, XCircle, Zap, Termi
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 
-const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
+const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
 
 const UsageView: React.FC = () => {
     const { profile, isRole, isPlatformOwner } = useAuth();

@@ -88,7 +88,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
     const loadEmpresas = async () => {
         setIsLoadingEmpresas(true);
         try {
-            const API_URL = import.meta.env.VITE_API_URL || '';
+            const API_URL = (import.meta as any).env.VITE_API_URL || '';
             const resp = await fetch(`${API_URL}/api/empresas`);
             if (!resp.ok) throw new Error('No se pudo cargar empresas');
             const data = await resp.json();
@@ -112,7 +112,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
         setIsGeneratingCompanyContext(true);
         try {
-            const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+            const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
             const resp = await fetch(`${API_URL}/api/ai/company-context`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -171,7 +171,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
         setIsSaving(true);
         try {
-            const API_URL = import.meta.env.VITE_API_URL || '';
+            const API_URL = (import.meta as any).env.VITE_API_URL || '';
             const method = isEditing ? 'PUT' : 'POST';
             const url = isEditing ? `${API_URL}/api/agents/${agent!.id}` : `${API_URL}/api/agents`;
 
@@ -214,7 +214,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
         if (!aiPromptRequest.trim()) return;
         setIsGeneratingPrompt(true);
         try {
-            const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+            const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
             const payload = {
                 user_request: aiPromptRequest,
                 empresa_id: formData.empresa_id || profile?.empresa_id || null,

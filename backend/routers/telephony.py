@@ -349,10 +349,6 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
             curr_data.get("telefono", ""),
         )
 
-    # --- Deducir 1 crédito al completar la llamada ---
-    if normalized_status == "completed" and curr_data.get("empresa_id"):
-        background_tasks.add_task(_deduct_credit, curr_data["empresa_id"])
-
     return {"status": "ok", "updated": update_data}
 
 
@@ -483,55 +479,6 @@ async def _notify_n8n_post_call(encuesta_id: int, status: str, result_data: dict
                     logger.info(f"📡 CRM Webhook [{status}] → {emp_cfg['crm_webhook_url']} ({resp.status})")
         except Exception as e:
             logger.warning(f"⚠️ Error en CRM Webhook: {e}")
-
-
-async def _deduct_credit(empresa_id: int) -> None:
-    """
-    Descuenta 1 crédito de llamada a la empresa usando una función RPC atómica.
-
-    La atomicidad previene la race condition de leer-modificar-escribir cuando
-    múltiples llamadas concurrentes terminan al mismo tiempo para la misma empresa.
-    La función SQL solo resta si creditos_llamadas > 0, evitando saldos negativos.
-    """
-    if not supabase:
-        return
-    try:
-        result = await sb_query(
-            lambda: supabase.rpc(
-                "deduct_credit_atomic",
-                {"empresa_id_param": empresa_id}
-            ).execute()
-        )
-        remaining = result.data  # La función devuelve los créditos restantes o NULL
-
-        if remaining is None:
-            # NULL: empresa no encontrada o créditos ya en 0 antes de intentar restar
-            logger.warning(f"⚠️ [Credits] Empresa {empresa_id}: RPC devolvió NULL (sin créditos o no existe). Pausando campañas.")
-            await _pause_empresa_campaigns(empresa_id, reason="sin_creditos")
-            return
-
-        logger.info(f"💳 [Credits] Empresa {empresa_id}: créditos restantes → {remaining}")
-
-        if remaining == 0:
-            logger.warning(f"🚫 [Credits] Empresa {empresa_id} sin créditos. Pausando campañas.")
-            await _pause_empresa_campaigns(empresa_id, reason="sin_creditos")
-
-    except Exception as e:
-        logger.warning(f"⚠️ [Credits] Error deduciendo crédito para empresa {empresa_id}: {e}")
-
-
-async def _pause_empresa_campaigns(empresa_id: int, reason: str = "sin_creditos") -> None:
-    """Pausa todas las campañas activas de una empresa por falta de créditos."""
-    if not supabase:
-        return
-    try:
-        res = await sb_query(
-            lambda: supabase.table("campaigns").update({"status": "paused"}).eq("empresa_id", empresa_id).in_("status", ["active", "running"]).execute()
-        )
-        paused = len(res.data) if res.data else 0
-        logger.warning(f"⏸️ [Credits] {paused} campaña(s) pausadas para empresa {empresa_id} (motivo: {reason})")
-    except Exception as e:
-        logger.error(f"❌ [Credits] Error pausando campañas empresa {empresa_id}: {e}")
 
 
 # ──────────────────────────────────────────────

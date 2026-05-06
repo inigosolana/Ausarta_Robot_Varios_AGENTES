@@ -183,97 +183,94 @@ const LiveCallView: React.FC<LiveCallViewProps> = ({ onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col min-h-[500px]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4">
+      <div className="bg-slate-900 w-full max-w-md rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-slate-800 overflow-hidden flex flex-col min-h-[550px]">
         {/* Header */}
-        <div className="p-4 flex items-center justify-between border-b border-gray-50 bg-gray-50/30">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`} />
-            <span className="text-sm font-bold text-gray-800">Agent Live Call</span>
+        <div className="p-5 flex items-center justify-between border-b border-slate-800 bg-slate-900/50">
+          <div className="flex items-center gap-3">
+            <div className={`w-3 h-3 rounded-full shadow-[0_0_10px_rgba(0,0,0,0.5)] ${isConnected ? 'bg-cyan-500 shadow-cyan-500/50 animate-pulse' : 'bg-slate-700'}`} />
+            <span className="text-sm font-bold text-slate-200 tracking-wider">CYBER-OPS TERMINAL</span>
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded-full transition-colors text-gray-500">
-            <X size={18} />
+          <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-xl transition-all text-slate-400 hover:text-white">
+            <X size={20} />
           </button>
         </div>
 
         {/* Call Body */}
         <div className="flex-1 p-8 flex flex-col items-center justify-center space-y-8">
-          <div className="relative">
-            {/* Visualizer Circle */}
-            <div className="w-32 h-32 rounded-full bg-gray-50 flex items-center justify-center relative overflow-hidden">
-               {/* Pulsing rings */}
+            {/* Circular Voice Wave - Cyber-Ops Style */}
+            <div className="w-48 h-48 rounded-full bg-slate-950/20 backdrop-blur-3xl flex items-center justify-center relative overflow-hidden border border-cyan-500/20 shadow-[0_0_30px_rgba(0,240,255,0.1)] group">
                {isConnected && (
                  <>
-                   <div className="absolute inset-0 bg-blue-400/20 rounded-full animate-ping" style={{ animationDuration: '2s' }} />
-                   <div className="absolute inset-0 bg-blue-500/10 rounded-full animate-ping" style={{ animationDuration: '3s' }} />
+                   {/* Expanding pulse waves */}
+                   <div className="absolute inset-0 bg-cyan-400/20 rounded-full animate-ping" style={{ animationDuration: '2s', transform: `scale(${1 + volume/100})` }} />
+                   <div className="absolute inset-0 bg-cyan-500/10 rounded-full animate-ping" style={{ animationDuration: '3s', transform: `scale(${1.2 + volume/80})` }} />
+                   
+                   {/* Orbiting particles (simulated with border shadows) */}
+                   <div className="absolute inset-0 rounded-full border border-cyan-500/10 animate-[spin_10s_linear_infinite]" />
+                   
+                   {/* Dynamic Waveform Overlay */}
+                   <div className="absolute inset-0 flex items-center justify-center opacity-30">
+                     {[...Array(24)].map((_, i) => (
+                       <div 
+                         key={i}
+                         className="w-1 bg-cyan-400 rounded-full mx-[1px] transition-all duration-75"
+                         style={{ 
+                           height: `${20 + Math.random() * (volume + 10)}%`,
+                           opacity: 0.3 + (volume / 100)
+                         }}
+                       />
+                     ))}
+                   </div>
                  </>
                )}
-               <div className="w-16 h-16 rounded-full bg-white shadow-lg flex items-center justify-center z-10">
-                 <Mic size={32} className={`${isConnected ? 'text-blue-600' : 'text-gray-300'}`} />
-               </div>
+               
+               {/* Central Icon */}
             </div>
-            {/* Dynamic Volume bars */}
-            {isConnected && (
-              <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 flex gap-1 h-8 items-end">
-                {[...Array(5)].map((_, i) => (
-                  <div 
-                    key={i} 
-                    className="w-1.5 bg-blue-500 rounded-full transition-all duration-75"
-                    style={{ height: `${10 + Math.random() * volume}%` }}
-                  />
-                ))}
-              </div>
-            )}
+
+            <div className="text-center">
+              <h2 className="text-2xl font-bold text-white tracking-tight drop-shadow-[0_0_10px_rgba(0,240,255,0.3)]">
+                {isConnecting ? 'ESTABLISHING SECURE LINK...' : isConnected ? 'OPERATIVE STATUS: ACTIVE' : 'CONNECTION TERMINATED'}
+              </h2>
+              <p className="text-sm text-cyan-500/60 mt-2 font-mono uppercase tracking-widest">
+                {isConnected ? 'Bi-directional voice stream active' : 'Waiting for Gemini uplink...'}
+              </p>
+            </div>
+
+            {/* Transcript Area */}
+            <div className="w-full bg-slate-950/50 rounded-2xl p-5 h-32 overflow-y-auto border border-slate-800/50 scrollbar-hide">
+              {transcript.length === 0 ? (
+                <p className="text-xs text-slate-600 italic text-center mt-8 font-mono">WAITING FOR DATA PACKETS...</p>
+              ) : (
+                <div className="space-y-3">
+                  {transcript.map((line, idx) => (
+                    <p key={idx} className={`text-[11px] font-mono leading-relaxed ${line.startsWith('AI:') ? 'text-cyan-400' : 'text-slate-400'}`}>
+                      <span className="opacity-50 mr-2">{'>'}</span>{line}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="text-center">
-            <h2 className="text-xl font-bold text-gray-900">
-              {isConnecting ? 'Establishing connection...' : isConnected ? 'AI Agent connected' : 'Call ended'}
-            </h2>
-            <p className="text-sm text-gray-500 mt-1">
-              {isConnected ? 'Speaking with AI Voice Agent...' : 'Connecting to Gemini Live API...'}
-            </p>
+          <div className="p-10 border-t border-slate-800 bg-slate-950/30 flex items-center justify-center gap-8">
+            <button 
+              onClick={() => setIsMuted(!isMuted)}
+              className={`p-5 rounded-2xl shadow-xl transition-all duration-300 border ${isMuted ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/50'}`}
+            >
+              {isMuted ? <MicOff size={24} /> : <Mic size={24} />}
+            </button>
+            
+            <button 
+              onClick={onClose}
+              className="p-6 bg-red-600 text-white rounded-2xl shadow-[0_0_20px_rgba(220,38,38,0.4)] hover:bg-red-500 transition-all hover:scale-110 active:scale-95 border border-red-400/30"
+            >
+              <PhoneOff size={32} />
+            </button>
           </div>
-
-          {/* Transcript Area */}
-          <div className="w-full bg-gray-50/50 rounded-xl p-4 h-32 overflow-y-auto border border-gray-100">
-            {transcript.length === 0 ? (
-              <p className="text-xs text-gray-400 italic text-center mt-8">Transcripts will appear here...</p>
-            ) : (
-              <div className="space-y-2">
-                {transcript.map((line, idx) => (
-                  <p key={idx} className="text-[11px] text-gray-600 leading-tight">
-                    {line}
-                  </p>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Controls */}
-        <div className="p-8 border-t border-gray-50 bg-gray-50/20 flex items-center justify-center gap-6">
-          <button 
-            onClick={() => setIsMuted(!isMuted)}
-            className={`p-4 rounded-full shadow-md transition-all ${isMuted ? 'bg-red-50 text-red-500' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-          >
-            {isMuted ? <MicOff size={24} /> : <Mic size={24} />}
-          </button>
-          
-          <button 
-            onClick={onClose}
-            className="p-5 bg-red-500 text-white rounded-full shadow-lg hover:bg-red-600 transition-all hover:scale-110 active:scale-95"
-          >
-            <PhoneOff size={28} />
-          </button>
-
-          <button className="p-4 rounded-full bg-white shadow-md text-gray-600 hover:bg-gray-50 transition-all">
-            <AudioWaveform size={24} />
-          </button>
         </div>
       </div>
-    </div>
-  );
+    );
 };
 
 export default LiveCallView;

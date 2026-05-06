@@ -28,7 +28,7 @@ const AssistantPanel: React.FC<AssistantPanelProps> = ({ isOpen, onClose }) => {
     const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+    const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
 
     const quickActions = [
         { label: t("Today's Summary", "Resumen de hoy"), query: "Dáme un resumen de las llamadas de hoy" },

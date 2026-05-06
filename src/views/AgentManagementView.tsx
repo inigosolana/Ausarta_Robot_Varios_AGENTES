@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Bot, Edit2, Trash2, Loader2, Search, Building2, ArrowLeft, Coins, AlertTriangle } from "lucide-react";
+import { Plus, Bot, Edit2, Trash2, Loader2, Search, Building2, ArrowLeft } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useTranslation } from "react-i18next";
@@ -21,32 +21,16 @@ const AgentManagementView: React.FC = () => {
     const [showTemplateGallery, setShowTemplateGallery] = useState(false);
     const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | "all">("all");
     const [templatePreload, setTemplatePreload] = useState<Partial<AgentConfig> | null>(null);
-    const [creditBalance, setCreditBalance] = useState<number | null>(null);
 
     useEffect(() => {
         loadData();
     }, []);
 
-    // Load credit balance for non-superadmins
-    useEffect(() => {
-        if (!isPlatformOwner && profile?.empresa_id) {
-            supabase
-                .from("empresas")
-                .select("creditos_llamadas")
-                .eq("id", profile.empresa_id)
-                .single()
-                .then(({ data }) => {
-                    if (data && data.creditos_llamadas !== undefined && data.creditos_llamadas !== null) {
-                        setCreditBalance(data.creditos_llamadas);
-                    }
-                });
-        }
-    }, [isPlatformOwner, profile?.empresa_id]);
 
     const loadData = async () => {
         setLoading(true);
         try {
-            const API_URL = import.meta.env.VITE_API_URL || '';
+            const API_URL = (import.meta as any).env.VITE_API_URL || '';
 
             // Load Empresas
             const empRes = await fetch(`${API_URL}/api/empresas`);
@@ -77,7 +61,7 @@ const AgentManagementView: React.FC = () => {
         if (!agentToDelete) return;
         try {
             setLoading(true);
-            const API_URL = import.meta.env.VITE_API_URL || '';
+            const API_URL = (import.meta as any).env.VITE_API_URL || '';
             const res = await fetch(`${API_URL}/api/agents/${agentToDelete}`, {
                 method: 'DELETE'
             });
@@ -217,27 +201,6 @@ const AgentManagementView: React.FC = () => {
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
-                    {/* Credits badge — only for non-superadmins */}
-                    {!isPlatformOwner && creditBalance !== null && (
-                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold border ${
-                            creditBalance === 0
-                                ? 'bg-red-50 text-red-600 border-red-200'
-                                : creditBalance <= 5
-                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        }`}>
-                            {creditBalance === 0
-                                ? <AlertTriangle size={15} className="shrink-0" />
-                                : <Coins size={15} className="shrink-0" />
-                            }
-                            <span>
-                                {creditBalance === 0
-                                    ? t('Sin créditos', 'Sin créditos')
-                                    : `${creditBalance} ${t('créditos', 'créditos')}`
-                                }
-                            </span>
-                        </div>
-                    )}
 
                     {canCreate && (
                         <button

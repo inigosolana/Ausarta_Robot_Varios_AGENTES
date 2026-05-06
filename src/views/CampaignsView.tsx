@@ -105,7 +105,7 @@ export function CampaignsView() {
   const [extractionSchema, setExtractionSchema] = useState<{key: string; type: string; label: string; options?: string[]}[]>([]);
   const [editExtractionSchema, setEditExtractionSchema] = useState<{key: string; type: string; label: string; options?: string[]}[]>([]);
 
-  const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+  const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
 
   const openEditModal = (camp: Campaign) => {
     setEditingCampaign(camp);
@@ -1274,14 +1274,26 @@ export function CampaignsView() {
                 <div className="h-px bg-gray-100 mb-4"></div>
 
                 {companyCampaigns.length === 0 ? (
-                  <div className="bg-gray-50 rounded-xl border border-gray-100 p-8 text-center text-gray-400 flex flex-col items-center gap-2">
-                    <History className="w-8 h-8 opacity-20" />
-                    <p className="text-sm">{t("No campaigns for this company yet.", "Aún no hay campañas para esta empresa.")}</p>
+                  <div className="bg-slate-900/40 backdrop-blur-xl rounded-2xl border border-dashed border-cyan-500/20 p-12 text-center flex flex-col items-center gap-6 group hover:border-cyan-500/40 transition-all duration-500">
+                    <div className="relative w-24 h-24 flex items-center justify-center">
+                      {/* Radar Animation SVG */}
+                      <svg className="absolute inset-0 w-full h-full text-cyan-500/20 animate-[spin_4s_linear_infinite]" viewBox="0 0 100 100">
+                        <circle cx="50" cy="50" r="48" fill="none" stroke="currentColor" strokeWidth="0.5" strokeDasharray="4 4" />
+                        <circle cx="50" cy="50" r="30" fill="none" stroke="currentColor" strokeWidth="0.5" />
+                        <line x1="50" y1="50" x2="50" y2="2" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+                      </svg>
+                      <div className="absolute inset-0 bg-cyan-500/5 rounded-full animate-pulse" />
+                      <Target className="w-10 h-10 text-cyan-500/40 group-hover:text-cyan-400 transition-colors" />
+                    </div>
+                    <div>
+                      <p className="text-slate-200 font-bold tracking-tight uppercase">{t("No active signals detected", "No se detectan señales activas")}</p>
+                      <p className="text-slate-500 text-xs mt-1 max-w-[200px] mx-auto">{t("Launch a new campaign to begin intercepting customer signals.", "Inicia una nueva campaña para interceptar señales de clientes.")}</p>
+                    </div>
                     <button
                       onClick={() => handleCreateNewForCompany(empresa.id)}
-                      className="text-blue-600 text-xs font-medium hover:underline"
+                      className="px-6 py-2 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 text-xs font-bold rounded-xl border border-cyan-500/30 transition-all uppercase tracking-widest"
                     >
-                      {t("Create the first one", "Crea la primera")}
+                      {t("Initialize Campaign", "Inicializar Campaña")}
                     </button>
                   </div>
                 ) : (

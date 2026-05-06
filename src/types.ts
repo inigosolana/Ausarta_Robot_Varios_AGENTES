@@ -33,8 +33,6 @@ export interface Empresa {
   crm_webhook_url?: string | null;
   /** Generic automation webhook (Zapier, Make, custom). Separate from CRM-specific crm_webhook_url. */
   webhook_url?: string | null;
-  /** Call credits balance. Each completed call deducts 1 credit. 0 = campaigns paused. */
-  creditos_llamadas?: number | null;
   /** Public URL of the company logo stored in Supabase Storage. */
   logo_url?: string | null;
   created_at?: string;
@@ -134,6 +132,8 @@ export interface SurveyResult {
   customer_name?: string | null;
   empresa_name?: string | null;
   recording_url?: string | null;
+  ai_analysis_done?: boolean | null;
+  comentarios_ai?: string | null;
 }
 
 export function getSentimiento(r: SurveyResult): Sentimiento {
@@ -146,16 +146,17 @@ export function getIdioma(r: SurveyResult): string | null {
   return r.datos_extra?.idioma ?? null;
 }
 
-// Mapeo canónico de disposición para gráficos
-export type CallDisposition = 'completed' | 'incomplete' | 'rejected' | 'failed' | 'pending';
+// Mapeo canónico de disposición para gráficos (usa los nombres del backend)
+export type CallDisposition = 'completed' | 'incomplete' | 'rejected_opt_out' | 'failed' | 'unreached' | 'pending';
 
 export function getCallDisposition(status: string | null): CallDisposition {
   if (!status) return 'pending';
   const s = status.toLowerCase();
   if (s === 'completada' || s === 'completed') return 'completed';
   if (s === 'parcial' || s === 'incomplete') return 'incomplete';
-  if (s === 'rechazada' || s === 'rejected_opt_out' || s === 'rejected') return 'rejected';
-  if (s === 'fallida' || s === 'failed' || s === 'no_contesta' || s === 'unreached') return 'failed';
+  if (s === 'rechazada' || s === 'rejected' || s === 'rejected_opt_out') return 'rejected_opt_out';
+  if (s === 'unreached' || s === 'no_contesta') return 'unreached';
+  if (s === 'fallida' || s === 'failed') return 'failed';
   return 'pending';
 }
 

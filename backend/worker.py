@@ -303,37 +303,12 @@ async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
 
     logger.info(f"[Orchestrator] {len(campaigns)} campaña(s) activa(s).")
 
-    # ── Paso 2: Verificar créditos por empresa (una query, no N queries) ──────
-    empresa_ids = list({c["empresa_id"] for c in campaigns if c.get("empresa_id")})
-    try:
-        emp_res = await sb_query(
-            lambda: supabase.table("empresas")
-            .select("id, creditos_llamadas")
-            .in_("id", empresa_ids)
-            .execute()
-        )
-        creditos_map = {
-            row["id"]: (row.get("creditos_llamadas") or 0)
-            for row in (emp_res.data or [])
-        }
-    except Exception as e:
-        logger.error(f"[Orchestrator] Error leyendo créditos de empresas: {e}")
-        creditos_map = {}
-
-    # ── Paso 3: Extraer leads pendientes de todas las campañas con créditos ───
+    # ── Paso 2: Extraer leads pendientes de todas las campañas activas ───
     leads_to_dispatch: list[dict] = []
 
     for camp in campaigns:
         camp_id = camp["id"]
         empresa_id = camp.get("empresa_id") or 0
-
-        creditos = creditos_map.get(empresa_id, 0)
-        if creditos <= 0:
-            logger.info(
-                f"[Orchestrator] Empresa {empresa_id} sin créditos. "
-                f"Skipping campaña {camp_id}."
-            )
-            continue
 
         try:
             leads_res = await sb_query(

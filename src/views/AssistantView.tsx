@@ -21,7 +21,7 @@ const AssistantView: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+    const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
 
     const quickActions = [
         "Resumen de hoy",

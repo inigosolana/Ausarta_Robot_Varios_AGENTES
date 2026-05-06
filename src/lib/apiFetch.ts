@@ -56,7 +56,7 @@ export async function apiFetch(
     url: string,
     options: RequestInit = {},
 ): Promise<Response> {
-    const API_URL = (import.meta.env.VITE_API_URL as string | undefined) || '';
+    const API_URL = ((import.meta as any).env.VITE_API_URL as string | undefined) || '';
 
     const token = await _resolveToken();
 
@@ -73,7 +73,14 @@ export async function apiFetch(
     }
 
     const fullUrl = url.startsWith('http') ? url : `${API_URL}${url}`;
-    const response = await fetch(fullUrl, { ...options, headers });
+    let response: Response;
+    try {
+        response = await fetch(fullUrl, { ...options, headers });
+    } catch (error) {
+        // Silent Fail para errores de red en consola, pero elevamos para la UI
+        console.debug('[apiFetch] Network error silently caught:', error);
+        throw new Error('Error de conexión con el servidor.');
+    }
 
     if (response.status === 401) {
         // Intentar refresh una sola vez antes de expulsar
@@ -89,6 +96,22 @@ export async function apiFetch(
 
         // El token definitivamente expiró o fue revocado → logout
         return _forceLogout();
+    }
+
+    if (!response.ok && response.status !== 204) {
+        // Intentar parsear el error del backend para elevar un mensaje amigable
+        try {
+            const errorData = await response.clone().json();
+            const message = errorData?.detail || errorData?.error || errorData?.message;
+            if (message) {
+                // Elevamos el error específico del backend (ej: "Sin saldo en OpenAI")
+                console.debug(`[apiFetch] HTTP ${response.status}:`, message);
+                throw new Error(message);
+            }
+        } catch (e) {
+            // Si no es JSON o no hay mensaje, logueamos en debug y dejamos que el componente maneje el status.
+            console.debug(`[apiFetch] Unparsed error HTTP ${response.status}`);
+        }
     }
 
     return response;

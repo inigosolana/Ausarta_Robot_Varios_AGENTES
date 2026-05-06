@@ -412,7 +412,7 @@ const TelephonyView: React.FC = () => {
                 '¿Estás seguro de que quieres forzar el cierre de TODAS las llamadas activas? Esto desbloqueará el sistema.'
               ))) {
                 try {
-                  const res = await fetch(`${import.meta.env.VITE_API_URL || '/api'}/calls/cleanup`, { method: 'POST' });
+                  const res = await fetch(`${(import.meta as any).env.VITE_API_URL || '/api'}/calls/cleanup`, { method: 'POST' });
                   if (res.ok) alert(t('✅ System cleaned successfully. All rooms have been cleared.', '✅ Sistema limpiado correctamente. Todas las salas han sido borradas.'));
                   else alert(t('❌ Error cleaning the rooms.', '❌ Error al limpiar las salas.'));
                 } catch {

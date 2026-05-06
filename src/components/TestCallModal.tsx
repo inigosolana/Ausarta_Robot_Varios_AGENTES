@@ -53,8 +53,8 @@ const TERMINAL_STATUSES = new Set([
 ]);
 
 const PHASE_TIMEOUT_MS = 5 * 60 * 1000;
-const API_URL = import.meta.env.VITE_API_URL || '';
-const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || 'wss://ausarta-robot-m7e6v2y5.livekit.cloud';
+const API_URL = (import.meta as any).env.VITE_API_URL || '';
+const LIVEKIT_URL = (import.meta as any).env.VITE_LIVEKIT_URL || 'wss://ausarta-robot-m7e6v2y5.livekit.cloud';
 
 function classifySpeaker(identity: string): { role: 'agent' | 'client'; label: string } {
     const lower = (identity || '').toLowerCase();

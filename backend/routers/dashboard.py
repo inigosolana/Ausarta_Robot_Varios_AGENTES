@@ -570,3 +570,42 @@ async def get_monitoring_token(room_name: str, identity: str = "supervisor"):
     except Exception as e:
         logger.error(f"Error generating monitoring token: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/dashboard/api-status")
+async def get_api_status():
+    """
+    Check the connectivity and basic status of external APIs like OpenAI and LiveKit.
+    Returns 'active' or 'inactive' to display in the UI Dashboard.
+    """
+    status = {
+        "openai": "inactive",
+        "livekit": "inactive",
+        "supabase": "active" if supabase else "inactive",
+    }
+
+    # Simple OpenAI Key check
+    if os.getenv("OPENAI_API_KEY"):
+        # Without making a real billing call, we assume active if key exists. 
+        # Optionally, one could ping https://api.openai.com/v1/models.
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://api.openai.com/v1/models",
+                    headers={"Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}"},
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
+                    if resp.status == 200:
+                        status["openai"] = "active"
+                    else:
+                        logger.warning(f"OpenAI API check failed with status: {resp.status}")
+        except Exception as e:
+            logger.warning(f"OpenAI API check error: {e}")
+
+    # Simple LiveKit check
+    if os.getenv("LIVEKIT_API_KEY") and os.getenv("LIVEKIT_URL"):
+        # Since LiveKit URL is often a WebSocket, checking it directly might be complex,
+        # but if lkapi is initialized, we can consider it active.
+        if lkapi:
+            status["livekit"] = "active"
+
+    return status

@@ -50,7 +50,7 @@ const AppShell: React.FC = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [hiddenAlerts, setHiddenAlerts] = useState<Set<number>>(new Set());
   const queryClient = useQueryClient();
-  const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
+  const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
 
   const isRootUser =
     realProfile?.email === 'admin@ausarta.net' ||
@@ -156,12 +156,15 @@ const AppShell: React.FC = () => {
         position="bottom-right"
         toastOptions={{ className: 'dark:bg-gray-800 dark:text-white border dark:border-gray-700' }}
       />
-      <div className="flex min-h-screen w-full bg-[#fcfcfc] dark:bg-gray-900 overflow-hidden text-gray-900 dark:text-gray-100 transition-colors duration-200 flex-col md:flex-row">
+      <div className="flex min-h-screen w-full bg-[#fcfcfc] dark:bg-slate-950 dark:bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] dark:from-slate-900 dark:via-slate-950 dark:to-black overflow-hidden text-gray-900 dark:text-gray-100 transition-colors duration-200 flex-col md:flex-row relative">
+        {/* Cyber-Ops decorative glow */}
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-cyan-500/10 dark:bg-cyan-500/5 blur-[120px] pointer-events-none" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-violet-500/10 dark:bg-violet-500/5 blur-[120px] pointer-events-none" />
 
         {/* ── Sidebar ── */}
-        <aside className={`${isSidebarOpen ? 'md:w-64' : 'md:w-20'} w-full border-b md:border-b-0 md:border-r border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-800 flex flex-col transition-all duration-300 ease-in-out`}>
-          <div className="p-4 flex items-center justify-between border-b border-gray-50 dark:border-gray-700">
-            <div className={`flex items-center gap-3 font-bold text-gray-800 dark:text-gray-100 overflow-hidden ${!isSidebarOpen && 'hidden'}`}>
+        <aside className={`${isSidebarOpen ? 'md:w-64' : 'md:w-20'} w-full border-b md:border-b-0 md:border-r border-gray-100 dark:border-cyan-900/30 bg-white/80 dark:bg-slate-900/40 backdrop-blur-xl flex flex-col transition-all duration-300 ease-in-out relative z-10`}>
+          <div className="p-4 flex items-center justify-between border-b border-gray-50 dark:border-cyan-900/30">
+            <div className={`flex items-center gap-3 font-bold text-gray-800 dark:text-cyan-50 overflow-hidden ${!isSidebarOpen && 'hidden'}`}>
               <img src="/ausarta.png" alt="Ausarta Logo" className="h-8 w-auto object-contain dark:invert" />
               <div className="flex flex-col">
                 <span className="text-lg leading-none tracking-tight">Ausarta</span>
@@ -170,7 +173,7 @@ const AppShell: React.FC = () => {
             </div>
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-1 hover:bg-gray-50 dark:hover:bg-gray-700 rounded text-gray-400 dark:text-gray-500"
+              className="p-1 hover:bg-gray-50 dark:hover:bg-cyan-900/30 rounded text-gray-400 dark:text-cyan-400/70 transition-colors"
             >
               {isSidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
             </button>
@@ -223,18 +226,18 @@ const AppShell: React.FC = () => {
           </nav>
 
           {/* User info + Logout */}
-          <div className="p-4 border-t border-gray-50 dark:border-gray-700 space-y-2">
+          <div className="p-4 border-t border-gray-50 dark:border-cyan-900/30 space-y-2">
             <div
               onClick={() => navigate('/profile')}
-              className={`flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded-xl transition-all ${!isSidebarOpen && 'justify-center'}`}
+              className={`flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-cyan-900/20 p-2 rounded-xl transition-all ${!isSidebarOpen && 'justify-center'} border border-transparent dark:hover:border-cyan-900/50`}
             >
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400 to-violet-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-[0_0_10px_rgba(0,240,255,0.3)]">
                 {(profile.full_name || profile.email).charAt(0).toUpperCase()}
               </div>
               {isSidebarOpen && (
                 <div className="overflow-hidden">
-                  <p className="font-medium text-gray-800 dark:text-gray-200 truncate text-xs">{profile.full_name || profile.email}</p>
-                  <p className="text-[10px] text-gray-400 dark:text-gray-500">{getRoleLabel()}</p>
+                  <p className="font-medium text-gray-800 dark:text-cyan-50 truncate text-xs">{profile.full_name || profile.email}</p>
+                  <p className="text-[10px] text-gray-400 dark:text-cyan-400/70">{getRoleLabel()}</p>
                 </div>
               )}
             </div>
@@ -367,10 +370,10 @@ const AppShell: React.FC = () => {
           {!isChatOpen && (
             <button
               onClick={() => setIsChatOpen(true)}
-              className="fixed bottom-8 right-8 w-16 h-16 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-2xl hover:bg-blue-700 transition-all hover:scale-110 active:scale-95 z-40 group overflow-hidden"
+              className="fixed bottom-8 right-8 w-16 h-16 bg-gradient-to-r from-cyan-500 to-violet-600 text-white rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(138,43,226,0.4)] hover:shadow-[0_0_30px_rgba(0,240,255,0.6)] transition-all hover:scale-110 active:scale-95 z-40 group overflow-hidden border border-white/10"
             >
-              <div className="absolute inset-0 bg-blue-500 rounded-full animate-ping opacity-20 pointer-events-none group-hover:block" />
-              <Bot size={28} />
+              <div className="absolute inset-0 bg-white/20 rounded-full animate-ping opacity-20 pointer-events-none group-hover:block" />
+              <Bot size={28} className="drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
             </button>
           )}
         </main>

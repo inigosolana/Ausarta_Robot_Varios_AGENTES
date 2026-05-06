@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import type { AgentConfig } from '../types';
 import { apiFetch } from '../lib/apiFetch';
 
-const API_URL = import.meta.env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8001/api';
+const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8001/api';
 
 const TestCallView: React.FC = () => {
     const { profile } = useAuth();

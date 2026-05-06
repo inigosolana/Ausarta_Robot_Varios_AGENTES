@@ -21,8 +21,9 @@ import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { DateRangePicker, getDatesFromRange, DateRange } from './DateRangePicker';
 import { LiveMonitoring } from './LiveMonitoring';
+import { ApiStatusWidget } from './ApiStatusWidget';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+const API_URL = (import.meta as any).env.VITE_API_URL || '';
 
 const STATUS_LABELS: Record<string, string> = {
     completed: 'Completadas', completada: 'Completadas',
@@ -105,18 +106,18 @@ interface StatCardProps {
 
 const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, color }) => {
     const colors = {
-        blue: 'bg-blue-50 text-blue-600',
-        green: 'bg-green-50 text-green-600',
-        purple: 'bg-purple-50 text-purple-600',
-        orange: 'bg-orange-50 text-orange-600',
+        blue: 'bg-cyan-50 text-cyan-600 dark:bg-cyan-900/20 dark:text-cyan-400',
+        green: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400',
+        purple: 'bg-violet-50 text-violet-600 dark:bg-violet-900/20 dark:text-violet-400',
+        orange: 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400',
     };
     return (
-        <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
+        <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl p-5 rounded-2xl border border-gray-100 dark:border-cyan-900/30 shadow-[0_0_15px_rgba(0,240,255,0.03)] hover:border-cyan-500/50 hover:shadow-[0_0_20px_rgba(0,240,255,0.1)] transition-all duration-300">
             <div className="flex items-center justify-between mb-3">
                 <div className={`p-2.5 rounded-lg ${colors[color]}`}><Icon size={22} /></div>
             </div>
-            <h3 className="text-sm font-medium text-gray-500">{title}</h3>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
+            <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</h3>
+            <p className="text-2xl font-bold text-gray-900 dark:text-cyan-50 mt-1">{value}</p>
         </div>
     );
 };
@@ -162,7 +163,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             fetch(`${API_URL}/api/dashboard/stats${queryStr}`),
             fetch(`${API_URL}/api/dashboard/recent-calls${queryStr}`),
             fetch(`${API_URL}/api/dashboard/top-performers${queryStr}`),
-            hideIntegrations ? Promise.resolve({ ok: true, json: () => [] } as Response) : fetch(`${API_URL}/api/dashboard/integrations`)
+            hideIntegrations ? Promise.resolve({ ok: true, json: () => [] } as any as Response) : fetch(`${API_URL}/api/dashboard/integrations`)
         ]);
         return {
             stats: statsRes.ok ? (await statsRes.json()) as DashboardStats : null,
@@ -249,19 +250,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="flex items-center gap-3">
                         <img src="/ausarta.png" alt="Logo" className="h-10 w-auto object-contain" />
                         <div>
-                            <h2 className="text-3xl font-bold text-gray-900">{t('Panel de Administración')}</h2>
-                            <p className="text-gray-500 text-sm">{t('Salud del sistema y estadísticas globales')}</p>
+                            <h2 className="text-3xl font-bold text-gray-900 dark:text-cyan-50 drop-shadow-[0_0_10px_rgba(0,240,255,0.3)]">{t('Panel de Administración')}</h2>
+                            <p className="text-gray-500 dark:text-cyan-400/70 text-sm">{t('Salud del sistema y estadísticas globales')}</p>
                         </div>
                     </div>
                 ) : (
                     <div>
-                        <h2 className="text-2xl font-bold text-gray-900">{title}</h2>
-                        <p className="text-gray-500 mt-1 text-sm">{t('Resumen de actividad')}</p>
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-cyan-50 drop-shadow-[0_0_10px_rgba(0,240,255,0.3)]">{title}</h2>
+                        <p className="text-gray-500 dark:text-cyan-400/70 mt-1 text-sm">{t('Resumen de actividad')}</p>
                     </div>
                 )}
                 <div className="flex flex-wrap items-center gap-2">
                     <DateRangePicker value={dateRange} onChange={setDateRange} />
-                    <button onClick={loadData} className="p-2 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors" title={t('Refrescar')}>
+                    <button onClick={() => loadData()} className="p-2 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors" title={t('Refrescar')}>
                         <RefreshCw size={18} className={isLoading ? "animate-spin" : "text-gray-500"} />
                     </button>
                 </div>
@@ -357,37 +358,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {/* Supervision & Integrations */}
                 <div className="lg:col-span-1 space-y-6">
                     <LiveMonitoring />
-                    {!hideIntegrations && integrations.length > 0 && (
-                        <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
-                            <h3 className="text-lg font-bold text-gray-800 mb-4">{t('Integraciones')}</h3>
-                            <div className="space-y-3">
-                                {integrations.map((int, i) => (
-                                    <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100">
-                                        <div className="flex items-center gap-3">
-                                            <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${int.active ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
-                                                <Zap size={18} />
-                                            </div>
-                                            <div>
-                                                <h4 className="text-sm font-bold text-gray-800">{int.name}</h4>
-                                                <p className="text-[10px] text-gray-500 uppercase">{int.provider}</p>
-                                            </div>
-                                        </div>
-                                        <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${int.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                            {int.active ? 'ONLINE' : 'OFFLINE'}
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
+                    {!hideIntegrations && (
+                        <ApiStatusWidget />
                     )}
                 </div>
 
                 {/* Recent Activity - ENRICHED */}
                 <div className="lg:col-span-2">
-                    <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                    <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl p-6 rounded-2xl border border-gray-100 dark:border-cyan-900/30 shadow-[0_0_15px_rgba(0,240,255,0.03)] overflow-hidden">
                         <div className="flex justify-between items-center mb-5">
-                            <h3 className="text-lg font-bold text-gray-800">{t('Última Actividad Global')}</h3>
-                            <button onClick={exportCSV} className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-all border border-blue-100">
+                            <h3 className="text-lg font-bold text-gray-800 dark:text-cyan-50">{t('Última Actividad Global')}</h3>
+                            <button onClick={exportCSV} className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-900/20 rounded-lg hover:bg-cyan-100 dark:hover:bg-cyan-900/40 transition-all border border-cyan-100 dark:border-cyan-800/50">
                                 <Download size={14} /> {t('Exportar CSV')}
                             </button>
                         </div>
