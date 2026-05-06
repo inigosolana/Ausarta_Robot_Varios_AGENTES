@@ -18,13 +18,19 @@ from services.livekit_service import lkapi, create_isolated_room, dispatch_agent
 from services.yeastar_service import YeastarPSeriesClient
 from services.auth import get_current_user, CurrentUser, require_admin, require_outbound_auth
 from services.crypto_service import encrypt_data, decrypt_data
+from services.rate_limiter import limiter
 from livekit import api
+from livekit.api import WebhookReceiver
 import aiohttp
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 import random
 import logging
+
+# Credenciales LiveKit para validar firmas de webhooks entrantes
+_LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "")
+_LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
 
 logger = logging.getLogger("api-backend")
 
@@ -185,21 +191,23 @@ async def validate_yeastar_ip(request: Request):
         logger.warning(f"🛡️ [Security] Blocked unauthorized webhook attempt from IP: {client_ip}")
         raise HTTPException(status_code=403, detail="Unauthorized IP")
 
+@limiter.exempt
 @router.post("/webhooks/yeastar")
-async def yeastar_webhook(request: Request, background_tasks: BackgroundTasks):
+async def yeastar_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    _=Depends(validate_yeastar_ip),  # Bloquea IPs no autorizadas si YEASTAR_IP_WHITELIST está configurado
+):
     """
     Recibe eventos de la centralita Yeastar (CallAnswered, CallHangup, etc.).
     Optimización: Procesa en segundo plano para evitar timeouts de la PBX.
     """
-    # Security: Basic check for User-Agent or format if IP whitelist not provided
-    # IP validation can be added via Depends(validate_yeastar_ip) if configured
-    
     try:
         payload = await request.json()
-        
+
         # Rendimiento: Responder inmediatamente y procesar en segundo plano
         background_tasks.add_task(_process_yeastar_event, payload)
-        
+
         return {"status": "ok", "message": "Event queued"}
     except Exception as e:
         logger.error(f"❌ Error recibiendo webhook de Yeastar: {e}")
@@ -498,41 +506,32 @@ async def _notify_n8n_post_call(encuesta_id: int, status: str, result_data: dict
 
 async def _deduct_credit(empresa_id: int) -> None:
     """
-    Descuenta 1 crédito de llamada a la empresa.
-    Si los créditos llegan a 0, pausa automáticamente todas sus campañas activas.
+    Descuenta 1 crédito de llamada a la empresa usando una función RPC atómica.
 
-    La deducción usa un UPDATE atómico con condición >= 1 para evitar saldos negativos.
-    SQL migration requerida (una sola vez en Supabase):
-        ALTER TABLE empresas ADD COLUMN IF NOT EXISTS creditos_llamadas INTEGER DEFAULT 0;
+    La atomicidad previene la race condition de leer-modificar-escribir cuando
+    múltiples llamadas concurrentes terminan al mismo tiempo para la misma empresa.
+    La función SQL solo resta si creditos_llamadas > 0, evitando saldos negativos.
     """
     if not supabase:
         return
     try:
-        # Leer créditos actuales
-        emp_res = await sb_query(
-            lambda: supabase.table("empresas").select("creditos_llamadas").eq("id", empresa_id).limit(1).execute()
+        result = await sb_query(
+            lambda: supabase.rpc(
+                "deduct_credit_atomic",
+                {"empresa_id_param": empresa_id}
+            ).execute()
         )
-        if not emp_res.data:
-            return
+        remaining = result.data  # La función devuelve los créditos restantes o NULL
 
-        current = emp_res.data[0].get("creditos_llamadas")
-        if current is None:
-            # columna no existe aún o no configurada — omitir silenciosamente
-            return
-
-        if current <= 0:
-            # Ya está a 0 — pausar campañas como medida de seguridad
+        if remaining is None:
+            # NULL: empresa no encontrada o créditos ya en 0 antes de intentar restar
+            logger.warning(f"⚠️ [Credits] Empresa {empresa_id}: RPC devolvió NULL (sin créditos o no existe). Pausando campañas.")
             await _pause_empresa_campaigns(empresa_id, reason="sin_creditos")
             return
 
-        # Decrementar (sólo si > 0 para evitar negativos)
-        new_credits = max(0, current - 1)
-        await sb_query(
-            lambda: supabase.table("empresas").update({"creditos_llamadas": new_credits}).eq("id", empresa_id).execute()
-        )
-        logger.info(f"💳 [Credits] Empresa {empresa_id}: {current} → {new_credits} créditos")
+        logger.info(f"💳 [Credits] Empresa {empresa_id}: créditos restantes → {remaining}")
 
-        if new_credits == 0:
+        if remaining == 0:
             logger.warning(f"🚫 [Credits] Empresa {empresa_id} sin créditos. Pausando campañas.")
             await _pause_empresa_campaigns(empresa_id, reason="sin_creditos")
 
@@ -723,6 +722,7 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
 # Webhook de LiveKit — sustituye al polling
 # ──────────────────────────────────────────────
 
+@limiter.exempt
 @router.post("/api/livekit/webhook")
 async def livekit_webhook(request: Request):
     """
@@ -732,25 +732,31 @@ async def livekit_webhook(request: Request):
       - room_finished: la sala se cerró (todos los participantes se fueron).
       - participant_left: un participante salió (para detectar cliente que cuelga).
 
-    Nota: LiveKit envía estos eventos firmados con el API Secret.
-    Para producción, valida la firma con livekit.api.WebhookReceiver.
+    Seguridad: Valida la firma HMAC del webhook usando WebhookReceiver antes
+    de procesar cualquier dato. Requests sin firma válida reciben un 401.
     """
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse(status_code=400, content={"error": "Invalid JSON"})
+    body_bytes = await request.body()
+    auth_token = request.headers.get("Authorization", "")
 
-    event = body.get("event", "")
-    room_info = body.get("room", {})
-    room_name = room_info.get("name", "")
-    room_metadata_raw = room_info.get("metadata")
+    # Validar firma criptográfica antes de procesar el payload
+    try:
+        receiver = WebhookReceiver(_LIVEKIT_API_KEY, _LIVEKIT_API_SECRET)
+        webhook_event = receiver.receive(body_bytes.decode("utf-8"), auth_token)
+    except Exception as e:
+        logger.warning(f"🛡️ [LK Webhook] Firma inválida o payload malformado: {e}")
+        return JSONResponse(status_code=401, content={"error": "Invalid signature"})
+
+    # Extraer campos del proto validado
+    event = webhook_event.event
+    room_name = webhook_event.room.name if webhook_event.HasField("room") else ""
+    room_metadata_raw = webhook_event.room.metadata if webhook_event.HasField("room") else ""
 
     logger.info(f"🔔 [LK Webhook] Evento: {event} | Sala: {room_name}")
 
     if not room_name:
         return {"status": "ignored", "reason": "No room name"}
 
-    # Extraer encuesta_id del nombre de sala (formato: {agent_prefix}_encuesta_{id})
+    # Parsear metadata de sala (JSON string embebido en el proto)
     room_metadata = {}
     if isinstance(room_metadata_raw, str) and room_metadata_raw.strip():
         try:
@@ -774,8 +780,7 @@ async def livekit_webhook(request: Request):
         await _handle_room_finished(encuesta_id, room_name, room_metadata)
 
     elif event == "participant_left":
-        participant = body.get("participant", {})
-        participant_identity = participant.get("identity", "")
+        participant_identity = webhook_event.participant.identity if webhook_event.HasField("participant") else ""
         # Solo nos interesa cuando el cliente (no el agente) se va
         if not participant_identity.startswith("agent-"):
             await _handle_participant_left(encuesta_id, room_name, participant_identity, room_metadata)
