@@ -853,6 +853,9 @@ async def _handle_room_finished(encuesta_id: int, room_name: str, room_metadata:
     """
     La sala se cerró. Si el estado en BD todavía no es terminal,
     significa que la llamada no se completó normalmente → marcamos 'failed'.
+
+    Si la encuesta tiene transcripción, encola el análisis con LLM vía ARQ
+    (process_transcription_ai) en lugar de llamar a n8n.
     """
     if not supabase:
         return
@@ -863,7 +866,7 @@ async def _handle_room_finished(encuesta_id: int, room_name: str, room_metadata:
     try:
         res = await asyncio.to_thread(
             supabase.table("encuestas")
-                .select("status, empresa_id, telefono")
+                .select("status, empresa_id, telefono, transcription")
                 .eq("id", encuesta_id)
                 .limit(1)
                 .execute
@@ -884,6 +887,30 @@ async def _handle_room_finished(encuesta_id: int, room_name: str, room_metadata:
             await _propagate_to_lead(encuesta_id, "failed", enc)
         else:
             logger.info(f"[LK Webhook] Sala {room_name} cerrada con status terminal: {current_status}. Sin acción.")
+
+        # Encolar análisis de transcripción vía ARQ (reemplaza llamada HTTP a n8n)
+        transcription = enc.get("transcription") or ""
+        empresa_id = enc.get("empresa_id")
+        if transcription.strip() and empresa_id:
+            try:
+                from services.queue_service import get_arq_pool
+                arq_pool = await get_arq_pool()
+                job = await arq_pool.enqueue_job(
+                    "process_transcription_ai",
+                    encuesta_id,
+                    transcription,
+                    empresa_id,
+                )
+                logger.info(
+                    f"📬 [LK Webhook] Tarea process_transcription_ai encolada para "
+                    f"encuesta {encuesta_id} (job_id={getattr(job, 'job_id', 'n/a')})."
+                )
+            except Exception as eq:
+                # No bloquear el flujo principal si la cola falla
+                logger.warning(f"⚠️ [LK Webhook] No se pudo encolar transcripción para encuesta {encuesta_id}: {eq}")
+        else:
+            logger.info(f"[LK Webhook] Encuesta {encuesta_id} sin transcripción o empresa_id. Skipping análisis AI.")
+
     except Exception as e:
         logger.error(f"❌ [LK Webhook] Error en room_finished para encuesta {encuesta_id}: {e}")
 

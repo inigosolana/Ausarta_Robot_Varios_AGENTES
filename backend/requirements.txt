@@ -18,3 +18,4 @@ supabase
 postgrest
 slowapi
 cryptography
+openai>=1.0.0

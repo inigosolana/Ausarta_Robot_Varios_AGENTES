@@ -20,9 +20,10 @@ Flujo de datos:
     encola dispatch_lead_drip_task por cada empresa sin lock activo.
 """
 import os
+import json
 import logging
 from typing import Any
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 
 from arq import cron
@@ -71,25 +72,13 @@ def _build_redis_settings() -> RedisSettings:
 async def startup(ctx: dict[str, Any]) -> None:
     """
     Inicialización del worker: conexiones compartidas entre tareas.
-
-    ctx es el diccionario compartido que ARQ inyecta en cada tarea.
-    Aquí inicializamos Supabase, LiveKit, y Redis (para locks) una
-    sola vez y los reutilizamos en todas las tareas del worker.
-
-    Fase 2 completará este bloque. Por ahora verifica conectividad.
+    ctx es inyectado por ARQ en cada tarea.
     """
     logger.info("🚀 [ARQ Worker] Arrancando...")
 
-    # Verificar que Redis responde (la conexión ARQ ya está establecida en ctx['redis'])
     redis: ArqRedis = ctx["redis"]
     await redis.set("ausarta:arq:worker_started", "1", ex=300)
     logger.info("✅ [ARQ Worker] Redis OK.")
-
-    # Fase 2 añadirá aquí:
-    # from services.supabase_service import supabase
-    # from services.livekit_service import lkapi
-    # ctx['supabase'] = supabase
-    # ctx['lkapi']    = lkapi
     logger.info("✅ [ARQ Worker] Listo para consumir tareas.")
 
 
@@ -98,8 +87,377 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     logger.info("🌙 [ARQ Worker] Apagando...")
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# PARTE 1: Procesamiento de transcripciones con LLM (asíncrono, max_tries=3)
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def process_transcription_ai(
+    ctx: dict[str, Any],
+    encuesta_id: int,
+    transcription: str,
+    empresa_id: int,
+) -> None:
+    """
+    Tarea ARQ: analiza la transcripción de una llamada con un LLM y persiste
+    los resultados estructurados (notas + comentario) en la tabla encuestas.
+
+    Registrada con max_tries=3 en WorkerSettings para tolerar errores
+    transitorios de la API de OpenAI (rate limits, timeouts de red).
+
+    Flujo:
+        1. Obtener prompt de sistema de la empresa (agent_config → system_prompt).
+        2. Llamar a OpenAI con la transcripción.
+        3. Parsear JSON de respuesta.
+        4. UPDATE en encuestas con las notas y comentarios extraídos.
+    """
+    from services.supabase_service import supabase, sb_query
+    import openai
+
+    logger.info(
+        f"🤖 [TranscriptionAI] Iniciando análisis encuesta={encuesta_id}, "
+        f"empresa={empresa_id}, chars={len(transcription)}"
+    )
+
+    if not supabase:
+        logger.error("[TranscriptionAI] Supabase no disponible. Abortando.")
+        return
+
+    if not transcription or not transcription.strip():
+        logger.warning(f"[TranscriptionAI] Transcripción vacía para encuesta {encuesta_id}. Skipping.")
+        return
+
+    # ── Paso 1: Obtener el prompt de sistema de la empresa ────────────────────
+    system_prompt_extra = ""
+    try:
+        agent_res = await sb_query(
+            lambda: supabase.table("agent_config")
+            .select("system_prompt")
+            .eq("empresa_id", empresa_id)
+            .limit(1)
+            .execute()
+        )
+        if agent_res.data:
+            system_prompt_extra = agent_res.data[0].get("system_prompt") or ""
+    except Exception as e:
+        logger.warning(f"[TranscriptionAI] No se pudo leer agent_config empresa {empresa_id}: {e}")
+
+    analysis_system_prompt = (
+        "Eres un analizador experto de llamadas comerciales en español. "
+        "Recibirás la transcripción completa de una llamada entre un agente IA y un cliente. "
+        "Tu tarea es extraer las valoraciones y el comentario clave.\n\n"
+        "RESPONDE ÚNICAMENTE con un JSON válido (sin markdown, sin explicaciones) con esta estructura exacta:\n"
+        "{\n"
+        '  "nota_comercial": <número 1-10 o null>,\n'
+        '  "nota_instalador": <número 1-10 o null>,\n'
+        '  "nota_rapidez": <número 1-10 o null>,\n'
+        '  "comentario_resumen": "<resumen en 1-3 frases del feedback del cliente>"\n'
+        "}\n\n"
+        "Si una nota no fue mencionada en la llamada, devuelve null para ese campo.\n"
+        f"{('Contexto adicional del agente: ' + system_prompt_extra) if system_prompt_extra else ''}"
+    )
+
+    # ── Paso 2: Llamar al LLM ─────────────────────────────────────────────────
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        logger.error("[TranscriptionAI] OPENAI_API_KEY no configurada. Abortando.")
+        return
+
+    client = openai.AsyncOpenAI(api_key=openai_api_key)
+    try:
+        logger.info(f"[TranscriptionAI] Enviando transcripción a OpenAI para encuesta {encuesta_id}...")
+        response = await client.chat.completions.create(
+            model=os.getenv("TRANSCRIPTION_LLM_MODEL", "gpt-4o-mini"),
+            messages=[
+                {"role": "system", "content": analysis_system_prompt},
+                {"role": "user", "content": f"TRANSCRIPCIÓN:\n{transcription}"},
+            ],
+            temperature=0.1,   # Baja temperatura para respuestas deterministas
+            max_tokens=512,
+            response_format={"type": "json_object"},
+        )
+        raw_json = response.choices[0].message.content or "{}"
+        logger.info(f"[TranscriptionAI] Respuesta LLM encuesta {encuesta_id}: {raw_json[:200]}")
+    except openai.RateLimitError as e:
+        # Forzamos excepción para que ARQ reintente (max_tries=3)
+        logger.warning(f"[TranscriptionAI] Rate limit OpenAI encuesta {encuesta_id}: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"[TranscriptionAI] Error llamando a OpenAI para encuesta {encuesta_id}: {e}")
+        raise  # Propagar para que ARQ reintente
+
+    # ── Paso 3: Parsear JSON de respuesta ─────────────────────────────────────
+    try:
+        extracted = json.loads(raw_json)
+    except json.JSONDecodeError as e:
+        logger.error(f"[TranscriptionAI] JSON inválido del LLM encuesta {encuesta_id}: {e} | raw={raw_json}")
+        return  # No reintentamos un JSON malformado; es error del modelo
+
+    # ── Paso 4: Persistir resultados en Supabase ──────────────────────────────
+    update_payload: dict = {"ai_analysis_done": True}
+
+    nota_comercial = extracted.get("nota_comercial")
+    nota_instalador = extracted.get("nota_instalador")
+    nota_rapidez = extracted.get("nota_rapidez")
+    comentario = extracted.get("comentario_resumen")
+
+    # Solo actualizamos campos con valor real para no sobrescribir datos del agente
+    if isinstance(nota_comercial, (int, float)) and 1 <= nota_comercial <= 10:
+        update_payload["puntuacion_comercial"] = nota_comercial
+    if isinstance(nota_instalador, (int, float)) and 1 <= nota_instalador <= 10:
+        update_payload["puntuacion_instalador"] = nota_instalador
+    if isinstance(nota_rapidez, (int, float)) and 1 <= nota_rapidez <= 10:
+        update_payload["puntuacion_rapidez"] = nota_rapidez
+    if comentario:
+        update_payload["comentarios_ai"] = str(comentario)[:1000]  # Limitar longitud
+
+    try:
+        await sb_query(
+            lambda: supabase.table("encuestas")
+            .update(update_payload)
+            .eq("id", encuesta_id)
+            .execute()
+        )
+        logger.info(
+            f"✅ [TranscriptionAI] Encuesta {encuesta_id} actualizada: "
+            f"comercial={nota_comercial}, instalador={nota_instalador}, "
+            f"rapidez={nota_rapidez}"
+        )
+    except Exception as e:
+        logger.error(f"[TranscriptionAI] Error guardando en Supabase encuesta {encuesta_id}: {e}")
+        raise  # Propagar para reintento ARQ
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PARTE 2: Orquestador nativo de campañas (Cron ARQ — cada minuto)
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
+    """
+    Cron ARQ: se ejecuta cada minuto.
+
+    Orquesta el lanzamiento de llamadas para campañas activas de forma nativa,
+    sin depender de n8n. Implementa:
+      - Filtrado de empresas sin créditos.
+      - Extracción de leads pendientes con next_retry_at <= now.
+      - Concurrencia limitada con asyncio.Semaphore(5) para no saturar LiveKit.
+      - Actualización de estado del lead a 'calling' antes del dispatch.
+    """
+    from services.supabase_service import supabase, sb_query
+    from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
+    from livekit import api as lk_api
+
+    if not supabase:
+        logger.warning("[Orchestrator] Supabase no disponible. Skipping ciclo.")
+        return
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    batch_size = int(os.getenv("ORCHESTRATOR_BATCH_SIZE", "10"))
+    max_parallel = int(os.getenv("ORCHESTRATOR_MAX_PARALLEL", "5"))
+
+    logger.info(f"[Orchestrator] ▶ Ciclo iniciado. batch={batch_size}, max_parallel={max_parallel}")
+
+    # ── Paso 1: Campañas activas ──────────────────────────────────────────────
+    try:
+        camp_res = await sb_query(
+            lambda: supabase.table("campaigns")
+            .select("id, empresa_id, name, agent_id")
+            .eq("status", "active")
+            .execute()
+        )
+        campaigns = camp_res.data or []
+    except Exception as e:
+        logger.error(f"[Orchestrator] Error leyendo campañas activas: {e}")
+        return
+
+    if not campaigns:
+        logger.info("[Orchestrator] Sin campañas activas. Fin de ciclo.")
+        return
+
+    logger.info(f"[Orchestrator] {len(campaigns)} campaña(s) activa(s).")
+
+    # ── Paso 2: Verificar créditos por empresa (una query, no N queries) ──────
+    empresa_ids = list({c["empresa_id"] for c in campaigns if c.get("empresa_id")})
+    try:
+        emp_res = await sb_query(
+            lambda: supabase.table("empresas")
+            .select("id, creditos_llamadas")
+            .in_("id", empresa_ids)
+            .execute()
+        )
+        creditos_map = {
+            row["id"]: (row.get("creditos_llamadas") or 0)
+            for row in (emp_res.data or [])
+        }
+    except Exception as e:
+        logger.error(f"[Orchestrator] Error leyendo créditos de empresas: {e}")
+        creditos_map = {}
+
+    # ── Paso 3: Extraer leads pendientes de todas las campañas con créditos ───
+    leads_to_dispatch: list[dict] = []
+
+    for camp in campaigns:
+        camp_id = camp["id"]
+        empresa_id = camp.get("empresa_id") or 0
+
+        creditos = creditos_map.get(empresa_id, 0)
+        if creditos <= 0:
+            logger.info(
+                f"[Orchestrator] Empresa {empresa_id} sin créditos. "
+                f"Skipping campaña {camp_id}."
+            )
+            continue
+
+        try:
+            leads_res = await sb_query(
+                lambda: supabase.table("campaign_leads")
+                .select("id, phone_number, campaign_id, empresa_id")
+                .eq("campaign_id", camp_id)
+                .eq("status", "pending")
+                .or_(f"next_retry_at.is.null,next_retry_at.lte.{now_iso}")
+                .order("next_retry_at", desc=False, nullsfirst=True)
+                .limit(batch_size)
+                .execute()
+            )
+            batch = leads_res.data or []
+            if batch:
+                logger.info(
+                    f"[Orchestrator] Campaña {camp_id} (empresa {empresa_id}): "
+                    f"{len(batch)} lead(s) pendiente(s)."
+                )
+            # Adjuntar metadata de campaña al lead para el dispatch
+            for lead in batch:
+                lead["_campaign_agent_id"] = camp.get("agent_id")
+                lead["_campaign_name"] = camp.get("name", "")
+            leads_to_dispatch.extend(batch)
+        except Exception as e:
+            logger.error(f"[Orchestrator] Error leyendo leads campaña {camp_id}: {e}")
+
+    if not leads_to_dispatch:
+        logger.info("[Orchestrator] Sin leads pendientes. Fin de ciclo.")
+        return
+
+    logger.info(f"[Orchestrator] Total leads a despachar: {len(leads_to_dispatch)}")
+
+    # ── Paso 4: Dispatch con concurrencia limitada ────────────────────────────
+    semaphore = asyncio.Semaphore(max_parallel)
+
+    async def _dispatch_one(lead: dict) -> None:
+        """Despacha una sola llamada SIP respetando el semáforo global."""
+        lead_id = lead["id"]
+        phone = lead.get("phone_number", "")
+        camp_id = lead.get("campaign_id")
+        empresa_id = lead.get("empresa_id") or 0
+        agent_id = lead.get("_campaign_agent_id") or "1"
+        camp_name = lead.get("_campaign_name", "")
+
+        if not phone:
+            logger.warning(f"[Orchestrator] Lead {lead_id} sin teléfono. Skipping.")
+            return
+
+        async with semaphore:
+            try:
+                # 1. Marcar el lead como 'calling' antes del dispatch para evitar
+                #    que el siguiente tick del cron lo vuelva a coger.
+                await sb_query(
+                    lambda: supabase.table("campaign_leads")
+                    .update({
+                        "status": "calling",
+                        "last_call_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    .eq("id", lead_id)
+                    .execute()
+                )
+                logger.info(f"[Orchestrator] Lead {lead_id} marcado como 'calling'.")
+
+                # 2. Crear encuesta
+                enc_res = await sb_query(
+                    lambda: supabase.table("encuestas").insert({
+                        "telefono": phone,
+                        "fecha": datetime.now(timezone.utc).isoformat(),
+                        "status": "initiated",
+                        "completada": 0,
+                        "agent_id": agent_id,
+                        "empresa_id": empresa_id,
+                        "campaign_id": camp_id,
+                        "campaign_name": camp_name,
+                    }).execute()
+                )
+                encuesta_id = enc_res.data[0]["id"]
+
+                # 3. Vincular encuesta al lead
+                await sb_query(
+                    lambda: supabase.table("campaign_leads")
+                    .update({"call_id": encuesta_id})
+                    .eq("id", lead_id)
+                    .execute()
+                )
+
+                # 4. Construir nombre de sala y metadata
+                room_name = (
+                    f"llamada_ausarta_empresa_{empresa_id}"
+                    f"_campana_{camp_id}"
+                    f"_contacto_{lead_id}"
+                    f"_encuesta_{encuesta_id}"
+                )
+                room_metadata = {
+                    "empresa_id": int(empresa_id),
+                    "campaign_id": int(camp_id or 0),
+                    "campana_id": int(camp_id or 0),
+                    "contacto_id": int(lead_id),
+                    "client_id": int(lead_id),
+                    "lead_id": int(lead_id),
+                    "survey_id": int(encuesta_id),
+                }
+
+                # 5. Crear sala LiveKit
+                await create_isolated_room(room_name, metadata=room_metadata)
+
+                # 6. Despachar agente antes del SIP (para que esté listo cuando conteste)
+                agent_name = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
+                await dispatch_agent_explicit(
+                    room_name=room_name,
+                    agent_name=agent_name,
+                    metadata=room_metadata,
+                )
+                logger.info(f"[Orchestrator] Agente despachado para lead {lead_id} en sala {room_name}.")
+
+                await asyncio.sleep(float(os.getenv("DRIP_AGENT_JOIN_DELAY_SECONDS", "3")))
+
+                # 7. Crear participante SIP
+                sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
+                await lkapi.sip.create_sip_participant(
+                    lk_api.CreateSIPParticipantRequest(
+                        sip_trunk_id=sip_trunk_id,
+                        sip_call_to=phone,
+                        room_name=room_name,
+                        participant_identity=f"user_{phone}_{encuesta_id}",
+                        participant_name="Cliente",
+                    )
+                )
+                logger.info(f"✅ [Orchestrator] Llamada SIP iniciada para lead {lead_id} → {phone}.")
+
+            except Exception as e:
+                logger.error(
+                    f"❌ [Orchestrator] Error despachando lead {lead_id} ({phone}): {e}"
+                )
+                # Revertir estado del lead a 'pending' para que sea reintentado
+                try:
+                    await sb_query(
+                        lambda: supabase.table("campaign_leads")
+                        .update({"status": "pending"})
+                        .eq("id", lead_id)
+                        .execute()
+                    )
+                except Exception as revert_err:
+                    logger.error(f"[Orchestrator] Error revirtiendo lead {lead_id}: {revert_err}")
+
+    # Lanzar todos los dispatches con control de concurrencia
+    await asyncio.gather(*[_dispatch_one(lead) for lead in leads_to_dispatch])
+    logger.info("[Orchestrator] ◀ Ciclo completado.")
+
+
 # ──────────────────────────────────────────────
-# Tareas (stubs — Fase 2 implementa el cuerpo)
+# Tareas heredadas del sistema de goteo (drip)
 # ──────────────────────────────────────────────
 
 async def campaign_scheduler_task(ctx: dict[str, Any]) -> None:
@@ -297,37 +655,52 @@ class WorkerSettings:
     on_startup  = startup
     on_shutdown = shutdown
 
-    # Tareas disponibles para enqueue_job()
+    # Todas las tareas disponibles para enqueue_job()
     functions = [
         campaign_scheduler_task,
         dispatch_lead_drip_task,
+        process_transcription_ai,
+        campaign_orchestrator,
     ]
 
-    # Cron: scanner de campañas cada 30 segundos
-    # second={0, 30} → dispara en el segundo :00 y :30 de cada minuto
+    # Cron jobs:
+    #   - campaign_scheduler_task: cada 30s (sistema de goteo legacy)
+    #   - campaign_orchestrator: cada 60s (orquestador nativo, sin n8n)
     cron_jobs = [
         cron(
             campaign_scheduler_task,
             second={0, 30},
-            unique=True,   # no encolar si la instancia anterior no ha terminado
-            timeout=25,    # debe terminar antes del siguiente tick (30s)
-        )
+            unique=True,   # No encolar si la instancia anterior no ha terminado
+            timeout=25,    # Debe terminar antes del siguiente tick (30s)
+        ),
+        cron(
+            campaign_orchestrator,
+            minute=None,   # Cada minuto (minute=None → todos los minutos)
+            unique=True,   # No encolar si el ciclo anterior sigue corriendo
+            timeout=55,    # Debe terminar antes del siguiente minuto
+        ),
     ]
 
-    # Concurrencia: 1 tarea de goteo activa por empresa (el lock Redis lo garantiza),
-    # pero múltiples empresas pueden tener su goteo simultáneo.
+    # Concurrencia global del worker
     max_jobs: int = int(os.getenv("ARQ_MAX_JOBS", "10"))
 
-    # Timeout: llamada SIP (max 300s) + cooldown (max 180s) + margen de seguridad
+    # Timeout: llamada SIP (max 300s) + cooldown (max 180s) + margen de seguridad.
+    # process_transcription_ai usa max_tries=3 propio; el job_timeout global
+    # cubre el caso de un cuelgue de red total.
     job_timeout: int = int(os.getenv("ARQ_JOB_TIMEOUT", "660"))
 
     # Conservar resultado de cada job 5 minutos (útil para debugging)
     keep_result: int = 300
 
-    # No reintentar automáticamente: el drip gestiona sus propios reintentos
-    # vía _apply_retry_after_failure(). Evita llamadas duplicadas.
+    # Por defecto sin reintentos (el drip gestiona los suyos).
+    # process_transcription_ai sobreescribe esto con max_tries=3.
     max_tries: int = 1
 
     # Health check en Redis cada 60s
     health_check_interval: int = 60
     health_check_key: str      = "ausarta:arq:health"
+
+
+# Registro de max_tries específico por tarea.
+# ARQ lee esta propiedad si se define como atributo de la función.
+process_transcription_ai.max_tries = 3  # type: ignore[attr-defined]
