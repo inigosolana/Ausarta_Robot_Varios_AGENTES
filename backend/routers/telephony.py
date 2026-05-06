@@ -484,25 +484,6 @@ async def _notify_n8n_post_call(encuesta_id: int, status: str, result_data: dict
         except Exception as e:
             logger.warning(f"⚠️ Error en CRM Webhook: {e}")
 
-    # También notificar al webhook global de n8n si está configurado
-    n8n_results_url = os.getenv("N8N_WEBHOOK_URL_RESULTS")
-    if not n8n_results_url:
-        return
-    try:
-        n8n_payload = {
-            "encuesta_id": encuesta_id,
-            "empresa_id": empresa_id,
-            "telefono": telefono,
-            "status": status,
-            "resultados": result_data,
-            "transcription": result_data.get("transcription"),
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(n8n_results_url, json=n8n_payload, timeout=10) as resp:
-                logger.info(f"📡 n8n results webhook [{status}] → {resp.status}")
-    except Exception as e:
-        logger.warning(f"⚠️ Error en n8n results webhook: {e}")
-
 
 async def _deduct_credit(empresa_id: int) -> None:
     """

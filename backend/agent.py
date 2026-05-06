@@ -488,20 +488,8 @@ class DynamicAgent(Agent):
         except Exception as e:
             logger.error(f"❌ Error al saludar: {e}")
 
-    async def notify_n8n_transcription(self, survey_id: str, messages: list):
-        """Envía la transcripción cruda a n8n para que él la procese."""
-        webhook_url = os.getenv("N8N_WEBHOOK_URL_TRANSCRIPTS") or os.getenv("N8N_WEBHOOK_URL")
-        if not webhook_url: return
-        try:
-            payload = {
-                "survey_id": survey_id,
-                "room_name": self.room_name,
-                "messages": messages
-            }
-            async with aiohttp.ClientSession() as session:
-                await session.post(webhook_url, json=payload, timeout=5)
-        except Exception as e:
-            logger.error(f"Error enviando a n8n: {e}")
+
+
 
     @function_tool(name="guardar_encuesta")
     async def _http_tool_guardar_encuesta(
@@ -756,18 +744,16 @@ async def fetch_agent_config(survey_id: str, expected_empresa_id: str = "0") -> 
 
 
 # ============================================================================
-# FUNCIÓN PARA ENVIAR ALERTAS A N8N
+# FUNCIÓN PARA ENVIAR ALERTAS AL SISTEMA (VÍA ARQ)
 # ============================================================================
-async def notify_n8n_alert(message: str, details: Optional[dict] = None):
-    webhook_url = os.getenv("N8N_WEBHOOK_URL_ALERTS")
-    if not webhook_url:
-        return
+async def notify_system_alert(message: str, details: Optional[dict] = None):
     try:
-        async with aiohttp.ClientSession() as session:
-            payload = {"message": message, "details": details or {}}
-            await session.post(webhook_url, json=payload, timeout=5)
+        from backend.services.queue_service import get_arq_pool
+        redis = await get_arq_pool()
+        await redis.enqueue_job("process_system_alert", message, details)
+        logger.info(f"📡 Alerta del sistema encolada: {message}")
     except Exception as e:
-        logger.error(f"❌ Error sending alert to n8n: {e}")
+        logger.error(f"❌ Error encolando alerta del sistema: {e}")
 
 # ============================================================================
 # SERVIDOR Y ENTRYPOINT DINÁMICO
@@ -786,10 +772,10 @@ async def entrypoint(ctx: JobContext):
         msg = str(error)
         if "429" in msg or "Rate Limit" in msg or "insufficient_quota" in msg: 
             logger.error(f"🚨🚨🚨 ALERTA (Job {job_id}): Límite de API Alcanzado")
-            asyncio.create_task(notify_n8n_alert("Límite de API Alcanzado (Error 429)", {"job_id": job_id, "error": msg}))
+            asyncio.create_task(notify_system_alert("Límite de API Alcanzado (Error 429)", {"job_id": job_id, "error": msg}))
         else:
             logger.error(f"⚠️ ERROR DEL AGENTE (Job {job_id}): {error}")
-            asyncio.create_task(notify_n8n_alert("Error en Agente LiveKit", {"job_id": job_id, "error": msg}))
+            asyncio.create_task(notify_system_alert("Error en Agente LiveKit", {"job_id": job_id, "error": msg}))
 
     async def _safe_reject(reason: str):
         logger.error(f"🚫 [{job_id}] Job rechazado: {reason}")

@@ -228,6 +228,34 @@ async def process_transcription_ai(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# TAREA: Envío de Alertas del Sistema
+# ──────────────────────────────────────────────────────────────────────────────
+async def process_system_alert(ctx: dict[str, Any], message: str, details: dict = None) -> None:
+    """
+    Procesa las alertas del sistema enviándolas a una tabla de base de datos,
+    o simplemente logueándolas de forma centralizada (reemplazo de n8n).
+    """
+    logger.error(f"🚨 ALERTA DEL SISTEMA: {message} | Detalles: {json.dumps(details or {})}")
+    from services.supabase_service import supabase, sb_query
+    if not supabase:
+        return
+    
+    try:
+        # Intentamos guardar la alerta en "system_logs" si la tabla existe.
+        await sb_query(
+            lambda: supabase.table("system_logs").insert({
+                "level": "error",
+                "message": message,
+                "metadata": details or {}
+            }).execute()
+        )
+    except Exception:
+        # Silenciamos el error si la tabla no existe en este proyecto
+        pass
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # PARTE 2: Orquestador nativo de campañas (Cron ARQ — cada minuto)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -660,6 +688,7 @@ class WorkerSettings:
         campaign_scheduler_task,
         dispatch_lead_drip_task,
         process_transcription_ai,
+        process_system_alert,
         campaign_orchestrator,
     ]
 
