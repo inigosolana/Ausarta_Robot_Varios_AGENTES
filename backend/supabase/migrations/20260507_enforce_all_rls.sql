@@ -3,15 +3,20 @@
 -- Auditoría de Row Level Security: activar RLS y políticas
 -- multi-tenant estrictas en todas las tablas de negocio.
 --
--- Contexto: La tabla `empresas` ya tiene RLS (20260420).
--- Esta migración extiende el mismo nivel de seguridad al
--- resto de tablas que el frontend consulta directamente:
+-- Tablas cubiertas:
+--   - empresas
 --   - user_profiles
 --   - user_permissions
---   - agents
---   - call_logs
+--   - agent_config
+--   - ai_config
+--   - campaigns
+--   - campaign_leads
+--   - encuestas
 --   - audit_logs
---   - yeastar_tenant_config (si existe)
+--   - prompt_templates
+--   - company_yeastar_configs
+--   - api_usage_cache
+--   - ui_cache
 --
 -- PATRÓN GENERAL de aislamiento multi-tenant:
 --   SELECT/UPDATE: solo filas donde empresa_id = empresa_id del usuario
@@ -19,282 +24,173 @@
 --   Superadmin: acceso total (bypass de las restricciones de tenant)
 -- =============================================================
 
+-- 1. EMPRESAS
+ALTER TABLE public.empresas ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Superadmins have full access" ON public.empresas;
+DROP POLICY IF EXISTS "Users can view their own company" ON public.empresas;
+DROP POLICY IF EXISTS "Admins can update their own company" ON public.empresas;
 
--- =============================================================
--- HELPER: función auxiliar para obtener el empresa_id del usuario
--- autenticado sin repetir la subquery en cada política.
--- =============================================================
-CREATE OR REPLACE FUNCTION auth.user_empresa_id()
-RETURNS integer
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-AS $$
-    SELECT empresa_id
-    FROM user_profiles
-    WHERE id = auth.uid()
-    LIMIT 1;
-$$;
+CREATE POLICY "Superadmins have full access" ON public.empresas FOR ALL TO authenticated
+USING (EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'superadmin'));
 
-CREATE OR REPLACE FUNCTION auth.user_role()
-RETURNS text
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-AS $$
-    SELECT role
-    FROM user_profiles
-    WHERE id = auth.uid()
-    LIMIT 1;
-$$;
+CREATE POLICY "Users can view their own company" ON public.empresas FOR SELECT TO authenticated
+USING (id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1));
 
+CREATE POLICY "Admins can update their own company" ON public.empresas FOR UPDATE TO authenticated
+USING (id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role IN ('admin', 'superadmin')))
+WITH CHECK (id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role IN ('admin', 'superadmin')));
 
--- =============================================================
--- TABLA: user_profiles
--- =============================================================
-ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
+-- 2. USER PROFILES
+ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "up: superadmin acceso total" ON public.user_profiles;
+DROP POLICY IF EXISTS "up: tenant ve sus usuarios" ON public.user_profiles;
+DROP POLICY IF EXISTS "up: usuario ve su propio perfil" ON public.user_profiles;
+DROP POLICY IF EXISTS "up: usuario actualiza su perfil" ON public.user_profiles;
 
-DROP POLICY IF EXISTS "up: superadmin acceso total"          ON user_profiles;
-DROP POLICY IF EXISTS "up: usuario ve su propio perfil"      ON user_profiles;
-DROP POLICY IF EXISTS "up: admin ve usuarios de su empresa"  ON user_profiles;
-DROP POLICY IF EXISTS "up: usuario actualiza su perfil"      ON user_profiles;
-DROP POLICY IF EXISTS "up: admin actualiza usuarios empresa" ON user_profiles;
+CREATE POLICY "up: superadmin acceso total" ON public.user_profiles FOR ALL TO authenticated
+USING (EXISTS (SELECT 1 FROM public.user_profiles up WHERE up.id = auth.uid() AND up.role = 'superadmin'));
 
--- Superadmin: acceso total a todos los perfiles
-CREATE POLICY "up: superadmin acceso total" ON user_profiles
-FOR ALL TO authenticated
-USING (auth.user_role() = 'superadmin');
+CREATE POLICY "up: tenant ve sus usuarios" ON public.user_profiles FOR SELECT TO authenticated
+USING (empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1));
 
--- Admin y user: solo ven perfiles de su mismo empresa_id
-CREATE POLICY "up: admin ve usuarios de su empresa" ON user_profiles
-FOR SELECT TO authenticated
-USING (
-    empresa_id = auth.user_empresa_id()
-    AND auth.user_role() IN ('admin', 'user')
-);
+CREATE POLICY "up: usuario ve su propio perfil" ON public.user_profiles FOR SELECT TO authenticated USING (id = auth.uid());
+CREATE POLICY "up: usuario actualiza su perfil" ON public.user_profiles FOR UPDATE TO authenticated USING (id = auth.uid()) WITH CHECK (id = auth.uid());
 
--- Usuario: puede leer y actualizar su propio perfil (campos no sensibles)
-CREATE POLICY "up: usuario actualiza su perfil" ON user_profiles
-FOR UPDATE TO authenticated
-USING (id = auth.uid())
-WITH CHECK (id = auth.uid());
+-- 3. USER PERMISSIONS
+ALTER TABLE public.user_permissions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "perm: superadmin acceso total" ON public.user_permissions;
+DROP POLICY IF EXISTS "perm: usuario ve sus permisos" ON public.user_permissions;
+DROP POLICY IF EXISTS "perm: admin gestiona permisos empresa" ON public.user_permissions;
 
--- Admin: puede actualizar perfiles de usuarios de su empresa
-CREATE POLICY "up: admin actualiza usuarios empresa" ON user_profiles
-FOR UPDATE TO authenticated
-USING (
-    empresa_id = auth.user_empresa_id()
-    AND auth.user_role() = 'admin'
-)
-WITH CHECK (
-    empresa_id = auth.user_empresa_id()
-    AND auth.user_role() = 'admin'
-);
+CREATE POLICY "perm: superadmin acceso total" ON public.user_permissions FOR ALL TO authenticated
+USING (EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'superadmin'));
 
+CREATE POLICY "perm: usuario ve sus permisos" ON public.user_permissions FOR SELECT TO authenticated USING (user_id = auth.uid());
 
--- =============================================================
--- TABLA: user_permissions
--- =============================================================
-ALTER TABLE user_permissions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "perm: admin gestiona permisos empresa" ON public.user_permissions FOR ALL TO authenticated
+USING (EXISTS (SELECT 1 FROM public.user_profiles up WHERE up.id = user_permissions.user_id AND up.empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1)) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'admin'))
+WITH CHECK (EXISTS (SELECT 1 FROM public.user_profiles up WHERE up.id = user_permissions.user_id AND up.empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1)) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'admin'));
 
-DROP POLICY IF EXISTS "perm: superadmin acceso total"        ON user_permissions;
-DROP POLICY IF EXISTS "perm: usuario ve sus permisos"        ON user_permissions;
-DROP POLICY IF EXISTS "perm: admin ve permisos de empresa"   ON user_permissions;
-DROP POLICY IF EXISTS "perm: admin gestiona permisos empresa" ON user_permissions;
+-- 4. AGENT CONFIG
+ALTER TABLE public.agent_config ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "agents: superadmin acceso total" ON public.agent_config;
+DROP POLICY IF EXISTS "agents: tenant solo ve los suyos" ON public.agent_config;
+DROP POLICY IF EXISTS "agents: admin gestiona los suyos" ON public.agent_config;
 
--- Superadmin: acceso total
-CREATE POLICY "perm: superadmin acceso total" ON user_permissions
-FOR ALL TO authenticated
-USING (auth.user_role() = 'superadmin');
+CREATE POLICY "agents: superadmin acceso total" ON public.agent_config FOR ALL TO authenticated
+USING (EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'superadmin'));
 
--- Usuario: solo puede leer sus propios permisos
-CREATE POLICY "perm: usuario ve sus permisos" ON user_permissions
-FOR SELECT TO authenticated
-USING (user_id = auth.uid());
+CREATE POLICY "agents: tenant solo ve los suyos" ON public.agent_config FOR SELECT TO authenticated
+USING (empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1));
 
--- Admin: ve los permisos de todos los usuarios de su empresa
-CREATE POLICY "perm: admin ve permisos de empresa" ON user_permissions
-FOR SELECT TO authenticated
-USING (
-    EXISTS (
-        SELECT 1 FROM user_profiles
-        WHERE user_profiles.id = user_permissions.user_id
-        AND user_profiles.empresa_id = auth.user_empresa_id()
-    )
-    AND auth.user_role() = 'admin'
-);
+CREATE POLICY "agents: admin gestiona los suyos" ON public.agent_config FOR ALL TO authenticated
+USING (empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'admin'))
+WITH CHECK (empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'admin'));
 
--- Admin: puede insertar/actualizar/borrar permisos de usuarios de su empresa
-CREATE POLICY "perm: admin gestiona permisos empresa" ON user_permissions
-FOR ALL TO authenticated
-USING (
-    EXISTS (
-        SELECT 1 FROM user_profiles
-        WHERE user_profiles.id = user_permissions.user_id
-        AND user_profiles.empresa_id = auth.user_empresa_id()
-    )
-    AND auth.user_role() = 'admin'
-)
-WITH CHECK (
-    EXISTS (
-        SELECT 1 FROM user_profiles
-        WHERE user_profiles.id = user_permissions.user_id
-        AND user_profiles.empresa_id = auth.user_empresa_id()
-    )
-    AND auth.user_role() = 'admin'
-);
+-- 5. AI CONFIG (linked to agent_config)
+ALTER TABLE public.ai_config ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "ai_config: superadmin acceso total" ON public.ai_config;
+DROP POLICY IF EXISTS "ai_config: tenant solo ve los suyos" ON public.ai_config;
+DROP POLICY IF EXISTS "ai_config: admin gestiona los suyos" ON public.ai_config;
 
+CREATE POLICY "ai_config: superadmin acceso total" ON public.ai_config FOR ALL TO authenticated
+USING (EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'superadmin'));
 
--- =============================================================
--- TABLA: agents
--- =============================================================
-ALTER TABLE agents ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "ai_config: tenant solo ve los suyos" ON public.ai_config FOR SELECT TO authenticated
+USING (EXISTS (SELECT 1 FROM public.agent_config WHERE agent_config.id = ai_config.agent_id AND agent_config.empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1)));
 
-DROP POLICY IF EXISTS "agents: superadmin acceso total"    ON agents;
-DROP POLICY IF EXISTS "agents: tenant solo ve los suyos"   ON agents;
-DROP POLICY IF EXISTS "agents: admin gestiona los suyos"   ON agents;
+CREATE POLICY "ai_config: admin gestiona los suyos" ON public.ai_config FOR ALL TO authenticated
+USING (EXISTS (SELECT 1 FROM public.agent_config WHERE agent_config.id = ai_config.agent_id AND agent_config.empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1)) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'admin'));
 
--- Superadmin: acceso total
-CREATE POLICY "agents: superadmin acceso total" ON agents
-FOR ALL TO authenticated
-USING (auth.user_role() = 'superadmin');
+-- 6. CAMPAIGNS
+ALTER TABLE public.campaigns ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "campaigns: superadmin acceso total" ON public.campaigns;
+DROP POLICY IF EXISTS "campaigns: tenant solo ve los suyos" ON public.campaigns;
+DROP POLICY IF EXISTS "campaigns: admin gestiona los suyos" ON public.campaigns;
 
--- Admin y user: solo ven los agentes de su empresa
-CREATE POLICY "agents: tenant solo ve los suyos" ON agents
-FOR SELECT TO authenticated
-USING (
-    empresa_id = auth.user_empresa_id()
-    AND auth.user_role() IN ('admin', 'user')
-);
+CREATE POLICY "campaigns: superadmin acceso total" ON public.campaigns FOR ALL TO authenticated
+USING (EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'superadmin'));
 
--- Admin: puede crear, modificar y borrar agentes de su empresa
-CREATE POLICY "agents: admin gestiona los suyos" ON agents
-FOR ALL TO authenticated
-USING (
-    empresa_id = auth.user_empresa_id()
-    AND auth.user_role() = 'admin'
-)
-WITH CHECK (
-    empresa_id = auth.user_empresa_id()
-    AND auth.user_role() = 'admin'
-);
+CREATE POLICY "campaigns: tenant solo ve los suyos" ON public.campaigns FOR SELECT TO authenticated
+USING (empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1));
 
+CREATE POLICY "campaigns: admin gestiona los suyos" ON public.campaigns FOR ALL TO authenticated
+USING (empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'admin'))
+WITH CHECK (empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'admin'));
 
--- =============================================================
--- TABLA: call_logs
--- =============================================================
-ALTER TABLE call_logs ENABLE ROW LEVEL SECURITY;
+-- 7. CAMPAIGN LEADS (linked to campaigns)
+ALTER TABLE public.campaign_leads ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "leads: superadmin acceso total" ON public.campaign_leads;
+DROP POLICY IF EXISTS "leads: tenant solo ve los suyos" ON public.campaign_leads;
+DROP POLICY IF EXISTS "leads: admin gestiona los suyos" ON public.campaign_leads;
 
-DROP POLICY IF EXISTS "calls: superadmin acceso total"   ON call_logs;
-DROP POLICY IF EXISTS "calls: tenant solo ve los suyos"  ON call_logs;
+CREATE POLICY "leads: superadmin acceso total" ON public.campaign_leads FOR ALL TO authenticated
+USING (EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'superadmin'));
 
--- Superadmin: acceso total
-CREATE POLICY "calls: superadmin acceso total" ON call_logs
-FOR ALL TO authenticated
-USING (auth.user_role() = 'superadmin');
+CREATE POLICY "leads: tenant solo ve los suyos" ON public.campaign_leads FOR SELECT TO authenticated
+USING (EXISTS (SELECT 1 FROM public.campaigns WHERE campaigns.id = campaign_leads.campaign_id AND campaigns.empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1)));
 
--- Admin y user: solo ven logs de llamadas de su empresa
--- (call_logs es read-only para usuarios finales)
-CREATE POLICY "calls: tenant solo ve los suyos" ON call_logs
-FOR SELECT TO authenticated
-USING (
-    empresa_id = auth.user_empresa_id()
-    AND auth.user_role() IN ('admin', 'user')
-);
+CREATE POLICY "leads: admin gestiona los suyos" ON public.campaign_leads FOR ALL TO authenticated
+USING (EXISTS (SELECT 1 FROM public.campaigns WHERE campaigns.id = campaign_leads.campaign_id AND campaigns.empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1)) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'admin'));
 
+-- 8. ENCUESTAS
+ALTER TABLE public.encuestas ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "encuestas: superadmin acceso total" ON public.encuestas;
+DROP POLICY IF EXISTS "encuestas: tenant solo ve los suyos" ON public.encuestas;
+DROP POLICY IF EXISTS "encuestas: admin gestiona los suyos" ON public.encuestas;
 
--- =============================================================
--- TABLA: audit_logs
--- Auditoría: los usuarios solo ven eventos de su empresa.
--- Nadie puede modificar ni borrar entradas de auditoría.
--- =============================================================
-ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "encuestas: superadmin acceso total" ON public.encuestas FOR ALL TO authenticated
+USING (EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'superadmin'));
 
-DROP POLICY IF EXISTS "audit: superadmin acceso total"   ON audit_logs;
-DROP POLICY IF EXISTS "audit: admin ve logs de empresa"  ON audit_logs;
+CREATE POLICY "encuestas: tenant solo ve los suyos" ON public.encuestas FOR SELECT TO authenticated
+USING (empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1));
 
--- Superadmin: acceso total de lectura
-CREATE POLICY "audit: superadmin acceso total" ON audit_logs
-FOR SELECT TO authenticated
-USING (auth.user_role() = 'superadmin');
+CREATE POLICY "encuestas: admin gestiona los suyos" ON public.encuestas FOR ALL TO authenticated
+USING (empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'admin'))
+WITH CHECK (empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'admin'));
 
--- Admin: solo logs generados por usuarios de su empresa
-CREATE POLICY "audit: admin ve logs de empresa" ON audit_logs
-FOR SELECT TO authenticated
-USING (
-    EXISTS (
-        SELECT 1 FROM user_profiles
-        WHERE user_profiles.id = audit_logs.user_id
-        AND user_profiles.empresa_id = auth.user_empresa_id()
-    )
-    AND auth.user_role() = 'admin'
-);
+-- 9. AUDIT LOGS
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "audit: superadmin acceso total" ON public.audit_logs;
+DROP POLICY IF EXISTS "audit: admin ve logs de empresa" ON public.audit_logs;
 
--- NOTA: No hay política de INSERT/UPDATE/DELETE para usuarios normales.
--- Los registros de auditoría solo los inserta el backend con service_role_key.
+CREATE POLICY "audit: superadmin acceso total" ON public.audit_logs FOR SELECT TO authenticated
+USING (EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'superadmin'));
 
+CREATE POLICY "audit: admin ve logs de empresa" ON public.audit_logs FOR SELECT TO authenticated
+USING (EXISTS (SELECT 1 FROM public.user_profiles actor WHERE actor.id = auth.uid() AND actor.role = 'admin') AND EXISTS (SELECT 1 FROM public.user_profiles target WHERE target.id = audit_logs.user_id AND target.empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1)));
 
--- =============================================================
--- TABLA: yeastar_tenant_config (si existe en el proyecto)
--- Configuración sensible de integración telefónica por tenant.
--- =============================================================
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'yeastar_tenant_config') THEN
-        ALTER TABLE yeastar_tenant_config ENABLE ROW LEVEL SECURITY;
+-- 10. PROMPT TEMPLATES
+ALTER TABLE public.prompt_templates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "prompts: admins gestionan" ON public.prompt_templates;
+DROP POLICY IF EXISTS "prompts: lectura autenticada" ON public.prompt_templates;
 
-        DROP POLICY IF EXISTS "yeastar: superadmin acceso total"  ON yeastar_tenant_config;
-        DROP POLICY IF EXISTS "yeastar: admin ve su config"       ON yeastar_tenant_config;
-        DROP POLICY IF EXISTS "yeastar: admin gestiona su config" ON yeastar_tenant_config;
+CREATE POLICY "prompts: admins gestionan" ON public.prompt_templates FOR ALL TO authenticated
+USING (EXISTS (SELECT 1 FROM public.user_profiles WHERE user_profiles.id = auth.uid() AND user_profiles.role IN ('superadmin', 'admin')));
 
-        EXECUTE $pol$
-            CREATE POLICY "yeastar: superadmin acceso total" ON yeastar_tenant_config
-            FOR ALL TO authenticated
-            USING (auth.user_role() = 'superadmin');
-        $pol$;
+CREATE POLICY "prompts: lectura autenticada" ON public.prompt_templates FOR SELECT TO authenticated USING (true);
 
-        EXECUTE $pol$
-            CREATE POLICY "yeastar: admin ve su config" ON yeastar_tenant_config
-            FOR SELECT TO authenticated
-            USING (
-                empresa_id = auth.user_empresa_id()
-                AND auth.user_role() = 'admin'
-            );
-        $pol$;
+-- 11. COMPANY YEASTAR CONFIGS
+ALTER TABLE public.company_yeastar_configs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "yeastar: superadmin acceso total" ON public.company_yeastar_configs;
+DROP POLICY IF EXISTS "yeastar: admin gestiona su config" ON public.company_yeastar_configs;
 
-        EXECUTE $pol$
-            CREATE POLICY "yeastar: admin gestiona su config" ON yeastar_tenant_config
-            FOR ALL TO authenticated
-            USING (
-                empresa_id = auth.user_empresa_id()
-                AND auth.user_role() = 'admin'
-            )
-            WITH CHECK (
-                empresa_id = auth.user_empresa_id()
-                AND auth.user_role() = 'admin'
-            );
-        $pol$;
+CREATE POLICY "yeastar: superadmin acceso total" ON public.company_yeastar_configs FOR ALL TO authenticated
+USING (EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'superadmin'));
 
-        RAISE NOTICE 'RLS aplicado a yeastar_tenant_config';
-    ELSE
-        RAISE NOTICE 'Tabla yeastar_tenant_config no encontrada, omitida.';
-    END IF;
-END;
-$$;
+CREATE POLICY "yeastar: admin gestiona su config" ON public.company_yeastar_configs FOR ALL TO authenticated
+USING (empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'admin'))
+WITH CHECK (empresa_id = (SELECT empresa_id FROM public.user_profiles WHERE id = auth.uid() LIMIT 1) AND EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'admin'));
 
+-- 12. CACHE TABLES
+ALTER TABLE public.api_usage_cache ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ui_cache ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "cache: superadmin gestion total" ON public.api_usage_cache;
+DROP POLICY IF EXISTS "cache: lectura autenticada" ON public.api_usage_cache;
+DROP POLICY IF EXISTS "ui_cache: superadmin gestion total" ON public.ui_cache;
+DROP POLICY IF EXISTS "ui_cache: lectura autenticada" ON public.ui_cache;
 
--- =============================================================
--- VERIFICACIÓN FINAL
--- Lista todas las tablas con RLS activo para confirmar el estado.
--- =============================================================
-SELECT
-    schemaname,
-    tablename,
-    rowsecurity AS rls_enabled
-FROM pg_tables
-WHERE schemaname = 'public'
-AND tablename IN (
-    'empresas', 'user_profiles', 'user_permissions',
-    'agents', 'call_logs', 'audit_logs', 'yeastar_tenant_config'
-)
-ORDER BY tablename;
+CREATE POLICY "cache: superadmin gestion total" ON public.api_usage_cache FOR ALL TO authenticated USING (EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'superadmin'));
+CREATE POLICY "cache: lectura autenticada" ON public.api_usage_cache FOR SELECT TO authenticated USING (true);
+CREATE POLICY "ui_cache: superadmin gestion total" ON public.ui_cache FOR ALL TO authenticated USING (EXISTS (SELECT 1 FROM public.user_profiles WHERE id = auth.uid() AND role = 'superadmin'));
+CREATE POLICY "ui_cache: lectura autenticada" ON public.ui_cache FOR SELECT TO authenticated USING (true);
