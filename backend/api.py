@@ -2,14 +2,32 @@ import os
 import sys
 import logging
 from contextlib import asynccontextmanager
+
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+
+# Servicios internos
 from services.rate_limiter import limiter
+from services.auth import get_supabase_jwt_secret
+from services.redis_service import get_redis, close_redis
+from services.queue_service import get_arq_pool, close_arq_pool
+
+# Routers
+from routers.logs import router as logs_router
+from routers.dashboard import router as dashboard_router
+from routers.settings import router as settings_router
+from routers.agents import router as agents_router
+from routers.telephony import router as telephony_router
+from routers.admin import router as admin_router
+from routers.campaigns import router as campaigns_router
+from routers.n8n_proxy import router as n8n_proxy_router
+from routers.assistant import router as assistant_router
 
 # --- CONFIGURACIÓN DE LOGS ---
+# Configurado antes de load_dotenv para capturar cualquier problema de arranque
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -22,16 +40,15 @@ logger = logging.getLogger("api-backend")
 
 load_dotenv()
 
-# --- Carga de servicios (inicializa cliente Supabase / LiveKit) ---
+# Inicialización anticipada de clientes singleton (Supabase / LiveKit)
+# Se importan por efecto secundario: el módulo registra su cliente al cargarse.
 import services.supabase_service  # noqa: F401
-import services.livekit_service  # noqa: F401
+import services.livekit_service   # noqa: F401
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🌅 Iniciando API Ausarta v2 (scheduler delegado a ARQ worker)...")
-
-    from services.auth import get_supabase_jwt_secret
 
     if not get_supabase_jwt_secret():
         logger.critical(
@@ -44,7 +61,6 @@ async def lifespan(app: FastAPI):
         logger.info("✅ JWT de sesión: SUPABASE_JWT_SECRET cargada correctamente.")
 
     try:
-        from services.redis_service import get_redis
         await get_redis()
     except Exception as e:
         logger.warning(
@@ -52,7 +68,6 @@ async def lifespan(app: FastAPI):
         )
 
     try:
-        from services.queue_service import get_arq_pool
         await get_arq_pool()
         logger.info("✅ Cliente ARQ inicializado.")
     except Exception as e:
@@ -62,12 +77,10 @@ async def lifespan(app: FastAPI):
 
     logger.info("🌙 Apagando API Ausarta v2...")
     try:
-        from services.redis_service import close_redis
         await close_redis()
     except Exception:
         pass
     try:
-        from services.queue_service import close_arq_pool
         await close_arq_pool()
     except Exception:
         pass
@@ -104,8 +117,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from routers.logs import router as logs_router
+# --- REGISTRO DE ROUTERS ---
 app.include_router(logs_router)
+app.include_router(dashboard_router)
+app.include_router(settings_router)
+app.include_router(agents_router)
+app.include_router(telephony_router)
+app.include_router(admin_router)
+app.include_router(campaigns_router)
+app.include_router(n8n_proxy_router)
+app.include_router(assistant_router)
 
 
 # --- ENDPOINTS BASE ---
@@ -113,33 +134,3 @@ app.include_router(logs_router)
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "Ausarta Backend v2", "database": "Supabase"}
-
-
-from routers.dashboard import router as dashboard_router
-from routers.settings import router as settings_router
-from routers.agents import router as agents_router
-app.include_router(dashboard_router)
-app.include_router(settings_router)
-app.include_router(agents_router)
-
-
-# --- CALL CONTROL ---
-
-from routers.telephony import router as telephony_router
-app.include_router(telephony_router)
-
-
-# --- CAMPAIGN MANAGEMENT ---
-
-from routers.admin import router as admin_router
-from routers.campaigns import router as campaigns_router
-app.include_router(admin_router)
-app.include_router(campaigns_router)
-
-
-# --- N8N PROXY + ASSISTANT ---
-
-from routers.n8n_proxy import router as n8n_proxy_router
-from routers.assistant import router as assistant_router
-app.include_router(n8n_proxy_router)
-app.include_router(assistant_router)

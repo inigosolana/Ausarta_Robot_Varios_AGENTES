@@ -12,56 +12,15 @@ services:
     restart: unless-stopped
     ports:
       - "8003:8001"
+    env_file:
+      - .env
     environment:
-      - LIVEKIT_URL=${LIVEKIT_URL}
-      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
-      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
-      - SIP_OUTBOUND_TRUNK_ID=${SIP_OUTBOUND_TRUNK_ID}
-      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
-      - CARTESIA_API_KEY=${CARTESIA_API_KEY}
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - ELEVEN_API_KEY=${ELEVEN_API_KEY}
-      - VOICE_ID_AUSARTA=${VOICE_ID_AUSARTA}
-      - VOICE_ID_ESPANOLA=${VOICE_ID_ESPANOLA}
-      - VOICE_ID_BUENA=${VOICE_ID_BUENA}
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
-      - GLPI_URL=${GLPI_URL}
-      - GLPI_APP_TOKEN=${GLPI_APP_TOKEN}
-      - GLPI_USER_TOKEN=${GLPI_USER_TOKEN}
-      - N8N_WEBHOOK_URL_ALERTS=${N8N_WEBHOOK_URL_ALERTS}
-      - AIRE_USER=${AIRE_USER}
-      - AIRE_PASSWORD=${AIRE_PASSWORD}
-      - LIVEKIT_ADMIN_USERNAME=${LIVEKIT_ADMIN_USERNAME}
-      - LIVEKIT_ADMIN_PASSWORD=${LIVEKIT_ADMIN_PASSWORD}
-      - ENABLE_SIP=${ENABLE_SIP}
-      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL}
-      - N8N_WEBHOOK_BASE_URL=${N8N_WEBHOOK_BASE_URL:-https://n8n.ausarta.net/webhook}
-      - N8N_WEBHOOK_URL_ORCHESTRATOR=${N8N_WEBHOOK_URL_ORCHESTRATOR}
-      - N8N_WEBHOOK_URL_TRANSCRIPTS=${N8N_WEBHOOK_URL_TRANSCRIPTS}
-      - N8N_PROXY_SECRET=${N8N_PROXY_SECRET}
+      # REDIS_URL se construye aquí porque requiere composición con REDIS_PASSWORD.
+      # El operador ?Error hace que Docker falle si REDIS_PASSWORD está vacía o no definida en .env.
+      - REDIS_URL=redis://:${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en .env}@redis:6379/0
+      # Estos valores requieren interpolación cruzada de otras variables, no se pueden declarar como literales en .env
       - IMPERSONATION_SECRET=${IMPERSONATION_SECRET:-${SUPABASE_SERVICE_ROLE_KEY}}
-      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-https://app.ausarta.net,https://www.ausarta.net}
-      - AGENT_NAME_DISPATCH=${AGENT_NAME_DISPATCH}
-      - MAX_CONCURRENT_CALLS=${MAX_CONCURRENT_CALLS:-10}
-      - MAX_CALLS_PER_EMPRESA=${MAX_CALLS_PER_EMPRESA:-5}
-      - CAMPAIGN_POLL_INTERVAL_SECONDS=${CAMPAIGN_POLL_INTERVAL_SECONDS:-30}
-      - DRIP_COOLDOWN_MIN_SECONDS=${DRIP_COOLDOWN_MIN_SECONDS:-120}
-      - DRIP_COOLDOWN_MAX_SECONDS=${DRIP_COOLDOWN_MAX_SECONDS:-180}
-      - AGENT_CALL_TIMEOUT_SECONDS=${AGENT_CALL_TIMEOUT_SECONDS:-600}
       - BRIDGE_SERVER_URL=${BRIDGE_SERVER_URL:-http://localhost:8001}
-      - AUSARTA_API_KEY=${AUSARTA_API_KEY:-}
-      - SIP_TRANSFER_NUMBER=${SIP_TRANSFER_NUMBER:-}
-      - AGENT_AMD_WINDOW_SECONDS=${AGENT_AMD_WINDOW_SECONDS:-15}
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-      - ENABLE_RECORDING=${ENABLE_RECORDING:-false}
-      - RECORDING_BUCKET=${RECORDING_BUCKET:-call-recordings}
-      - SUPABASE_S3_ACCESS_KEY=${SUPABASE_S3_ACCESS_KEY:-}
-      - SUPABASE_S3_SECRET_KEY=${SUPABASE_S3_SECRET_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -69,6 +28,9 @@ services:
     networks:
       - ausarta-network
     volumes:
+      # NOTA: Este volumen SQLite es exclusivo de entornos locales/desarrollo o como fallback temporal.
+      # La base de datos principal en PRODUCCIÓN es Supabase (PostgreSQL).
+      # En producción, este mount puede eliminarse si el código no lo referencia.
       - sqlite-data:/app/data
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8001/" ]
@@ -84,39 +46,15 @@ services:
     restart: unless-stopped
     command: ["arq", "worker.WorkerSettings"]
     working_dir: /app
+    env_file:
+      - .env
     environment:
-      - LIVEKIT_URL=${LIVEKIT_URL}
-      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
-      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
-      - SIP_OUTBOUND_TRUNK_ID=${SIP_OUTBOUND_TRUNK_ID}
-      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
-      - CARTESIA_API_KEY=${CARTESIA_API_KEY}
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - ELEVEN_API_KEY=${ELEVEN_API_KEY}
-      - VOICE_ID_AUSARTA=${VOICE_ID_AUSARTA}
-      - VOICE_ID_ESPANOLA=${VOICE_ID_ESPANOLA}
-      - VOICE_ID_BUENA=${VOICE_ID_BUENA}
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-      - AGENT_NAME_DISPATCH=${AGENT_NAME_DISPATCH}
-      - MAX_CONCURRENT_CALLS=${MAX_CONCURRENT_CALLS:-10}
-      - MAX_CALLS_PER_EMPRESA=${MAX_CALLS_PER_EMPRESA:-5}
-      - CAMPAIGN_POLL_INTERVAL_SECONDS=${CAMPAIGN_POLL_INTERVAL_SECONDS:-30}
-      - DRIP_COOLDOWN_MIN_SECONDS=${DRIP_COOLDOWN_MIN_SECONDS:-120}
-      - DRIP_COOLDOWN_MAX_SECONDS=${DRIP_COOLDOWN_MAX_SECONDS:-180}
-      - DRIP_ANSWER_TIMEOUT_SECONDS=${DRIP_ANSWER_TIMEOUT_SECONDS:-30}
-      - DRIP_AGENT_JOIN_DELAY_SECONDS=${DRIP_AGENT_JOIN_DELAY_SECONDS:-3}
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-      - ARQ_MAX_JOBS=${ARQ_MAX_JOBS:-10}
-      - ARQ_JOB_TIMEOUT=${ARQ_JOB_TIMEOUT:-660}
+      # Misma lógica que en backend: REDIS_URL requiere composición y protección estricta.
+      - REDIS_URL=redis://:${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en .env}@redis:6379/0
       - PYTHONUNBUFFERED=1
+      # El worker siempre comunica con el backend por red interna de Docker, no por host.
       - BRIDGE_SERVER_URL=http://backend:8001
       - BRIDGE_SERVER_URL_INTERNAL=http://backend:8001
-      - N8N_WEBHOOK_BASE_URL=${N8N_WEBHOOK_BASE_URL:-https://n8n.ausarta.net/webhook}
-      - N8N_PROXY_SECRET=${N8N_PROXY_SECRET}
       - IMPERSONATION_SECRET=${IMPERSONATION_SECRET:-${SUPABASE_SERVICE_ROLE_KEY}}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -131,7 +69,9 @@ services:
     restart: unless-stopped
     networks:
       - ausarta-network
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    # Prevención estricta: si REDIS_PASSWORD no existe o está vacía en .env,
+    # Docker Compose fallará al resolver la variable y no arrancará el contenedor.
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en .env}
     volumes:
       - redis-data:/data
 
@@ -163,6 +103,7 @@ networks:
     driver: bridge
 
 volumes:
+  # SQLite: solo desarrollo local / fallback. BD principal en producción: Supabase (PostgreSQL).
   sqlite-data:
     driver: local
   redis-data:
