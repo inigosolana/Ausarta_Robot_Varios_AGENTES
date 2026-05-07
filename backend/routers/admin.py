@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from supabase import create_client
 from services.supabase_service import supabase, clear_ui_cache, sb_query
-from services.auth import CurrentUser, require_admin, require_superadmin
+from services.auth import CurrentUser, require_admin, require_superadmin, invalidate_user_profile_cache
 from services.audit import log_audit_event
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -238,7 +238,9 @@ async def create_auth_user(request: Request, payload: dict, current_user: Curren
 
     safe_payload = {
         "email": email,
-        "password": password or "",
+        # SEGURIDAD: La contraseña NUNCA se envía a n8n ni a ningún sistema externo.
+        # El único flujo soportado es invite_user_by_email: Supabase envía un email
+        # al nuevo usuario para que establezca su contraseña de forma segura.
         "full_name": full_name,
         "role": role,
         "empresa_id": empresa_id,
@@ -324,7 +326,11 @@ async def create_auth_user(request: Request, payload: dict, current_user: Curren
     # Paso 3: Limpiar cache de lista de usuarios
     await clear_ui_cache("users_list")
 
-    should_invite = str(password or "").strip() == ""
+    # Paso 4: Invalidar caché de perfil en Redis/mem por si hubiera una entrada previa.
+    # Garantiza que no haya estado cacheado inconsistente desde el primer request del nuevo usuario.
+    await invalidate_user_profile_cache(user_id)
+
+    # Siempre es invite flow: la contraseña nunca se establece desde el panel de admin.
     await log_audit_event(
         user_id=current_user.user_id,
         action="create_user",
@@ -334,16 +340,18 @@ async def create_auth_user(request: Request, payload: dict, current_user: Curren
             "email": email,
             "role": role,
             "empresa_id": empresa_id,
-            "invited": should_invite,
+            "invited": True,
         },
     )
-    return {"status": "ok", "user_id": user_id, "invited": should_invite}
+    return {"status": "ok", "user_id": user_id, "invited": True}
 
 
 async def _fallback_create_user(payload: dict) -> str:
-    """Fallback: crear usuario directamente vía Supabase Auth Admin SDK si n8n no responde."""
+    """
+    Fallback: crear usuario directamente vía Supabase Auth Admin SDK si n8n no responde.
+    Siempre usa invite_user_by_email — nunca crea usuarios con contraseña predefinida.
+    """
     email = payload["email"]
-    password = str(payload.get("password") or "").strip()
     full_name = payload["full_name"]
     role = payload["role"]
     empresa_id = payload.get("empresa_id")
@@ -351,19 +359,12 @@ async def _fallback_create_user(payload: dict) -> str:
     service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
     admin_client = create_client(os.getenv("SUPABASE_URL"), service_role_key)
 
-    if not password:
-        options: dict = {"data": {"full_name": full_name, "role": role}}
-        redirect_to = payload.get("redirect_to") or os.getenv("INVITE_REDIRECT_TO") or os.getenv("FRONTEND_URL")
-        if redirect_to:
-            options["redirect_to"] = redirect_to
-        res = admin_client.auth.admin.invite_user_by_email(email, options)
-    else:
-        res = admin_client.auth.admin.create_user({
-            "email": email,
-            "password": password,
-            "user_metadata": {"full_name": full_name, "role": role},
-            "email_confirm": True
-        })
+    # Invite flow siempre: el usuario establece su contraseña a través del email de Supabase.
+    options: dict = {"data": {"full_name": full_name, "role": role}}
+    redirect_to = payload.get("redirect_to") or os.getenv("INVITE_REDIRECT_TO") or os.getenv("FRONTEND_URL")
+    if redirect_to:
+        options["redirect_to"] = redirect_to
+    res = admin_client.auth.admin.invite_user_by_email(email, options)
 
     user_id = res.user.id
 
@@ -375,7 +376,7 @@ async def _fallback_create_user(payload: dict) -> str:
         "empresa_id": empresa_id
     }).execute())
 
-    logger.info(f"✅ [admin-fallback] Usuario {user_id} creado directamente")
+    logger.info(f"✅ [admin-fallback] Usuario {user_id} creado directamente vía invite")
     return user_id
 
 
@@ -437,8 +438,12 @@ async def delete_auth_user(request: Request, user_id: str, current_user: Current
         # 2. Borrar de la base de datos pública tras borrar Auth
         await sb_query(lambda: supabase.table("user_permissions").delete().eq("user_id", user_id).execute())
         await sb_query(lambda: supabase.table("user_profiles").delete().eq("id", user_id).execute())
-        
-        # 3. Limpiar cache
+
+        # 3. Revocar acceso instantáneamente: eliminar caché de perfil en Redis y memoria.
+        # Sin esto, el JWT del usuario borrado seguiría siendo válido hasta que expire el TTL (60s).
+        await invalidate_user_profile_cache(user_id)
+
+        # 4. Limpiar cache de lista de usuarios
         await clear_ui_cache("users_list")
         
         logger.info(f"🗑️ Usuario {user_id} eliminado completamente del sistema")

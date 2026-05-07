@@ -280,6 +280,33 @@ async def get_user_profile_cached(user_id: str) -> dict:
     return row
 
 
+async def invalidate_user_profile_cache(user_id: str) -> None:
+    """
+    Invalida la caché de perfil de un usuario en Redis y en memoria.
+
+    Llamar siempre que se elimine o modifique un usuario para revocar acceso
+    inmediatamente, sin esperar a que expire el TTL de caché (por defecto 60s).
+    Sin esto, un JWT de un usuario borrado o desactivado seguiría siendo válido
+    hasta el siguiente ciclo de TTL.
+    """
+    # 1. Invalidación en Redis (caché distribuida entre réplicas del backend)
+    try:
+        from services.redis_service import get_redis
+        r = await get_redis()
+        key = f"{_USER_PROFILE_CACHE_PREFIX}{user_id}"
+        deleted = await r.delete(key)
+        if deleted:
+            logger.info(f"[Auth] Caché Redis invalidada para user_id={user_id}")
+    except Exception as e:
+        logger.warning(f"[Auth] No se pudo invalidar caché Redis para user_id={user_id}: {e}")
+
+    # 2. Invalidación en caché de memoria (fallback local en el proceso)
+    async with _MEM_PROFILE_LOCK:
+        if user_id in _MEM_PROFILE_CACHE:
+            del _MEM_PROFILE_CACHE[user_id]
+            logger.info(f"[Auth] Caché memoria invalidada para user_id={user_id}")
+
+
 async def get_current_user(
     creds: HTTPAuthorizationCredentials | None = Security(_BEARER),
     x_impersonate_token: Optional[str] = Header(None, alias="X-Impersonate-Token"),
@@ -354,6 +381,78 @@ async def require_outbound_auth(
     """
     Para integraciones: X-API-Key válida.
     Para el SPA (Probar llamada, etc.): Authorization Bearer (misma sesión Supabase que apiFetch).
+
+    # TODO SEGURIDAD — Refactorización de API Keys estáticas a dinámicas por BD
+    # =========================================================================
+    # PROBLEMA ACTUAL:
+    #   _get_valid_keys() lee AUSARTA_API_KEY desde una variable de entorno estática.
+    #   Si esa clave se filtra (logs, git, error de configuración), el atacante
+    #   obtiene acceso maestro SIN restricción de tenant ni de operación.
+    #
+    # SOLUCIÓN PROPUESTA: tabla `api_keys` en Supabase con aislamiento por empresa.
+    #
+    # DDL sugerido:
+    #   CREATE TABLE api_keys (
+    #       id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    #       empresa_id  integer NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+    #       key_hash    text NOT NULL UNIQUE,   -- SHA-256 de la clave, nunca en claro
+    #       description text,
+    #       scopes      text[] NOT NULL DEFAULT '{outbound_call}',
+    #       is_active   boolean NOT NULL DEFAULT true,
+    #       expires_at  timestamptz,
+    #       created_at  timestamptz NOT NULL DEFAULT now(),
+    #       last_used_at timestamptz
+    #   );
+    #   ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
+    #   -- (añadir política: admin solo ve/gestiona sus propias keys)
+    #
+    # CÓMO REEMPLAZAR _get_valid_keys():
+    #   import hashlib
+    #   from services.redis_service import get_redis
+    #
+    #   async def _validate_api_key_from_db(raw_key: str) -> dict | None:
+    #       \"\"\"Devuelve {empresa_id, scopes} si la key es válida, None si no.\"\"\"
+    #       key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    #
+    #       # 1. Intentar caché Redis (TTL: 5 min) para evitar una query por cada request
+    #       try:
+    #           r = await get_redis()
+    #           cached = await r.get(f"ausarta:api_key:{key_hash}")
+    #           if cached:
+    #               return json.loads(cached)
+    #           if cached == "INVALID":
+    #               return None
+    #       except Exception:
+    #           pass
+    #
+    #       # 2. Consultar BD con service_role (bypassa RLS para validación interna)
+    #       from services.supabase_service import supabase
+    #       res = supabase.table("api_keys") \\
+    #           .select("empresa_id,scopes,is_active,expires_at") \\
+    #           .eq("key_hash", key_hash) \\
+    #           .eq("is_active", True) \\
+    #           .limit(1) \\
+    #           .execute()
+    #
+    #       if not res.data:
+    #           await r.set(f"ausarta:api_key:{key_hash}", "INVALID", ex=300)
+    #           return None
+    #
+    #       row = res.data[0]
+    #       if row.get("expires_at") and row["expires_at"] < datetime.utcnow().isoformat():
+    #           return None
+    #
+    #       # Registrar último uso (fire-and-forget, no bloquea el request)
+    #       supabase.table("api_keys").update({"last_used_at": "now()"}).eq("key_hash", key_hash).execute()
+    #
+    #       payload = {"empresa_id": row["empresa_id"], "scopes": row["scopes"]}
+    #       await r.set(f"ausarta:api_key:{key_hash}", json.dumps(payload), ex=300)
+    #       return payload
+    #
+    # VENTAJA: cada API key está limitada a un empresa_id específico.
+    # Un atacante que obtenga una key solo tiene acceso al tenant del cliente,
+    # no a todos los tenants como ocurre con la variable estática actual.
+    # =========================================================================
     """
     valid_keys = _get_valid_keys()
     if not valid_keys:
@@ -386,6 +485,7 @@ async def require_outbound_auth(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Missing X-API-Key header or Authorization Bearer token",
     )
+
 
 
 # Alias de compatibilidad para código existente.
