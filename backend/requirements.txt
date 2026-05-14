@@ -9,12 +9,12 @@ fastapi==0.111.0
 uvicorn==0.30.1
 PyJWT==2.10.1
 
-# LiveKit Agents y plugins de IA (conjunto compatible verificado en PyPI)
-livekit-agents==0.12.21
-livekit-plugins-openai==0.12.4
-livekit-plugins-deepgram==0.7.4
-livekit-plugins-cartesia==0.4.12
-livekit-plugins-silero==0.7.6
+# LiveKit Agents y plugins de IA (agent.py requiere API 1.x: Agent, AgentServer, etc.)
+livekit-agents==1.4.6
+livekit-plugins-openai==1.4.6
+livekit-plugins-deepgram==1.4.6
+livekit-plugins-cartesia==1.4.6
+livekit-plugins-silero==1.4.6
 livekit-plugins-noise-cancellation==0.2.5
 
 # Cola de tareas y caché
@@ -34,5 +34,5 @@ supabase==2.28.0
 slowapi==0.1.9
 cryptography==42.0.7
 
-# OpenAI SDK (livekit-plugins-openai requiere >=1.68.2)
-openai==1.68.2
+# OpenAI SDK (livekit-plugins-openai 1.4.x requiere openai>=2)
+openai==2.15.0

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import jwt as pyjwt
+from jwt import PyJWKClient
 from fastapi import Security, HTTPException, status, Depends, Header
 from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 
@@ -110,24 +111,59 @@ def get_supabase_jwt_secret() -> str:
     return ""
 
 
+def _get_jwks_client() -> PyJWKClient | None:
+    url = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
+    if not url:
+        return None
+    return PyJWKClient(f"{url}/auth/v1/.well-known/jwks.json", cache_keys=True)
+
+
+_jwks_client: PyJWKClient | None = None
+
+
+def _jwks() -> PyJWKClient:
+    global _jwks_client
+    if _jwks_client is None:
+        client = _get_jwks_client()
+        if client is None:
+            raise HTTPException(status_code=500, detail="SUPABASE_URL no configurada para JWKS")
+        _jwks_client = client
+    return _jwks_client
+
+
 def _get_user_from_supabase_jwt(token: str) -> dict:
     """
-    Valida el JWT de Supabase de forma local usando SUPABASE_JWT_SECRET (HS256).
-    Evita una petición HTTP a Supabase por cada request, eliminando latencia
-    y el riesgo de Rate Limit contra la Auth API.
+    Valida el JWT de Supabase localmente.
+    - HS256: SUPABASE_JWT_SECRET (legacy)
+    - ES256/RS256: claves públicas JWKS del proyecto (Supabase JWT Signing Keys)
     """
     jwt_secret = get_supabase_jwt_secret()
-    if not jwt_secret:
-        raise HTTPException(status_code=500, detail="SUPABASE_JWT_SECRET no configurada")
 
     try:
-        payload = pyjwt.decode(
-            token,
-            jwt_secret,
-            algorithms=["HS256"],
-            # Supabase usa "authenticated" como audience; lo verificamos opcionalmente.
-            options={"verify_aud": False},
-        )
+        header = pyjwt.get_unverified_header(token)
+        alg = header.get("alg", "HS256")
+
+        if alg == "HS256":
+            if not jwt_secret:
+                raise HTTPException(status_code=500, detail="SUPABASE_JWT_SECRET no configurada")
+            payload = pyjwt.decode(
+                token,
+                jwt_secret,
+                algorithms=["HS256"],
+                options={"verify_aud": False},
+            )
+        elif alg in ("ES256", "RS256"):
+            signing_key = _jwks().get_signing_key_from_jwt(token)
+            payload = pyjwt.decode(
+                token,
+                signing_key.key,
+                algorithms=[alg],
+                options={"verify_aud": False},
+            )
+        else:
+            raise HTTPException(status_code=401, detail=f"Algoritmo JWT no soportado: {alg}")
+    except HTTPException:
+        raise
     except pyjwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expirado")
     except pyjwt.InvalidTokenError as exc:
