@@ -47,7 +47,7 @@ services:
       dockerfile: Dockerfile
     container_name: ausarta-livekit-agent
     restart: unless-stopped
-    command: ["python", "agent.py", "start"]
+    command: ["/agent_start.sh"]
     working_dir: /app
     env_file:
       - stack.env
@@ -56,7 +56,8 @@ services:
       - BRIDGE_SERVER_URL=http://backend:8001
       - BRIDGE_SERVER_URL_INTERNAL=http://backend:8001
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - ausarta-network
 

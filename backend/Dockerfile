@@ -33,6 +33,7 @@ ENV BRIDGE_SERVER_URL=http://127.0.0.1:8001
 
 # Script de inicio: API (worker LiveKit = servicio livekit-agent en compose)
 COPY start.sh /start.sh
-RUN chmod +x /start.sh
+COPY agent_start.sh /agent_start.sh
+RUN chmod +x /start.sh /agent_start.sh
 
 CMD ["/start.sh"]

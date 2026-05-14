@@ -1711,4 +1711,14 @@ async def entrypoint(ctx: JobContext):
             logger.info(f"--- 🏁 FIN DE SESIÓN DUPLICADA (Job: {job_id}) - Saliendo sin reportar datos ---")
 
 if __name__ == "__main__":
+    logger.info(
+        "🤖 Arrancando worker LiveKit | agent_name=%s | livekit_url=%s | bridge=%s",
+        DISPATCH_AGENT_NAME,
+        (os.getenv("LIVEKIT_URL") or "NO SET"),
+        (
+            os.getenv("BRIDGE_SERVER_URL_INTERNAL")
+            or os.getenv("BRIDGE_SERVER_URL")
+            or "http://127.0.0.1:8001"
+        ),
+    )
     cli.run_app(server)
