@@ -5,6 +5,7 @@ from services.supabase_service import supabase, get_ui_cache, sb_query
 from services.livekit_service import lkapi
 import os
 import asyncio
+import aiohttp
 import time
 from concurrent.futures import ThreadPoolExecutor
 import logging

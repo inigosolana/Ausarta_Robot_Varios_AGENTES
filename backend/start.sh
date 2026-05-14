@@ -1,17 +1,7 @@
 #!/bin/bash
 
-# Script de inicio para backend (API + Agent)
-# La API queda en primer plano: si el agente LiveKit falla, la web sigue respondiendo.
+# API FastAPI únicamente. El worker LiveKit corre en el servicio livekit-agent (docker-compose).
 
-echo "🚀 Iniciando Backend de Ausarta Robot..."
-echo ""
-
-echo "🤖 Iniciando LiveKit Agent (background)..."
-python agent.py dev &
-AGENT_PID=$!
-echo "   ✅ Agent PID: $AGENT_PID"
-
-sleep 3
-
-echo "🔧 Iniciando API FastAPI en puerto 8001..."
+echo "🚀 Iniciando API Backend Ausarta Robot (puerto 8001)..."
+echo "   ℹ️  El agente de voz corre en el contenedor livekit-agent."
 exec uvicorn api:app --host 0.0.0.0 --port 8001

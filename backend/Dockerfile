@@ -21,6 +21,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar código de la aplicación
 COPY . .
 
+# Modelos/plugins de voz (Silero VAD, etc.) — evita descarga en la primera llamada
+RUN python agent.py download-files 2>/dev/null || echo "⚠️ download-files omitido (se descargará en runtime)"
+
 # Exponer puerto de la API
 EXPOSE 8001
 
@@ -28,7 +31,7 @@ EXPOSE 8001
 ENV PYTHONUNBUFFERED=1
 ENV BRIDGE_SERVER_URL=http://127.0.0.1:8001
 
-# Script de inicio que lanza API y Agent
+# Script de inicio: API (worker LiveKit = servicio livekit-agent en compose)
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 

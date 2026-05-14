@@ -743,7 +743,7 @@ async def fetch_agent_config(survey_id: str, expected_empresa_id: str = "0") -> 
 # ============================================================================
 async def notify_system_alert(message: str, details: Optional[dict] = None):
     try:
-        from backend.services.queue_service import get_arq_pool
+        from services.queue_service import get_arq_pool
         redis = await get_arq_pool()
         await redis.enqueue_job("process_system_alert", message, details)
         logger.info(f"📡 Alerta del sistema encolada: {message}")
