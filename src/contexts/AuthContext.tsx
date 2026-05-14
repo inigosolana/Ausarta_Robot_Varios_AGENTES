@@ -128,18 +128,34 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     useEffect(() => {
-        // Get initial session
-        supabase.auth.getSession().then(({ data: { session: s } }) => {
-            setSession(s);
-            setUser(s?.user ?? null);
-            if (s?.user) {
-                loadUserData(s.user.id).finally(() => setLoading(false));
-            } else {
-                setLoading(false);
-            }
-        });
+        let cancelled = false;
 
-        // Listen for auth changes
+        const finishLoading = () => {
+            if (!cancelled) setLoading(false);
+        };
+
+        const timeout = window.setTimeout(() => {
+            console.warn('Auth: timeout esperando sesión de Supabase');
+            finishLoading();
+        }, 10000);
+
+        supabase.auth.getSession()
+            .then(({ data: { session: s } }) => {
+                if (cancelled) return;
+                setSession(s);
+                setUser(s?.user ?? null);
+                if (s?.user) {
+                    loadUserData(s.user.id).finally(finishLoading);
+                } else {
+                    finishLoading();
+                }
+            })
+            .catch((err) => {
+                console.error('Auth: error al obtener sesión', err);
+                finishLoading();
+            })
+            .finally(() => window.clearTimeout(timeout));
+
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (_event, s) => {
                 setSession(s);
@@ -153,7 +169,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
         );
 
-        return () => subscription.unsubscribe();
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timeout);
+            subscription.unsubscribe();
+        };
     }, []);
 
     const signIn = async (email: string, password: string) => {
