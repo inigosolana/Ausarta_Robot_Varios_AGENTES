@@ -13,12 +13,13 @@ services:
     ports:
       - "8003:8001"
     env_file:
-      - .env
+      # Portainer genera stack.env desde las variables del stack (no .env).
+      - stack.env
     environment:
       # REDIS_URL se construye aquí porque requiere composición con REDIS_PASSWORD.
-      # El operador ?Error hace que Docker falle si REDIS_PASSWORD está vacía o no definida en .env.
-      - REDIS_URL=redis://:${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en .env}@redis:6379/0
-      # Estos valores requieren interpolación cruzada de otras variables, no se pueden declarar como literales en .env
+      # El operador ?Error hace que Docker falle si REDIS_PASSWORD está vacía o no definida en stack.env.
+      - REDIS_URL=redis://:${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en stack.env}@redis:6379/0
+      # Estos valores requieren interpolación cruzada de otras variables, no se pueden declarar como literales en stack.env
       - IMPERSONATION_SECRET=${IMPERSONATION_SECRET:-${SUPABASE_SERVICE_ROLE_KEY}}
       - BRIDGE_SERVER_URL=${BRIDGE_SERVER_URL:-http://localhost:8001}
     extra_hosts:
@@ -47,10 +48,10 @@ services:
     command: ["arq", "worker.WorkerSettings"]
     working_dir: /app
     env_file:
-      - .env
+      - stack.env
     environment:
       # Misma lógica que en backend: REDIS_URL requiere composición y protección estricta.
-      - REDIS_URL=redis://:${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en .env}@redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en stack.env}@redis:6379/0
       - PYTHONUNBUFFERED=1
       # El worker siempre comunica con el backend por red interna de Docker, no por host.
       - BRIDGE_SERVER_URL=http://backend:8001
@@ -69,9 +70,9 @@ services:
     restart: unless-stopped
     networks:
       - ausarta-network
-    # Prevención estricta: si REDIS_PASSWORD no existe o está vacía en .env,
+    # Prevención estricta: si REDIS_PASSWORD no existe o está vacía en stack.env,
     # Docker Compose fallará al resolver la variable y no arrancará el contenedor.
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en .env}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en stack.env}
     volumes:
       - redis-data:/data
 
