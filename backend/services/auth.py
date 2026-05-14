@@ -230,7 +230,7 @@ _MEM_PROFILE_LOCK = asyncio.Lock()
 _USER_PROFILE_CACHE_PREFIX = "ausarta:user_profile:"
 
 
-async def _fetch_user_profile_row(user_id: str) -> dict:
+def _fetch_user_profile_row(user_id: str) -> dict:
     if not supabase:
         raise HTTPException(status_code=500, detail="No hay conexión con Supabase")
     try:
