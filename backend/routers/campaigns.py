@@ -377,14 +377,25 @@ async def get_result_transcription(result_id: int):
 async def get_agent_config_by_survey(survey_id: int):
     if not supabase: return JSONResponse(status_code=500, content={"error": "Supabase not connected"})
     try:
-        res_survey = supabase.table("encuestas").select("agent_id, nombre_cliente, empresa_id, campaign_id").eq("id", survey_id).execute()
+        res_survey = supabase.table("encuestas").select(
+            "agent_id, nombre_cliente, empresa_id, campaign_id"
+        ).eq("id", survey_id).execute()
         if not res_survey.data:
             return JSONResponse(status_code=404, content={"error": "Survey not found"})
 
         agent_id = res_survey.data[0].get("agent_id")
         nombre_cliente = res_survey.data[0].get("nombre_cliente")
         empresa_id = res_survey.data[0].get("empresa_id")
-        res_survey.data[0].get("campaign_id")
+        campaign_id = res_survey.data[0].get("campaign_id")
+
+        extraction_schema: list = []
+        if campaign_id:
+            try:
+                camp_res = supabase.table("campaigns").select("extraction_schema").eq("id", campaign_id).limit(1).execute()
+                if camp_res.data and camp_res.data[0].get("extraction_schema"):
+                    extraction_schema = camp_res.data[0]["extraction_schema"]
+            except Exception as schema_err:
+                logger.warning(f"No se pudo cargar extraction_schema de campaña {campaign_id}: {schema_err}")
 
         if not agent_id:
             return {
@@ -427,6 +438,8 @@ async def get_agent_config_by_survey(survey_id: int):
             "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
             "language": ai_data.get("language") or "es",
             "stt_provider": ai_data.get("stt_provider") or "deepgram",
+            "stt_model": ai_data.get("stt_model") or "nova-3",
+            "extraction_schema": extraction_schema,
             "company_context": agent_data.get("company_context") or "",
             "enthusiasm_level": agent_data.get("enthusiasm_level") or "Normal",
             "speaking_speed": agent_data.get("speaking_speed") or 1.0,

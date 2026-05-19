@@ -230,6 +230,33 @@ async def process_transcription_ai(
 # ──────────────────────────────────────────────────────────────────────────────
 # TAREA: Envío de Alertas del Sistema
 # ──────────────────────────────────────────────────────────────────────────────
+async def process_n8n_webhook(ctx: dict[str, Any], payload: dict) -> None:
+    """
+    Tarea ARQ: POST persistente a un webhook de n8n (p. ej. classify-agent).
+    Reemplaza asyncio.create_task() en routers para no perder peticiones al reiniciar la API.
+    """
+    import aiohttp
+
+    url = (payload or {}).get("url")
+    body = (payload or {}).get("body") or {}
+    if not url:
+        logger.warning("[ARQ] process_n8n_webhook: payload sin URL, ignorando")
+        return
+
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.post(url, json=body, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                if resp.status >= 400:
+                    text = await resp.text()
+                    logger.warning(
+                        f"[ARQ] Webhook n8n respondió HTTP {resp.status} para {url}: {text[:200]}"
+                    )
+                else:
+                    logger.info(f"[ARQ] Webhook n8n OK ({resp.status}): {url}")
+    except Exception as e:
+        logger.warning(f"[ARQ] Webhook n8n falló para {url}: {e}")
+
+
 async def process_system_alert(ctx: dict[str, Any], message: str, details: dict = None) -> None:
     """
     Procesa las alertas del sistema enviándolas a una tabla de base de datos,
@@ -663,6 +690,7 @@ class WorkerSettings:
         campaign_scheduler_task,
         dispatch_lead_drip_task,
         process_transcription_ai,
+        process_n8n_webhook,
         process_system_alert,
         campaign_orchestrator,
     ]

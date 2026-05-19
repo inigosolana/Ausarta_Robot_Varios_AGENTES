@@ -124,3 +124,22 @@ async def get_active_call_count() -> int:
     async for key in r.scan_iter(match=f"{LOCK_PREFIX}empresa:*"):
         keys.append(key)
     return len(keys)
+
+
+# ──────────────────────────────────────────────
+# Caché distribuida (valores con TTL)
+# ──────────────────────────────────────────────
+
+CACHE_PREFIX = "ausarta:cache:"
+
+
+async def cache_get(key: str) -> Optional[str]:
+    """Lee un valor de caché distribuida. Retorna None si no existe."""
+    r = await get_redis()
+    return await r.get(f"{CACHE_PREFIX}{key}")
+
+
+async def cache_set(key: str, value: str, ttl_seconds: int) -> None:
+    """Guarda un valor en caché distribuida con TTL."""
+    r = await get_redis()
+    await r.set(f"{CACHE_PREFIX}{key}", value, ex=ttl_seconds)

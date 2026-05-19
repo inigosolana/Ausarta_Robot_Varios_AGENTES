@@ -48,6 +48,90 @@ logging.basicConfig(
 logger = logging.getLogger("agent-dynamic")
 load_dotenv()
 
+
+def _require_bridge_server_url() -> str:
+    """URL interna del backend (obligatoria en Docker/multi-contenedor)."""
+    url = (os.getenv("BRIDGE_SERVER_URL_INTERNAL") or "").strip().rstrip("/")
+    if not url:
+        raise RuntimeError(
+            "BRIDGE_SERVER_URL_INTERNAL no está configurada. "
+            "En Docker debe apuntar al servicio backend (ej. http://backend:8001), "
+            "no a 127.0.0.1 del contenedor LiveKit."
+        )
+    return url
+
+
+# Precalculada al arranque del worker: falla rápido si falta la variable.
+BRIDGE_SERVER_URL_INTERNAL = _require_bridge_server_url()
+
+
+def _extraction_schema_to_json_schema(properties: list) -> dict[str, Any]:
+    """Convierte extraction_schema de campaña a JSON Schema (OpenAI strict)."""
+    props: dict[str, Any] = {}
+    required: list[str] = []
+    for item in properties:
+        if not isinstance(item, dict):
+            continue
+        key = (item.get("key") or "").strip()
+        if not key:
+            continue
+        field_type = (item.get("type") or "text").strip().lower()
+        if field_type == "boolean":
+            props[key] = {"type": "boolean", "description": item.get("label") or key}
+        elif field_type == "number":
+            props[key] = {"type": "number", "description": item.get("label") or key}
+        elif field_type == "enum":
+            options = item.get("options") or []
+            if options:
+                props[key] = {
+                    "type": "string",
+                    "enum": options,
+                    "description": item.get("label") or key,
+                }
+            else:
+                props[key] = {"type": "string", "description": item.get("label") or key}
+        else:
+            props[key] = {"type": "string", "description": item.get("label") or key}
+        required.append(key)
+    return {
+        "type": "object",
+        "properties": props,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def _build_guardar_encuesta_raw_schema(extraction_schema: list) -> dict[str, Any]:
+    """Schema OpenAI strict para la herramienta guardar_encuesta."""
+    datos_extra_schema = _extraction_schema_to_json_schema(extraction_schema)
+    return {
+        "type": "function",
+        "name": "guardar_encuesta",
+        "description": (
+            "Guarda los datos de la encuesta/llamada. "
+            "datos_extra debe cumplir el esquema de extracción definido."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "id_encuesta": {"type": "integer"},
+                "nota_comercial": {"type": ["integer", "null"]},
+                "nota_instalador": {"type": ["integer", "null"]},
+                "nota_rapidez": {"type": ["integer", "null"]},
+                "comentarios": {"type": ["string", "null"]},
+                "status": {
+                    "type": ["string", "null"],
+                    "enum": ["completed", "failed", "incomplete", "rejected_opt_out"],
+                },
+                "datos_extra": datos_extra_schema,
+            },
+            "required": ["id_encuesta", "datos_extra"],
+            "additionalProperties": False,
+        },
+    }
+
+
 from prompts import BASE_RULES, HUMAN_STYLE_RULES, HUMANIZATION_PROMPT, _LANG_OVERRIDE_MSGS
 
 _GLOBAL_VAD_MODEL = None
@@ -360,13 +444,8 @@ class DynamicAgent(Agent):
     """Agente dinámico que carga sus instrucciones desde Supabase."""
     
     def __init__(self, room_name: str, agent_config: dict) -> None:
-        # Base URL del backend/bridge. En despliegues multi-contenedor, 127.0.0.1 suele NO ser el backend.
-        # Priorizamos INTERNAL (misma red), luego BRIDGE_SERVER_URL (red docker / host), y por último loopback.
-        self.server_url = (
-            os.getenv("BRIDGE_SERVER_URL_INTERNAL")
-            or os.getenv("BRIDGE_SERVER_URL")
-            or "http://127.0.0.1:8001"
-        ).rstrip("/")
+        self.server_url = BRIDGE_SERVER_URL_INTERNAL
+        self._extraction_schema = agent_config.get("extraction_schema") or []
         self.data_saved = False
         self.room_name = room_name
         self.agent_config = agent_config
@@ -436,22 +515,66 @@ class DynamicAgent(Agent):
         full_instructions += "SIGUE ESTE GUION AL PIE DE LA LETRA:\n"
         full_instructions += f"{agent_instructions}\n\n"
 
-        extraction_schema = agent_config.get("extraction_schema")
+        extraction_schema = self._extraction_schema
         if extraction_schema and isinstance(extraction_schema, list) and len(extraction_schema) > 0:
-            import json
             schema_str = json.dumps(extraction_schema, ensure_ascii=False, indent=2)
             full_instructions += (
                 "IMPORTANTE - EXTRACCIÓN DE DATOS:\n"
-                "Al finalizar la llamada o al usar la herramienta 'guardar_encuesta', DEBES enviar un string JSON "
-                "en el argumento 'datos_extra'. Este JSON DEBE seguir estrictamente el siguiente esquema de variables "
-                "que necesitamos extraer de la conversación:\n"
+                "Al usar 'guardar_encuesta', el argumento 'datos_extra' se valida con JSON Schema estricto. "
+                "Completa todos los campos inferibles de la conversación:\n"
                 f"{schema_str}\n"
-                "Asegúrate de inferir y completar todos los campos posibles según lo que el cliente haya dicho, "
-                "respetando el tipo de cada campo ('boolean', 'number', 'text', 'enum'). "
-                "Para campos de tipo 'enum', el valor DEBE ser obligatoriamente una de las 'options' listadas.\n"
+                "Para campos 'enum', usa solo valores de 'options'.\n"
             )
 
-        super().__init__(instructions=full_instructions) # type: ignore
+        guardar_tools: list[Any] = []
+        if extraction_schema and isinstance(extraction_schema, list) and len(extraction_schema) > 0:
+            raw_schema = _build_guardar_encuesta_raw_schema(extraction_schema)
+
+            @function_tool(name="guardar_encuesta", raw_schema=raw_schema)
+            async def _tool_guardar_encuesta_strict(
+                ctx: RunContext, raw_arguments: dict[str, Any]
+            ) -> str | None:
+                datos = raw_arguments.get("datos_extra")
+                datos_str = json.dumps(datos, ensure_ascii=False) if isinstance(datos, dict) else datos
+                return await self._guardar_encuesta_impl(
+                    ctx,
+                    id_encuesta=int(raw_arguments.get("id_encuesta") or 0),
+                    nota_comercial=raw_arguments.get("nota_comercial"),
+                    nota_instalador=raw_arguments.get("nota_instalador"),
+                    nota_rapidez=raw_arguments.get("nota_rapidez"),
+                    comentarios=raw_arguments.get("comentarios"),
+                    status=raw_arguments.get("status"),
+                    datos_extra=datos_str,
+                )
+
+            guardar_tools.append(_tool_guardar_encuesta_strict)
+        else:
+
+            @function_tool(name="guardar_encuesta")
+            async def _tool_guardar_encuesta(
+                ctx: RunContext,
+                id_encuesta: int,
+                nota_comercial: Optional[int] = None,
+                nota_instalador: Optional[int] = None,
+                nota_rapidez: Optional[int] = None,
+                comentarios: Optional[str] = None,
+                status: Optional[str] = None,
+                datos_extra: Optional[str] = None,
+            ) -> str | None:
+                return await self._guardar_encuesta_impl(
+                    ctx,
+                    id_encuesta=id_encuesta,
+                    nota_comercial=nota_comercial,
+                    nota_instalador=nota_instalador,
+                    nota_rapidez=nota_rapidez,
+                    comentarios=comentarios,
+                    status=status,
+                    datos_extra=datos_extra,
+                )
+
+            guardar_tools.append(_tool_guardar_encuesta)
+
+        super().__init__(instructions=full_instructions, tools=guardar_tools)  # type: ignore
         logger.info(f"Agente '{agent_name}' creado (Survey: {self.survey_id})")
 
     async def on_enter(self, *args, **kwargs) -> None:
@@ -486,34 +609,24 @@ class DynamicAgent(Agent):
 
 
 
-    @function_tool(name="guardar_encuesta")
-    async def _http_tool_guardar_encuesta(
-        self, 
-        context: RunContext, 
-        id_encuesta: int, 
-        nota_comercial: Optional[int] = None, 
-        nota_instalador: Optional[int] = None, 
-        nota_rapidez: Optional[int] = None, 
+    async def _guardar_encuesta_impl(
+        self,
+        context: RunContext,
+        id_encuesta: int,
+        nota_comercial: Optional[int] = None,
+        nota_instalador: Optional[int] = None,
+        nota_rapidez: Optional[int] = None,
         comentarios: Optional[str] = None,
         status: Optional[str] = None,
-        datos_extra: Optional[str] = None
+        datos_extra: Optional[str | dict] = None,
     ) -> str | None:
-        """
-        Guarda los datos de la encuesta/llamada de forma flexible según el guion activo.
-        Analiza tu propio guion y adapta los campos:
-        - Si recoges notas numéricas, usa 'nota_comercial', 'nota_instalador' y/o 'nota_rapidez' (1-10).
-        - Si recoges respuestas abiertas, condicionales o cualquier dato no numérico, guarda esa estructura en 'datos_extra' como JSON string.
-          Ejemplo: '{"motivo_queja":"tardaron mucho","interesado":true}'.
-        - Si el guion es principalmente textual, usa 'comentarios' y/o 'datos_extra' para el resumen.
-        - Antes de despedirte, debes haber llamado a esta herramienta al menos una vez.
-        - 'status': 'completed', 'failed', 'incomplete' o 'rejected_opt_out'.
-        """
+        """Persiste datos de encuesta en el backend (invocado por la tool pública)."""
         self.data_saved = True
-        
+
         url = f"{self.server_url}/guardar-encuesta"
         real_id = int(self.survey_id) if str(self.survey_id).isdigit() else id_encuesta
 
-        if status == 'completed' and not comentarios:
+        if status == "completed" and not comentarios:
             comentarios = "Sin comentarios"
 
         payload: dict[str, Any] = {
@@ -522,23 +635,26 @@ class DynamicAgent(Agent):
             "nota_instalador": nota_instalador,
             "nota_rapidez": nota_rapidez,
             "comentarios": comentarios,
-            "status": status
+            "status": status,
         }
-        if datos_extra and isinstance(datos_extra, str):
-            try:
-                import json
-                payload["datos_extra"] = json.loads(datos_extra)
-            except Exception:
-                payload["datos_extra"] = {"raw": datos_extra}
-        
-        # IMPORTANTE: Await directo en vez de fire-and-forget para asegurar que se guarda
+        if datos_extra is not None:
+            if isinstance(datos_extra, dict):
+                payload["datos_extra"] = datos_extra
+            elif isinstance(datos_extra, str) and datos_extra.strip():
+                try:
+                    payload["datos_extra"] = json.loads(datos_extra)
+                except Exception:
+                    payload["datos_extra"] = {"raw": datos_extra}
+
         try:
             async with aiohttp.ClientSession() as sess:
                 async with sess.post(url, json=payload, timeout=10) as resp:
-                    logger.info(f"✅ guardar_encuesta tool: HTTP {resp.status} para encuesta {real_id}")
+                    logger.info(
+                        f"✅ [{self.room_name}] guardar_encuesta HTTP {resp.status} encuesta={real_id}"
+                    )
         except Exception as e:
-            logger.error(f"❌ Error en guardar_encuesta tool: {e}")
-        
+            logger.error(f"❌ [{self.room_name}] Error en guardar_encuesta: {e}")
+
         return "Dato guardado."
 
     @function_tool(name="transferir_a_agente_humano")
@@ -548,64 +664,78 @@ class DynamicAgent(Agent):
         motivo: str = "El cliente solicita hablar con una persona",
     ) -> str | None:
         """
-        Transfiere la llamada a un agente humano via SIP REFER.
+        Transfiere la llamada a un agente humano vía backend multi-tenant (Yeastar).
         Usa esta herramienta SOLO cuando el cliente pida EXPLÍCITAMENTE hablar con una persona.
         Antes de transferir:
         1. Confirma con el cliente: \"Entendido, le paso con un compañero. Un momento por favor.\"
         2. llama a esta herramienta.
         """
-        transfer_number = os.getenv("SIP_TRANSFER_NUMBER", "")
-        if not transfer_number:
-            logger.warning(f"⚠️ [{self.room_name}] SIP_TRANSFER_NUMBER no configurado. Transferencia no posible.")
-            return "Lo siento, no puedo transferir la llamada en este momento. ¿Puedo ayudarle en algo más?"
+        survey_id_raw = self.survey_id
+        survey_id: int | None = int(survey_id_raw) if str(survey_id_raw).isdigit() else None
 
-        logger.info(f"📞 [{self.room_name}] Transferencia solicitada → {transfer_number} (motivo: {motivo})")
+        logger.info(
+            f"📞 [{self.room_name}] Transferencia solicitada "
+            f"(survey={survey_id_raw}, motivo: {motivo})"
+        )
+
+        busy_message = "Lo siento, nuestros agentes están ocupados, ¿puedo tomar nota?"
 
         try:
-            # Notificar al backend para registro
             async with aiohttp.ClientSession() as sess:
                 await sess.post(
                     f"{self.server_url}/guardar-encuesta",
                     json={
-                        "id_encuesta": int(self.survey_id) if str(self.survey_id).isdigit() else 0,
+                        "id_encuesta": survey_id or 0,
                         "status": "transferred",
                         "comentarios": f"Transferido a humano: {motivo}",
                     },
                     timeout=8,
                 )
 
-            # SIP REFER via LiveKit API para transferir la llamada
-            from livekit import api as lk_api
-            lk = lk_api.LiveKitAPI()
-            try:
-                # Buscar el participante SIP activo en la sala
-                sip_participant = None
-                for p_id, p_info in context.session.room.remote_participants.items():
-                    identity = getattr(p_info, "identity", "")
-                    if identity.startswith("sip_") or identity.startswith("user_"):
-                        sip_participant = identity
-                        break
+                transfer_payload: dict[str, Any] = {"room_name": self.room_name}
+                if survey_id is not None:
+                    transfer_payload["survey_id"] = survey_id
+                if motivo:
+                    transfer_payload["motivo"] = motivo
 
-                if sip_participant:
-                    await lk.sip.transfer_sip_participant(
-                        lk_api.TransferSIPParticipantRequest(
-                            room_name=self.room_name,
-                            participant_identity=sip_participant,
-                            transfer_to=f"sip:{transfer_number}@trunk",
-                        )
+                async with sess.post(
+                    f"{self.server_url}/api/calls/transfer",
+                    json=transfer_payload,
+                    timeout=15,
+                ) as resp:
+                    if resp.status == 200:
+                        logger.info(f"✅ [{self.room_name}] Transferencia OK (survey={survey_id_raw})")
+                        current_session = getattr(self, "session", None)
+                        if current_session:
+                            try:
+                                await current_session.say(
+                                    "Transferencia en curso, un momento por favor",
+                                    allow_interruptions=False,
+                                )
+                            except Exception as say_err:
+                                logger.warning(f"⚠️ [{self.room_name}] No se pudo reproducir aviso TTS: {say_err}")
+                        return "Transferencia iniciada"
+
+                    body = await resp.text()
+                    logger.warning(
+                        f"⚠️ [{self.room_name}] Transferencia HTTP {resp.status}: {body[:300]}"
                     )
-                    logger.info(f"✅ [{self.room_name}] SIP REFER enviado para transferir a {transfer_number}")
-                else:
-                    logger.warning(f"⚠️ [{self.room_name}] No se encontró participante SIP para transferir")
-                    return "No puedo completar la transferencia ahora. ¿Puedo tomar nota de su consulta?"
-            finally:
-                await lk.aclose()
-
-            return "Transferencia iniciada. La llamada se está pasando a un compañero."
-
+                    current_session = getattr(self, "session", None)
+                    if current_session:
+                        try:
+                            await current_session.say(busy_message, allow_interruptions=True)
+                        except Exception:
+                            pass
+                    return busy_message
         except Exception as transfer_err:
-            logger.error(f"❌ [{self.room_name}] Error en transferencia SIP: {transfer_err}")
-            return "Ha habido un problema técnico con la transferencia. ¿Puedo tomar nota para que le llame un compañero?"
+            logger.error(f"❌ [{self.room_name}] Error en transferencia: {transfer_err}")
+            current_session = getattr(self, "session", None)
+            if current_session:
+                try:
+                    await current_session.say(busy_message, allow_interruptions=True)
+                except Exception:
+                    pass
+            return busy_message
 
 
     @function_tool(name="finalizar_llamada")
@@ -691,11 +821,7 @@ class DynamicAgent(Agent):
 # ============================================================================
 async def fetch_agent_config(survey_id: str, expected_empresa_id: str = "0") -> dict:
     """Consulta la API local para obtener la configuración del agente asignado a esta encuesta."""
-    server_url = (
-        os.getenv("BRIDGE_SERVER_URL_INTERNAL")
-        or os.getenv("BRIDGE_SERVER_URL")
-        or "http://127.0.0.1:8001"
-    ).rstrip("/")
+    server_url = BRIDGE_SERVER_URL_INTERNAL
     # Cache-busting y reintentos cortos para evitar lecturas obsoletas justo después de editar un agente.
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):
@@ -880,28 +1006,39 @@ async def entrypoint(ctx: JobContext):
         tts_model = agent_config.get("tts_model", "sonic-multilingual")
         language = agent_config.get("language", "es")
         stt_provider = agent_config.get("stt_provider", "deepgram")
+        stt_model = agent_config.get("stt_model", "nova-3")
         speaking_speed = agent_config.get("speaking_speed", 1.0)
-        
-        logger.info(f"🤖 [{job_id}] Config: LLM='{llm_model}', Voice='{voice_id}', Model='{tts_model}', Lang='{language}', STT='{stt_provider}', Speed='{speaking_speed}'")
+        has_strict_extraction = bool(
+            agent_config.get("extraction_schema")
+            and isinstance(agent_config.get("extraction_schema"), list)
+        )
+
+        logger.info(
+            f"🤖 [{job_id}] Config: LLM='{llm_model}', Voice='{voice_id}', TTS='{tts_model}', "
+            f"Lang='{language}', STT='{stt_provider}/{stt_model}', Speed='{speaking_speed}'"
+        )
 
         if language in ["eu", "gl"] or stt_provider == "openai":
             stt_plugin = openai.STT(language=language)
             logger.info("🎙️ Usando STT: OpenAI Whisper")
         else:
-            stt_plugin = deepgram.STT(model="nova-3", language=language)
-            logger.info("🎙️ Usando STT: Deepgram Nova-3")
+            stt_plugin = deepgram.STT(model=stt_model, language=language)
+            logger.info(f"🎙️ Usando STT: Deepgram {stt_model}")
 
         from livekit.agents.llm.fallback_adapter import FallbackAdapter  # type: ignore
 
         # LLM Principal: enruta a OpenAI si el modelo es de la familia GPT/o1/o3,
         # y a Groq (compatible OpenAI) para el resto (Llama, Mixtral, etc.)
         _is_openai_model = any(k in llm_model for k in ("gpt", "o1", "o3"))
+        llm_parallel_tools = False if has_strict_extraction else None
+
         if _is_openai_model:
             logger.info(f"🤖 [{job_id}] Modelo OpenAI detectado ('{llm_model}'). Usando endpoint OpenAI.")
             main_llm = openai.LLM(
                 model=llm_model,
                 api_key=os.getenv("OPENAI_API_KEY"),
                 temperature=0.35,
+                parallel_tool_calls=llm_parallel_tools,
             )
         else:
             logger.info(f"🤖 [{job_id}] Modelo Groq detectado ('{llm_model}'). Usando endpoint Groq.")
@@ -910,6 +1047,7 @@ async def entrypoint(ctx: JobContext):
                 base_url="https://api.groq.com/openai/v1",
                 api_key=os.getenv("GROQ_API_KEY"),
                 temperature=0.35,
+                parallel_tool_calls=llm_parallel_tools,
             )
 
         # LLM Secundario (OpenAI - gpt-4o-mini): fallback universal
@@ -917,6 +1055,7 @@ async def entrypoint(ctx: JobContext):
             model="gpt-4o-mini",
             api_key=os.getenv("OPENAI_API_KEY"),
             temperature=0.2,
+            parallel_tool_calls=llm_parallel_tools,
         )
 
         # Usar FallbackAdapter transparente al cliente
@@ -1200,12 +1339,7 @@ async def entrypoint(ctx: JobContext):
                 if t:
                     transcript_snapshot["transcript"] = t
                     transcript_snapshot["raw"] = raw
-                    _internal = (
-                        getattr(agent_instance, "server_url", None)
-                        or os.getenv("BRIDGE_SERVER_URL_INTERNAL")
-                        or os.getenv("BRIDGE_SERVER_URL")
-                        or "http://127.0.0.1:8001"
-                    ).rstrip("/")
+                    _internal = getattr(agent_instance, "server_url", BRIDGE_SERVER_URL_INTERNAL)
                     async with aiohttp.ClientSession() as _http:
                         _resp = await _http.post(
                             f"{_internal}/guardar-encuesta",
@@ -1526,12 +1660,7 @@ async def entrypoint(ctx: JobContext):
             
             try:
                 # Guardados post-llamada deben ir al mismo backend accesible desde este worker
-                internal_api_url = (
-                    getattr(agent_instance, "server_url", None)
-                    or os.getenv("BRIDGE_SERVER_URL_INTERNAL")
-                    or os.getenv("BRIDGE_SERVER_URL")
-                    or "http://127.0.0.1:8001"
-                ).rstrip("/")
+                internal_api_url = getattr(agent_instance, "server_url", BRIDGE_SERVER_URL_INTERNAL)
             
                 raw_messages = []
                 transcript = ""
@@ -1715,10 +1844,6 @@ if __name__ == "__main__":
         "🤖 Arrancando worker LiveKit | agent_name=%s | livekit_url=%s | bridge=%s",
         DISPATCH_AGENT_NAME,
         (os.getenv("LIVEKIT_URL") or "NO SET"),
-        (
-            os.getenv("BRIDGE_SERVER_URL_INTERNAL")
-            or os.getenv("BRIDGE_SERVER_URL")
-            or "http://127.0.0.1:8001"
-        ),
+        BRIDGE_SERVER_URL_INTERNAL,
     )
     cli.run_app(server)

@@ -4,12 +4,40 @@ from typing import Optional
 from services.supabase_service import supabase, get_ui_cache, clear_ui_cache
 from services.audit import log_audit_event
 from services.auth import CurrentUser, require_admin
+from services.queue_service import get_arq_pool
 from fastapi import Depends
 from datetime import datetime
 import logging
+import os
 
 logger = logging.getLogger("api-backend")
 DEFAULT_AUSARTA_VOICE_ID = "b5aa8098-49ef-475d-89b0-c9262ecf33fd"  # Chica castellano Cartesia
+DEFAULT_STT_MODEL = "nova-3"
+
+
+def _n8n_classify_agent_url() -> str | None:
+    """URL completa del webhook classify-agent; None si N8N_WEBHOOK_BASE_URL no está definida."""
+    base = (os.getenv("N8N_WEBHOOK_BASE_URL") or "").strip().rstrip("/")
+    if not base:
+        return None
+    return f"{base}/classify-agent"
+
+
+async def _enqueue_classify_agent_webhook(agent_id: str, instructions: str) -> None:
+    url = _n8n_classify_agent_url()
+    if not url:
+        logger.debug("[agents] N8N_WEBHOOK_BASE_URL no definida; omitiendo classify-agent")
+        return
+    try:
+        arq = await get_arq_pool()
+        await arq.enqueue_job(
+            "process_n8n_webhook",
+            {"url": url, "body": {"agent_id": agent_id, "instructions": instructions}},
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ [agents] No se pudo encolar webhook classify-agent: {e}")
+
+
 DEFAULT_HUMAN_INSTRUCTIONS = (
     "Habla como una persona real en llamada: tono cercano, frases cortas y naturales. "
     "Si te interrumpen, párate y retoma con amabilidad. "
@@ -149,21 +177,8 @@ async def update_agent(agent_id: str, config: dict, current_user: CurrentUser = 
             else:
                 supabase.table("ai_config").insert(ai_config).execute()
         
-        # Classification Hook
         if "instructions" in config:
-            async def call_webhook():
-                try:
-                    import aiohttp
-                    import os
-                    n8n_base = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
-                    url = f"{n8n_base}/classify-agent"
-                    payload = {"agent_id": agent_id, "instructions": config["instructions"]}
-                    async with aiohttp.ClientSession() as sess:
-                        await sess.post(url, json=payload)
-                except Exception as e:
-                    logger.warning(f"⚠️ [agents] Webhook classify-agent falló (update): {e}")
-            import asyncio
-            asyncio.create_task(call_webhook())
+            await _enqueue_classify_agent_webhook(str(agent_id), config["instructions"])
         
         await clear_ui_cache("agents_list")
         await log_audit_event(
@@ -216,25 +231,12 @@ async def create_agent(config: dict, current_user: CurrentUser = Depends(require
             "tts_model": config.get("tts_model", "sonic-multilingual"),
             "tts_voice": config.get("voice_id") or config.get("tts_voice", DEFAULT_AUSARTA_VOICE_ID),
             "stt_provider": config.get("stt_provider", "deepgram"),
-            "stt_model": config.get("stt_model", "nova-2"),
+            "stt_model": config.get("stt_model", DEFAULT_STT_MODEL),
             "language": config.get("language", "es")
         }
         supabase.table("ai_config").insert(ai_config).execute()
 
-        # Classification Hook
-        async def call_webhook():
-            try:
-                import aiohttp
-                import os
-                n8n_base = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
-                url = f"{n8n_base}/classify-agent"
-                payload = {"agent_id": str(new_id), "instructions": db_config["instructions"]}
-                async with aiohttp.ClientSession() as sess:
-                    await sess.post(url, json=payload)
-            except Exception as e:
-                logger.warning(f"⚠️ [agents] Webhook classify-agent falló (create): {e}")
-        import asyncio
-        asyncio.create_task(call_webhook())
+        await _enqueue_classify_agent_webhook(str(new_id), db_config["instructions"])
 
         await clear_ui_cache("agents_list")
         await log_audit_event(

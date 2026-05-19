@@ -9,10 +9,20 @@ Responsabilidades:
     para actualizar el estado de los leads sin polling.
   - /api/telephony/yeastar: CRUD de la configuración Yeastar PBX por empresa.
   - /api/telephony/yeastar/test: prueba la conexión en tiempo real sin persistir.
+  - /api/calls/transfer: transferencia multi-tenant a agente humano (Yeastar).
+  - /api/telephony/transfer: alias legacy del endpoint de transferencia.
 """
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, HTTPException
 from fastapi.responses import JSONResponse
-from models.schemas import CallEndRequest, EncuestaData, YeastarPSeriesConfigCreate, YeastarPSeriesConfigResponse, YeastarPSeriesConfigTest
+from models.schemas import (
+    CallEndRequest,
+    CallTransferRequest,
+    EncuestaData,
+    TelephonyTransferRequest,
+    YeastarPSeriesConfigCreate,
+    YeastarPSeriesConfigResponse,
+    YeastarPSeriesConfigTest,
+)
 from services.supabase_service import supabase, sb_query
 from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
 from services.yeastar_service import YeastarPSeriesClient
@@ -173,10 +183,212 @@ async def test_yeastar_connection(
         pbx_url=payload.yeastar_pbx_url,
         client_id=payload.yeastar_client_id,
         client_secret=client_secret,
+        tenant_id=target_empresa_id,
     )
 
     ok, message = await client.test_connection()
+    await client.close()
     return {"ok": ok, "message": message}
+
+
+def _parse_datos_extra(raw: object) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            import json as _json
+            parsed = _json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+async def _resolve_survey_id(room_name: str, survey_id: int | None) -> int:
+    """Obtiene survey_id del body o extrayéndolo del nombre de sala LiveKit."""
+    if survey_id:
+        return survey_id
+    extracted = _extract_encuesta_id_from_room(room_name.strip())
+    if extracted:
+        return extracted
+    raise HTTPException(
+        status_code=400,
+        detail="No se pudo determinar survey_id. Envíe survey_id o un room_name válido (ej. ..._encuesta_123).",
+    )
+
+
+async def _load_yeastar_tenant_config(empresa_id: int) -> dict:
+    """
+    Credenciales Yeastar del tenant (tabla empresas).
+    target_extension: variable de entorno global o datos_extra de la encuesta.
+    """
+    emp_res = await sb_query(
+        lambda: supabase.table("empresas")
+        .select("id, yeastar_pbx_url, yeastar_client_id, yeastar_client_secret")
+        .eq("id", empresa_id)
+        .limit(1)
+        .execute()
+    )
+    if not emp_res.data:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+    emp = emp_res.data[0]
+    if not emp.get("yeastar_pbx_url") or not emp.get("yeastar_client_id"):
+        raise HTTPException(
+            status_code=400,
+            detail="Centralita Yeastar no configurada para esta empresa",
+        )
+    if not emp.get("yeastar_client_secret"):
+        raise HTTPException(status_code=400, detail="Credenciales Yeastar incompletas")
+
+    return emp
+
+
+def _resolve_target_extension(
+    datos_extra: dict,
+    explicit: str | None = None,
+) -> str:
+    ext = (
+        (explicit or "").strip()
+        or (os.getenv("YEASTAR_HUMAN_TRANSFER_EXTENSION") or "").strip()
+        or str(datos_extra.get("target_extension") or "").strip()
+        or str(datos_extra.get("human_transfer_extension") or "").strip()
+    )
+    if not ext:
+        raise HTTPException(
+            status_code=400,
+            detail="Extensión de transferencia no configurada (YEASTAR_HUMAN_TRANSFER_EXTENSION).",
+        )
+    return ext
+
+
+async def _execute_yeastar_transfer(
+    *,
+    room_name: str,
+    survey_id: int,
+    motivo: str | None = None,
+    call_id: str | None = None,
+    target_extension: str | None = None,
+    yeastar_call_id: str | None = None,
+) -> dict:
+    """Lógica compartida de transferencia multi-tenant vía Yeastar P-Series."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    room_name = room_name.strip()
+
+    enc_res = await sb_query(
+        lambda sid=survey_id: supabase.table("encuestas")
+        .select("id, empresa_id, telefono, datos_extra, status")
+        .eq("id", sid)
+        .limit(1)
+        .execute()
+    )
+    if not enc_res.data:
+        raise HTTPException(status_code=404, detail=f"Encuesta {survey_id} no encontrada")
+
+    enc = enc_res.data[0]
+    empresa_id = enc.get("empresa_id")
+    if not empresa_id:
+        logger.error(f"[transfer] Encuesta {survey_id} sin empresa_id (room={room_name})")
+        raise HTTPException(status_code=400, detail="Encuesta sin empresa asociada")
+
+    emp = await _load_yeastar_tenant_config(empresa_id)
+    datos_extra = _parse_datos_extra(enc.get("datos_extra"))
+
+    resolved_call_id = (
+        call_id
+        or yeastar_call_id
+        or datos_extra.get("yeastar_callid")
+        or datos_extra.get("yeastar_call_id")
+        or room_name
+    )
+    resolved_extension = _resolve_target_extension(datos_extra, target_extension)
+
+    client_secret = decrypt_data(emp["yeastar_client_secret"])
+    client = YeastarPSeriesClient(
+        pbx_url=emp["yeastar_pbx_url"],
+        client_id=emp["yeastar_client_id"],
+        client_secret=client_secret,
+        tenant_id=empresa_id,
+    )
+
+    try:
+        await client.transfer_call(str(resolved_call_id), resolved_extension)
+    except Exception as exc:
+        logger.error(
+            f"[transfer] Fallo Yeastar empresa={empresa_id} survey={survey_id} "
+            f"room={room_name} call_id={resolved_call_id}: {exc}"
+        )
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        await client.close()
+
+    motivo_text = (motivo or "Transferencia a agente humano").strip()
+    merged_extra = {
+        **datos_extra,
+        "transfer_room": room_name,
+        "transfer_extension": resolved_extension,
+        "yeastar_callid": str(resolved_call_id),
+    }
+    await sb_query(
+        lambda sid=survey_id, extra=merged_extra, m=motivo_text, ext=resolved_extension: supabase.table("encuestas")
+        .update({
+            "status": "transferred",
+            "comentarios": f"Transferido a ext {ext}: {m}",
+            "datos_extra": extra,
+        })
+        .eq("id", sid)
+        .execute()
+    )
+
+    logger.info(
+        f"✅ [transfer] empresa={empresa_id} survey={survey_id} "
+        f"call_id={resolved_call_id} → ext {resolved_extension} room={room_name}"
+    )
+    return {
+        "status": "ok",
+        "message": "Transferencia iniciada en la centralita",
+        "empresa_id": empresa_id,
+        "survey_id": survey_id,
+        "room_name": room_name,
+        "call_id": str(resolved_call_id),
+        "target_extension": resolved_extension,
+    }
+
+
+@router.post("/api/calls/transfer")
+async def transfer_call_to_human(payload: CallTransferRequest):
+    """
+    Transfiere una llamada LiveKit a un agente humano en la PBX Yeastar del tenant.
+
+    Body: ``room_name`` (obligatorio), ``survey_id`` (opcional si el room lo incluye).
+  """
+    room_name = payload.room_name.strip()
+    if not room_name:
+        raise HTTPException(status_code=400, detail="room_name es obligatorio")
+
+    survey_id = await _resolve_survey_id(room_name, payload.survey_id)
+
+    return await _execute_yeastar_transfer(
+        room_name=room_name,
+        survey_id=survey_id,
+        motivo=payload.motivo,
+        call_id=room_name,
+    )
+
+
+@router.post("/api/telephony/transfer")
+async def transfer_call_to_human_legacy(payload: TelephonyTransferRequest):
+    """Alias legacy; prefiere call_id de Yeastar si está en BD."""
+    return await _execute_yeastar_transfer(
+        room_name=payload.room_name.strip(),
+        survey_id=payload.survey_id,
+        motivo=payload.motivo,
+        call_id=None,
+        target_extension=payload.target_extension,
+        yeastar_call_id=payload.yeastar_call_id,
+    )
 
 # Hardening: IP Whitelist for Yeastar Webhooks (example placeholder)
 YEASTAR_IP_WHITELIST = os.getenv("YEASTAR_IP_WHITELIST", "").split(",")
@@ -219,11 +431,64 @@ async def _process_yeastar_event(payload: dict):
         event_action = payload.get("action")
         call_id = payload.get("callid")
         logger.info(f"📞 [Yeastar Background] Procesando {event_action} para callid {call_id}")
-        
-        # Aquí iría la lógica de actualización de estados, 
-        # notificación a agentes IA, etc.
-        # Ejemplo: if event_action == "CallAnswered": ...
-        
+
+        if not call_id or not supabase:
+            return
+
+        # Vincular callid de Yeastar con encuesta activa por teléfono (normalizado)
+        caller = (
+            payload.get("caller")
+            or payload.get("from")
+            or payload.get("src")
+            or payload.get("callernumber")
+            or ""
+        )
+        callee = (
+            payload.get("callee")
+            or payload.get("to")
+            or payload.get("dst")
+            or payload.get("calleenumber")
+            or ""
+        )
+        phone_candidates = [p for p in (caller, callee) if p]
+
+        for raw_phone in phone_candidates:
+            digits = "".join(c for c in str(raw_phone) if c.isdigit())
+            if len(digits) < 6:
+                continue
+            tail = digits[-9:] if len(digits) >= 9 else digits
+            enc_res = await sb_query(
+                lambda t=tail: supabase.table("encuestas")
+                .select("id, datos_extra")
+                .in_("status", ["initiated", "calling", "in_progress"])
+                .ilike("telefono", f"%{t}%")
+                .order("id", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if not enc_res.data:
+                continue
+
+            row = enc_res.data[0]
+            extra = row.get("datos_extra") or {}
+            if isinstance(extra, str):
+                try:
+                    import json as _json
+                    extra = _json.loads(extra)
+                except Exception:
+                    extra = {}
+            extra["yeastar_callid"] = str(call_id)
+            await sb_query(
+                lambda eid=row["id"], ex=extra: supabase.table("encuestas")
+                .update({"datos_extra": ex})
+                .eq("id", eid)
+                .execute()
+            )
+            logger.info(
+                f"📞 [Yeastar] callid {call_id} vinculado a encuesta {row['id']} (tel ~{tail})"
+            )
+            break
+
     except Exception as e:
         logger.error(f"❌ Error en BackgroundTask de Yeastar: {e}")
 
