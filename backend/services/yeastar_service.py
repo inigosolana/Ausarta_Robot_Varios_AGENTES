@@ -177,6 +177,35 @@ class YeastarPSeriesClient:
             logger.error(f"[Yeastar] [{self.tenant_label}] Unexpected error during test: {exc}")
             return False, f"Error inesperado: {exc}"
 
+    async def get_extension_status(self, extension: str) -> str:
+        """
+        Consulta el estado de una extensión en la PBX (Idle, Busy, etc.).
+        """
+        try:
+            token = await self.get_access_token()
+            response = await self._post(
+                "/api/v2.0/extension/query",
+                {"number": extension},
+                token=token,
+            )
+            if response.get("errcode") == 0 and response.get("data"):
+                for item in response.get("data", []):
+                    if not isinstance(item, dict):
+                        continue
+                    ext_num = str(item.get("number") or item.get("extension") or "")
+                    if ext_num == str(extension):
+                        return str(item.get("status") or "Unregistered")
+                return "Unregistered"
+            logger.warning(
+                f"[Yeastar] [{self.tenant_label}] extension/query sin datos para ext {extension}: {response}"
+            )
+            return "Error"
+        except Exception as exc:
+            logger.warning(
+                f"[Yeastar] [{self.tenant_label}] get_extension_status({extension}): {exc}"
+            )
+            return "Error"
+
     async def transfer_call(self, call_id: str, target_extension: str) -> dict:
         """
         Transfer an ongoing call to a target extension.

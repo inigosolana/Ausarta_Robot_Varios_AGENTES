@@ -360,22 +360,131 @@ async def _execute_yeastar_transfer(
 @router.post("/api/calls/transfer")
 async def transfer_call_to_human(payload: CallTransferRequest):
     """
-    Transfiere una llamada LiveKit a un agente humano en la PBX Yeastar del tenant.
+    Transfiere una llamada a extensión humana tras comprobar que está Idle en Yeastar.
 
-    Body: ``room_name`` (obligatorio), ``survey_id`` (opcional si el room lo incluye).
-  """
+    Body: ``room_name``, ``empresa_id``, ``call_id``, ``extension`` (default 1000).
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
     room_name = payload.room_name.strip()
     if not room_name:
         raise HTTPException(status_code=400, detail="room_name es obligatorio")
 
-    survey_id = await _resolve_survey_id(room_name, payload.survey_id)
+    if not payload.empresa_id:
+        raise HTTPException(status_code=400, detail="empresa_id es obligatorio")
 
-    return await _execute_yeastar_transfer(
-        room_name=room_name,
-        survey_id=survey_id,
-        motivo=payload.motivo,
-        call_id=room_name,
+    call_id = (payload.call_id or "").strip()
+    if not call_id:
+        raise HTTPException(status_code=400, detail="call_id es obligatorio")
+
+    extension = (payload.extension or "1000").strip()
+    empresa_id = int(payload.empresa_id)
+
+    emp_res = await sb_query(
+        lambda eid=empresa_id: supabase.table("empresas")
+        .select("id, yeastar_pbx_url, yeastar_client_id, yeastar_client_secret")
+        .eq("id", eid)
+        .limit(1)
+        .execute()
     )
+    if not emp_res.data:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+    emp = emp_res.data[0]
+    pbx_url = emp.get("yeastar_pbx_url") or emp.get("yeastar_url")
+    client_id = emp.get("yeastar_client_id")
+    client_secret_enc = emp.get("yeastar_client_secret") or emp.get("yeastar_secret")
+
+    if not pbx_url or not client_id or not client_secret_enc:
+        logger.warning(f"[transfer] Yeastar no configurado para empresa_id={empresa_id}")
+        raise HTTPException(
+            status_code=404,
+            detail="Centralita Yeastar no configurada para esta empresa",
+        )
+
+    client_secret = decrypt_data(client_secret_enc)
+    yeastar_client = YeastarPSeriesClient(
+        pbx_url=pbx_url,
+        client_id=client_id,
+        client_secret=client_secret,
+        tenant_id=empresa_id,
+    )
+
+    try:
+        ext_status = await yeastar_client.get_extension_status(extension)
+        if ext_status != "Idle":
+            logger.info(
+                f"[transfer] Extensión {extension} no disponible (status={ext_status}) "
+                f"empresa={empresa_id} room={room_name}"
+            )
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "message": f"Extensión ocupada ({ext_status})",
+                    "status": ext_status,
+                },
+            )
+
+        await yeastar_client.transfer_call(call_id, extension)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            f"[transfer] Error Yeastar empresa={empresa_id} call_id={call_id}: {exc}"
+        )
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        await yeastar_client.close()
+
+    survey_id = payload.survey_id
+    if survey_id is None:
+        survey_id = _extract_encuesta_id_from_room(room_name)
+
+    if survey_id:
+        motivo_text = (payload.motivo or "Transferencia a agente humano").strip()
+        try:
+            enc_res = await sb_query(
+                lambda sid=survey_id: supabase.table("encuestas")
+                .select("datos_extra")
+                .eq("id", sid)
+                .limit(1)
+                .execute()
+            )
+            datos_extra = _parse_datos_extra(
+                enc_res.data[0].get("datos_extra") if enc_res.data else {}
+            )
+            merged_extra = {
+                **datos_extra,
+                "transfer_room": room_name,
+                "transfer_extension": extension,
+                "yeastar_callid": call_id,
+            }
+            await sb_query(
+                lambda sid=survey_id, extra=merged_extra, m=motivo_text, ext=extension: supabase.table("encuestas")
+                .update({
+                    "status": "transferred",
+                    "comentarios": f"Transferido a ext {ext}: {m}",
+                    "datos_extra": extra,
+                })
+                .eq("id", sid)
+                .execute()
+            )
+        except Exception as db_err:
+            logger.warning(f"[transfer] No se pudo actualizar encuesta {survey_id}: {db_err}")
+
+    logger.info(
+        f"✅ [transfer] empresa={empresa_id} call_id={call_id} → ext {extension} room={room_name}"
+    )
+    return {
+        "status": "ok",
+        "message": "Transferencia iniciada en la centralita",
+        "empresa_id": empresa_id,
+        "room_name": room_name,
+        "call_id": call_id,
+        "extension": extension,
+        "extension_status": ext_status,
+    }
 
 
 @router.post("/api/telephony/transfer")

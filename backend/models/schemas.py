@@ -129,6 +129,9 @@ class YeastarPSeriesConfigResponse(YeastarPSeriesConfigBase):
 class CallTransferRequest(BaseModel):
     """Transferencia a agente humano (agente LiveKit → backend → Yeastar)."""
     room_name: str
+    empresa_id: int
+    call_id: str
+    extension: str = "1000"
     survey_id: Optional[int] = None
     motivo: Optional[str] = None
 

@@ -3,6 +3,7 @@ from typing import Optional, Any
 import os
 import aiohttp
 import asyncio
+import redis.asyncio as aioredis
 import sys
 import json
 import re
@@ -63,6 +64,24 @@ def _require_bridge_server_url() -> str:
 
 # Precalculada al arranque del worker: falla rápido si falta la variable.
 BRIDGE_SERVER_URL_INTERNAL = _require_bridge_server_url()
+
+_AGENT_CONFIG_CACHE_TTL = 3600
+_REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+
+def _validate_agent_config_tenant(config: dict, expected_empresa_id: str) -> None:
+    """Sello multi-tenant: la config cacheada debe pertenecer al tenant de la sala."""
+    config_empresa_id = str(config.get("empresa_id", "0"))
+    if (
+        expected_empresa_id
+        and expected_empresa_id != "0"
+        and config_empresa_id != "0"
+        and expected_empresa_id != config_empresa_id
+    ):
+        raise Exception(
+            f"Violación de seguridad Multi-Tenant: El ID de la empresa no coincide. "
+            f"Metadata: {expected_empresa_id}, Config: {config_empresa_id}"
+        )
 
 
 def _extraction_schema_to_json_schema(properties: list) -> dict[str, Any]:
@@ -449,6 +468,7 @@ class DynamicAgent(Agent):
         self.data_saved = False
         self.room_name = room_name
         self.agent_config = agent_config
+        self.empresa_id = str(agent_config.get("empresa_id", "0") or "0")
         self.greeting = agent_config.get("greeting", "Buenas, ¿tiene un momento?")
         self.company_context = agent_config.get("company_context", "") or ""
         self.enthusiasm_level = agent_config.get("enthusiasm_level", "Normal") or "Normal"
@@ -692,20 +712,52 @@ class DynamicAgent(Agent):
                     timeout=8,
                 )
 
-                transfer_payload: dict[str, Any] = {"room_name": self.room_name}
+                empresa_id_raw = (
+                    getattr(self, "empresa_id", None)
+                    or self.agent_config.get("empresa_id")
+                    or "0"
+                )
+                try:
+                    empresa_id_int = int(empresa_id_raw)
+                except (TypeError, ValueError):
+                    empresa_id_int = 0
+
+                datos_extra = self.agent_config.get("datos_extra") or {}
+                if isinstance(datos_extra, str):
+                    try:
+                        datos_extra = json.loads(datos_extra)
+                    except Exception:
+                        datos_extra = {}
+                yeastar_call_id = (
+                    datos_extra.get("yeastar_callid")
+                    or datos_extra.get("yeastar_call_id")
+                    if isinstance(datos_extra, dict)
+                    else None
+                )
+
+                transfer_payload: dict[str, Any] = {
+                    "room_name": self.room_name,
+                    "empresa_id": empresa_id_int,
+                    "call_id": str(yeastar_call_id or self.room_name),
+                    "extension": os.getenv("YEASTAR_HUMAN_TRANSFER_EXTENSION", "1000"),
+                }
                 if survey_id is not None:
                     transfer_payload["survey_id"] = survey_id
                 if motivo:
                     transfer_payload["motivo"] = motivo
+
+                if not empresa_id_int:
+                    logger.warning(f"⚠️ [{self.room_name}] empresa_id no disponible para transferencia")
+                    return busy_message
 
                 async with sess.post(
                     f"{self.server_url}/api/calls/transfer",
                     json=transfer_payload,
                     timeout=15,
                 ) as resp:
+                    current_session = getattr(self, "session", None)
                     if resp.status == 200:
                         logger.info(f"✅ [{self.room_name}] Transferencia OK (survey={survey_id_raw})")
-                        current_session = getattr(self, "session", None)
                         if current_session:
                             try:
                                 await current_session.say(
@@ -716,11 +768,32 @@ class DynamicAgent(Agent):
                                 logger.warning(f"⚠️ [{self.room_name}] No se pudo reproducir aviso TTS: {say_err}")
                         return "Transferencia iniciada"
 
+                    elif resp.status == 409:
+                        logger.warning(
+                            f"⚠️ [{self.room_name}] Extensión ocupada (HTTP 409) empresa={empresa_id_int}"
+                        )
+                        extension_busy_msg = (
+                            "Lo siento, acabo de comprobarlo y todos mis compañeros están ocupados "
+                            "en este momento. ¿Le importaría contarme el motivo de su consulta o "
+                            "prefiere que le tomemos nota para llamarle más tarde?"
+                        )
+                        if current_session:
+                            try:
+                                await current_session.say(
+                                    extension_busy_msg,
+                                    allow_interruptions=True,
+                                )
+                            except Exception:
+                                pass
+                        return (
+                            "La transferencia falló porque la extensión está ocupada. "
+                            "Sigue la conversación ofreciendo tomar nota."
+                        )
+
                     body = await resp.text()
                     logger.warning(
                         f"⚠️ [{self.room_name}] Transferencia HTTP {resp.status}: {body[:300]}"
                     )
-                    current_session = getattr(self, "session", None)
                     if current_session:
                         try:
                             await current_session.say(busy_message, allow_interruptions=True)
@@ -820,9 +893,24 @@ class DynamicAgent(Agent):
 # FUNCIÓN PARA OBTENER LA CONFIGURACIÓN DEL AGENTE DESDE LA API
 # ============================================================================
 async def fetch_agent_config(survey_id: str, expected_empresa_id: str = "0") -> dict:
-    """Consulta la API local para obtener la configuración del agente asignado a esta encuesta."""
+    """Consulta config del agente: Redis (TTL 1h) → HTTP fallback → escribe en Redis."""
+    cache_key = f"ausarta:agent_config:survey_{survey_id}"
+
+    try:
+        redis_client = aioredis.from_url(_REDIS_URL, decode_responses=True)
+        try:
+            cached_raw = await redis_client.get(cache_key)
+            if cached_raw:
+                config = json.loads(cached_raw)
+                _validate_agent_config_tenant(config, expected_empresa_id)
+                logger.info(f"📋 Config desde Redis para survey {survey_id}")
+                return config
+        finally:
+            await redis_client.close()
+    except Exception as cache_err:
+        logger.warning(f"⚠️ Redis cache miss/error para survey {survey_id}: {cache_err}")
+
     server_url = BRIDGE_SERVER_URL_INTERNAL
-    # Cache-busting y reintentos cortos para evitar lecturas obsoletas justo después de editar un agente.
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):
         url = f"{server_url}/api/agent_config_by_survey/{survey_id}?_ts={int(asyncio.get_running_loop().time() * 1000)}"
@@ -835,28 +923,39 @@ async def fetch_agent_config(survey_id: str, expected_empresa_id: str = "0") -> 
                 ) as resp:
                     if resp.status == 200:
                         config = await resp.json()
+                        _validate_agent_config_tenant(config, expected_empresa_id)
 
-                        # SELLO DE SEGURIDAD MULTI-TENANT
-                        config_empresa_id = str(config.get("empresa_id", "0"))
-                        if expected_empresa_id and expected_empresa_id != "0" and config_empresa_id != "0" and expected_empresa_id != config_empresa_id:
-                            raise Exception(f"Violación de seguridad Multi-Tenant: El ID de la empresa no coincide. Metadata: {expected_empresa_id}, Config: {config_empresa_id}")
+                        try:
+                            redis_client = aioredis.from_url(_REDIS_URL, decode_responses=True)
+                            try:
+                                await redis_client.set(
+                                    cache_key,
+                                    json.dumps(config, ensure_ascii=False),
+                                    ex=_AGENT_CONFIG_CACHE_TTL,
+                                )
+                            finally:
+                                await redis_client.close()
+                        except Exception as write_err:
+                            logger.warning(
+                                f"⚠️ No se pudo cachear config en Redis survey {survey_id}: {write_err}"
+                            )
 
                         logger.info(
-                            f"📋 Config FRESH obtenida para survey {survey_id} (attempt {attempt}/{max_attempts}): "
+                            f"📋 Config HTTP para survey {survey_id} (attempt {attempt}/{max_attempts}): "
                             f"nombre='{config.get('name')}', modelo='{config.get('llm_model')}', "
                             f"cfg_updated_at='{config.get('config_updated_at')}'"
                         )
                         return config
-                    else:
-                        logger.warning(
-                            f"⚠️ Intento {attempt}/{max_attempts}: no se pudo obtener config (HTTP {resp.status})"
-                        )
+                    logger.warning(
+                        f"⚠️ Intento {attempt}/{max_attempts}: no se pudo obtener config (HTTP {resp.status})"
+                    )
         except Exception as e:
+            if "Violación de seguridad" in str(e):
+                raise
             logger.warning(
                 f"⚠️ Intento {attempt}/{max_attempts}: error obteniendo config de agente: {e}"
             )
 
-        # Pequeño backoff para dar tiempo a propagación de update en edge cases
         if attempt < max_attempts:
             await asyncio.sleep(0.25 * attempt)
 
