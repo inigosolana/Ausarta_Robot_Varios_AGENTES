@@ -152,7 +152,9 @@ def _build_guardar_encuesta_raw_schema(extraction_schema: list) -> dict[str, Any
     }
 
 
-from prompts import BASE_RULES, HUMAN_STYLE_RULES, HUMANIZATION_PROMPT, _LANG_OVERRIDE_MSGS
+from prompts import _LANG_OVERRIDE_MSGS
+from utils.call_analyzer import analyze_call_disposition
+from utils.prompt_builder import build_agent_prompt
 
 _GLOBAL_VAD_MODEL = None
 _VAD_LOCK = asyncio.Lock()
@@ -247,20 +249,6 @@ def _detect_language(text: str) -> str | None:
             return lang_code
 
     return None
-
-
-ENTHUSIASM_INSTRUCTIONS = {
-    "Bajo": "Mantén un tono calmado, pausado y profesional. Evita sonar efusivo.",
-    "Normal": "Mantén un tono cercano, claro y profesional con energía equilibrada.",
-    "Alto": "Habla con energía positiva y dinamismo, sin perder claridad ni profesionalidad.",
-    "Extremo": "Usa un tono muy entusiasta y motivador, con mucha energía y amabilidad.",
-}
-
-
-def _resolve_enthusiasm_instruction(level: str) -> str:
-    if level in ENTHUSIASM_INSTRUCTIONS:
-        return ENTHUSIASM_INSTRUCTIONS[level]
-    return ENTHUSIASM_INSTRUCTIONS["Normal"]
 
 
 def _is_uuid_like(value: str) -> bool:
@@ -493,59 +481,19 @@ class DynamicAgent(Agent):
         except:
             self.survey_id = "0"
 
-        # Combinar las instrucciones específicas del agente con las reglas base
-        agent_instructions = agent_config.get("instructions", "Eres un asistente virtual.")
-        agent_name = agent_config.get("name", "Bot")
-        company_name = (
-            agent_config.get("company_name")
-            or agent_config.get("empresa_nombre")
-            or "Ausarta"
-        )
-        
-        base_rules_to_use = BASE_RULES
-        
-        # Construcción del Prompt Final: Reglas -> Datos -> GUION (EL GUION ES LO MÁS IMPORTANTE)
-        full_instructions = f"{base_rules_to_use}\n\n"
-        full_instructions += f"{HUMAN_STYLE_RULES}\n\n"
-        full_instructions += f"{HUMANIZATION_PROMPT}\n\n"
-        full_instructions += f"DATOS DEL AGENTE:\n- NOMBRE: {agent_name}\n- EMPRESA: {company_name}\n"
-        full_instructions += f"- NIVEL DE ENTUSIASMO: {self.enthusiasm_level}\n"
-        full_instructions += f"- VELOCIDAD DE VOZ OBJETIVO: {self.speaking_speed}\n\n"
-        full_instructions += "CONTEXTO DE EMPRESA (Knowledge Base):\n"
-        full_instructions += f"{self.company_context if self.company_context else 'No disponible.'}\n\n"
-        full_instructions += (
-            "REGLAS DE USO DEL CONTEXTO DE EMPRESA:\n"
-            "- Si el cliente pregunta por servicios, productos, precios, horarios, garantías o políticas, "
-            "responde SIEMPRE usando primero el CONTEXTO DE EMPRESA.\n"
-            "- No inventes datos fuera del CONTEXTO DE EMPRESA.\n"
-            "- Si la información no está en el contexto, dilo de forma transparente y ofrece derivar o tomar nota para seguimiento.\n"
-            "- Mantén respuestas breves, claras y orientadas al negocio de la empresa.\n\n"
-        )
-        full_instructions += f"ESTILO DE ENTREGA: {_resolve_enthusiasm_instruction(self.enthusiasm_level)}\n\n"
-        full_instructions += (
-            "OBJETIVO DE EXPERIENCIA:\n"
-            "- El cliente debe sentir que habla con una persona profesional, cercana y resolutiva.\n"
-            "- Si dudas entre sonar 'perfecto' o 'humano', prioriza humano siempre sin perder precisión.\n\n"
-            "PLANTILLAS DE DESPEDIDA (úsalas como guía, adáptalas al contexto):\n"
-            "- Cuando todo salió bien: 'Muchas gracias. Hasta luego.'\n"
-            "- Cuando el cliente se mostró amable: 'Gracias por todo. Hasta pronto.'\n"
-            "- Cuando fue breve: 'Perfecto, gracias. Adiós.'\n"
-            "- Cuando el cliente rechazó o no tenía tiempo: 'Entendido, gracias. Hasta luego.'\n"
-            "- SIEMPRE termina con un 'adiós', 'hasta luego' o 'hasta pronto' explícito al final para que el cliente sepa que la llamada acaba.\n\n"
-        )
-        full_instructions += "SIGUE ESTE GUION AL PIE DE LA LETRA:\n"
-        full_instructions += f"{agent_instructions}\n\n"
+        try:
+            speaking_speed_f = float(self.speaking_speed)
+        except Exception:
+            speaking_speed_f = 1.0
 
+        full_instructions = build_agent_prompt(
+            agent_config,
+            self.enthusiasm_level,
+            speaking_speed_f,
+        )
+
+        agent_name = agent_config.get("name", "Bot")
         extraction_schema = self._extraction_schema
-        if extraction_schema and isinstance(extraction_schema, list) and len(extraction_schema) > 0:
-            schema_str = json.dumps(extraction_schema, ensure_ascii=False, indent=2)
-            full_instructions += (
-                "IMPORTANTE - EXTRACCIÓN DE DATOS:\n"
-                "Al usar 'guardar_encuesta', el argumento 'datos_extra' se valida con JSON Schema estricto. "
-                "Completa todos los campos inferibles de la conversación:\n"
-                f"{schema_str}\n"
-                "Para campos 'enum', usa solo valores de 'options'.\n"
-            )
 
         guardar_tools: list[Any] = []
         if extraction_schema and isinstance(extraction_schema, list) and len(extraction_schema) > 0:
@@ -1805,95 +1753,12 @@ async def entrypoint(ctx: JobContext):
             
                 if transcript:
                     logger.info(f"🧠 Clasificando disposición de llamada y extrayendo datos para encuesta {survey_id} (Tipo: {agent_type})")
-                    try:
-                        # Prompt de clasificación de disposición universal
-                        disposition_prompt = (
-                            "Eres un analista experto en llamadas telefónicas comerciales. "
-                            "Analiza la transcripción y responde ÚNICAMENTE con JSON válido con estos campos:\n\n"
-                            "1. 'disposicion': OBLIGATORIO. Clasifica la llamada en exactamente UNO de estos valores:\n"
-                            "   - 'completada': El cliente respondió a todas o casi todas las preguntas/objetivos de la llamada.\n"
-                            "   - 'parcial': El cliente contestó la llamada y respondió a ALGUNAS preguntas, pero colgó o se interrumpió antes de terminar.\n"
-                            "   - 'rechazada': El cliente contestó pero rechazó participar (dijo 'no me interesa', 'no tengo tiempo', 'quitadme de la lista', etc.).\n"
-                            "   - 'no_contesta': La llamada fue contestada por un buzón de voz, contestador automático, o no hubo interacción humana real.\n\n"
-                        )
-                    
-                        # Prompt especifico por tipo de agente para datos_extra
-                        if agent_type == "CUALIFICACION_LEAD":
-                            disposition_prompt += (
-                                "2. 'lead_cualificado' (booleano): ¿El lead cumple los criterios de cualificación?\n"
-                                "3. 'interes' (string: 'alto', 'medio', 'bajo'): Nivel de interés detectado.\n"
-                                "4. 'motivo_rechazo' (string o null): Razón por la que no cualifica o rechaza.\n"
-                            )
-                        elif agent_type == "AGENDAMIENTO_CITA":
-                            disposition_prompt += (
-                                "2. 'cita_agendada' (booleano): ¿Se agendó una cita?\n"
-                                "3. 'fecha_cita' (string formato libre o null): Fecha/hora acordada.\n"
-                                "4. 'disponibilidad' (string o null): Resumen de cuándo está disponible.\n"
-                            )
-                        elif agent_type != "ENCUESTA_NUMERICA":
-                            disposition_prompt += (
-                                "2. 'puntos_clave' (array de strings): Los 3 puntos más importantes de la conversación.\n"
-                            )
-                        else:
-                            disposition_prompt += ""
-
-                        # Sentiment extraction (universal, applies to all agent types)
-                        disposition_prompt += (
-                            "\nAdemás, SIEMPRE incluye este campo obligatorio:\n"
-                            "- 'sentimiento_cliente': Clasifica estrictamente como 'Positivo', 'Neutral' o 'Negativo' "
-                            "basándote en el tono general del cliente durante la llamada.\n"
-                        )
-                    
-                        groq_api_key = os.getenv("GROQ_API_KEY")
-                        if groq_api_key:
-                            async with aiohttp.ClientSession() as llm_sess:
-                                headers = {
-                                    "Authorization": f"Bearer {groq_api_key}",
-                                    "Content-Type": "application/json"
-                                }
-                                payload_llm = {
-                                    "model": "llama-3.3-70b-versatile",
-                                    "messages": [
-                                        {"role": "system", "content": disposition_prompt},
-                                        {"role": "user", "content": f"Transcripción:\n{transcript}"}
-                                    ],
-                                    "response_format": {"type": "json_object"},
-                                    "temperature": 0.1
-                                }
-                                async with llm_sess.post("https://api.groq.com/openai/v1/chat/completions", json=payload_llm, headers=headers, timeout=20) as llm_resp:
-                                    if llm_resp.status == 200:
-                                        llm_data = await llm_resp.json()
-                                        json_str = llm_data["choices"][0]["message"]["content"]
-                                        json_str = re.sub(r'^```(?:json)?\s*|\s*```$', '', json_str.strip(), flags=re.IGNORECASE)
-                                        parsed = json.loads(json_str)
-                                    
-                                        # Extraer disposición del JSON
-                                        call_disposition = parsed.pop("disposicion", None)
-                                        valid_dispositions = ("completada", "parcial", "rechazada", "no_contesta")
-                                        if call_disposition not in valid_dispositions:
-                                            call_disposition = "completada" if data_saved else "parcial"
-
-                                        # Extraer sentimiento (si el LLM lo devolvió)
-                                        sentimiento = parsed.pop("sentimiento_cliente", None)
-                                        valid_sentimientos = ("Positivo", "Neutral", "Negativo")
-                                        if sentimiento not in valid_sentimientos:
-                                            sentimiento = "Neutral"
-
-                                        # El resto del JSON son datos_extra
-                                        if parsed:
-                                            datos_extra = parsed
-
-                                        # Inyectar sentimiento + idioma en datos_extra
-                                        if datos_extra is None:
-                                            datos_extra = {}
-                                        datos_extra["sentimiento_cliente"] = sentimiento
-                                        datos_extra["idioma"] = lang_state.get("active_lang", language)
-
-                                        logger.info(f"✅ Disposición: {call_disposition} | Sentimiento: {sentimiento} | Idioma: {datos_extra['idioma']} | datos_extra_keys: {list(datos_extra.keys())}")
-                                    else:
-                                        logger.error(f"Error HTTP del LLM al clasificar: {llm_resp.status}")
-                    except Exception as e:
-                        logger.error(f"Error clasificando disposición con LLM: {e}")
+                    call_disposition, datos_extra = await analyze_call_disposition(
+                        transcript,
+                        agent_type,
+                        data_saved,
+                        lang_state.get("active_lang", language),
+                    )
                 else:
                     # Sin transcripción = no hubo interacción (buzón, timeout, SIP error)
                     call_disposition = "no_contesta"
