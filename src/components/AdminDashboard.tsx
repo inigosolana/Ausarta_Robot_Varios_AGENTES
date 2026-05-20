@@ -10,7 +10,8 @@ import {
     Trophy,
     Bot,
     Building2,
-    FlaskConical
+    FlaskConical,
+    Clock
 } from 'lucide-react';
 import {
     PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend
@@ -19,6 +20,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
+import { apiFetch } from '../lib/apiFetch';
 import { DateRangePicker, getDatesFromRange, DateRange } from './DateRangePicker';
 import { LiveMonitoring } from './LiveMonitoring';
 import { ApiStatusWidget } from './ApiStatusWidget';
@@ -97,6 +99,16 @@ interface Integration {
     status?: string | number;
 }
 
+/** Consumo agregado por tenant (GET /api/admin/metrics/usage-per-tenant). */
+export interface TenantUsage {
+    empresa_id: number;
+    empresa_nombre: string;
+    total_agents: number;
+    total_calls: number;
+    total_minutes: number;
+    avg_duration_seconds: number;
+}
+
 interface StatCardProps {
     title: string;
     value: string | number;
@@ -156,6 +168,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
 
     const dashboardQueryKey = ['admin-dashboard', empresaId, agentId, campaignId, dateRange, profile?.empresa_id] as const;
+    const usageQueryKey = ['admin-usage-per-tenant'] as const;
 
     const fetchDashboardData = async () => {
         const queryStr = buildQueryStr();
@@ -179,6 +192,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         staleTime: 30_000,
     });
 
+    const fetchTenantUsage = async (): Promise<TenantUsage[]> => {
+        const res = await apiFetch('/api/admin/metrics/usage-per-tenant');
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+        }
+        const json = await res.json();
+        return Array.isArray(json) ? json : [];
+    };
+
+    const {
+        data: tenantUsageRows = [],
+        isLoading: usageLoading,
+        error: usageError,
+    } = useQuery({
+        queryKey: usageQueryKey,
+        queryFn: fetchTenantUsage,
+        staleTime: 60_000,
+        enabled: !!profile && (profile.role === 'admin' || profile.role === 'superadmin'),
+    });
+
     const queryClient = useQueryClient();
     const stats = data?.stats ?? null;
     const recentCalls = data?.recentCalls ?? [];
@@ -195,17 +228,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'encuestas', filter: filterStr },
-                () => { queryClient.invalidateQueries({ queryKey: dashboardQueryKey }); }
+                () => {
+                    queryClient.invalidateQueries({ queryKey: dashboardQueryKey });
+                    queryClient.invalidateQueries({ queryKey: usageQueryKey });
+                }
             )
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'campaigns', filter: filterStr },
-                () => { queryClient.invalidateQueries({ queryKey: dashboardQueryKey }); }
+                () => {
+                    queryClient.invalidateQueries({ queryKey: dashboardQueryKey });
+                    queryClient.invalidateQueries({ queryKey: usageQueryKey });
+                }
             )
             .subscribe();
 
         return () => { supabase.removeChannel(channel); };
-    }, [empresaId, profile?.empresa_id, isPlatformOwner, dashboardQueryKey, queryClient]);
+    }, [empresaId, profile?.empresa_id, isPlatformOwner, dashboardQueryKey, usageQueryKey, queryClient]);
 
     const exportCSV = () => {
         const headers = [t("ID"), t("Teléfono"), t("Campaña"), t("Empresa"), t("Tipo"), t("Fecha"), t("Estado"), t("Modelo")];
@@ -262,8 +301,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 )}
                 <div className="flex flex-wrap items-center gap-2">
                     <DateRangePicker value={dateRange} onChange={setDateRange} />
-                    <button onClick={() => loadData()} className="p-2 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors" title={t('Refrescar')}>
-                        <RefreshCw size={18} className={isLoading ? "animate-spin" : "text-gray-500"} />
+                    <button
+                        onClick={() => {
+                            loadData();
+                            queryClient.invalidateQueries({ queryKey: usageQueryKey });
+                        }}
+                        className="p-2 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                        title={t('Refrescar')}
+                    >
+                        <RefreshCw size={18} className={isLoading || usageLoading ? 'animate-spin text-gray-500' : 'text-gray-500'} />
                     </button>
                 </div>
             </div>
@@ -275,6 +321,87 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <StatCard title={t('Tasa Completadas')} value={`${completionRate}%`} icon={BarChart2} color="purple" />
                 <StatCard title={t('En Curso')} value={stats?.pending_calls || 0} icon={Timer} color="orange" />
             </div>
+
+            {/* Consumo por empresa (B2B usage tracking) */}
+            {(profile?.role === 'admin' || profile?.role === 'superadmin') && (
+                <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl rounded-2xl border border-gray-100 dark:border-cyan-900/30 shadow-[0_0_15px_rgba(0,240,255,0.03)] overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-100 dark:border-cyan-900/30 flex items-center justify-between gap-2">
+                        <h3 className="text-lg font-bold text-gray-800 dark:text-cyan-50 flex items-center gap-2">
+                            <BarChart2 size={20} className="text-cyan-600 dark:text-cyan-400" />
+                            {t('Consumo por Empresa', 'Consumo por Empresa')}
+                        </h3>
+                        {usageLoading && (
+                            <span className="text-xs text-gray-400 dark:text-cyan-400/70">{t('Cargando...', 'Cargando...')}</span>
+                        )}
+                    </div>
+                    {usageError && (
+                        <div className="mx-6 mt-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800 text-sm text-amber-800 dark:text-amber-200">
+                            {usageError instanceof Error ? usageError.message : t('Error al cargar consumo', 'Error al cargar consumo')}
+                        </div>
+                    )}
+                    <div className="overflow-x-auto p-4">
+                        <table className="w-full text-left text-sm">
+                            <thead className="text-xs uppercase text-gray-400 dark:text-cyan-500/80 border-b border-gray-100 dark:border-cyan-900/30">
+                                <tr>
+                                    <th className="pb-3 pr-4 font-semibold">
+                                        <span className="inline-flex items-center gap-1.5">
+                                            <Building2 size={14} /> {t('Empresa')}
+                                        </span>
+                                    </th>
+                                    <th className="pb-3 pr-4 font-semibold text-center">
+                                        <span className="inline-flex items-center justify-center gap-1.5">
+                                            <Bot size={14} /> {t('Agentes Activos', 'Agentes')}
+                                        </span>
+                                    </th>
+                                    <th className="pb-3 pr-4 font-semibold text-center">{t('Total Llamadas', 'Total Llamadas')}</th>
+                                    <th className="pb-3 pr-4 font-semibold text-center">
+                                        <span className="inline-flex items-center justify-center gap-1.5">
+                                            <Clock size={14} /> {t('Minutos Consumidos', 'Minutos')}
+                                        </span>
+                                    </th>
+                                    <th className="pb-3 font-semibold text-center">{t('Duración Media', 'Duración media')}</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50 dark:divide-cyan-900/20">
+                                {usageLoading && tenantUsageRows.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={5} className="py-10 text-center text-gray-400 dark:text-cyan-500/60 italic">
+                                            {t('Cargando datos de consumo...', 'Cargando datos de consumo...')}
+                                        </td>
+                                    </tr>
+                                ) : tenantUsageRows.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={5} className="py-10 text-center text-gray-400 dark:text-cyan-500/60 italic">
+                                            {t('Sin datos de consumo', 'Sin datos de consumo')}
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    tenantUsageRows.map((row) => (
+                                        <tr key={row.empresa_id} className="hover:bg-gray-50/80 dark:hover:bg-cyan-950/20 transition-colors">
+                                            <td className="py-3 pr-4">
+                                                <div className="font-semibold text-gray-900 dark:text-cyan-50">{row.empresa_nombre}</div>
+                                                <div className="text-[10px] text-gray-400 dark:text-cyan-500/50">ID {row.empresa_id}</div>
+                                            </td>
+                                            <td className="py-3 pr-4 text-center tabular-nums font-medium text-gray-800 dark:text-cyan-100">
+                                                {row.total_agents}
+                                            </td>
+                                            <td className="py-3 pr-4 text-center tabular-nums font-medium text-gray-800 dark:text-cyan-100">
+                                                {row.total_calls}
+                                            </td>
+                                            <td className="py-3 pr-4 text-center tabular-nums font-medium text-cyan-700 dark:text-cyan-300">
+                                                {row.total_minutes}
+                                            </td>
+                                            <td className="py-3 text-center tabular-nums text-gray-600 dark:text-cyan-400/90">
+                                                {row.avg_duration_seconds}s
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
 
             {/* Donut + Top Performers */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

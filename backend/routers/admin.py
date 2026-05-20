@@ -531,3 +531,90 @@ async def get_redis_metrics(current_user: CurrentUser = Depends(require_admin)):
         raise HTTPException(status_code=502, detail=f"No se pudo consultar Redis: {e}") from e
     finally:
         await client.close()
+
+
+@router.get("/metrics/usage-per-tenant")
+async def get_usage_per_tenant(current_user: CurrentUser = Depends(require_admin)):
+    """
+    Consumo agregado por empresa: agentes, llamadas y minutos (seconds_used en encuestas).
+    Superadmin ve todas las empresas; admin solo la suya.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    emp_res = await sb_query(
+        lambda: supabase.table("empresas").select("id,nombre").execute()
+    )
+    agents_res = await sb_query(
+        lambda: supabase.table("agent_config").select("id,empresa_id").execute()
+    )
+    enc_res = await sb_query(
+        lambda: supabase.table("encuestas").select("id,empresa_id,seconds_used").execute()
+    )
+
+    enterprises = emp_res.data or []
+    agents = agents_res.data or []
+    encuestas = enc_res.data or []
+
+    agent_counts: dict[int, int] = {}
+    for row in agents:
+        eid = row.get("empresa_id")
+        if eid is None:
+            continue
+        try:
+            eid_int = int(eid)
+        except (TypeError, ValueError):
+            continue
+        agent_counts[eid_int] = agent_counts.get(eid_int, 0) + 1
+
+    call_stats: dict[int, dict[str, int]] = {}
+    for row in encuestas:
+        eid = row.get("empresa_id")
+        if eid is None:
+            continue
+        try:
+            eid_int = int(eid)
+        except (TypeError, ValueError):
+            continue
+        if eid_int not in call_stats:
+            call_stats[eid_int] = {"total_calls": 0, "total_seconds": 0}
+        call_stats[eid_int]["total_calls"] += 1
+        su = row.get("seconds_used")
+        if su is not None:
+            try:
+                call_stats[eid_int]["total_seconds"] += int(su)
+            except (TypeError, ValueError):
+                pass
+
+    is_super = current_user.role == "superadmin"
+    admin_empresa = current_user.empresa_id
+
+    out: list[dict] = []
+    for emp in enterprises:
+        try:
+            eid = int(emp["id"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if not is_super:
+            if admin_empresa is None or eid != int(admin_empresa):
+                continue
+
+        nombre = str(emp.get("nombre") or f"Empresa {eid}")
+        total_agents = agent_counts.get(eid, 0)
+        stats = call_stats.get(eid, {"total_calls": 0, "total_seconds": 0})
+        total_calls = stats["total_calls"]
+        total_seconds = stats["total_seconds"]
+        total_minutes = round(total_seconds / 60.0, 2) if total_seconds else 0.0
+        avg_duration_seconds = int(round(total_seconds / total_calls)) if total_calls else 0
+
+        out.append({
+            "empresa_id": eid,
+            "empresa_nombre": nombre,
+            "total_agents": total_agents,
+            "total_calls": total_calls,
+            "total_minutes": total_minutes,
+            "avg_duration_seconds": avg_duration_seconds,
+        })
+
+    out.sort(key=lambda x: x["empresa_nombre"].lower())
+    return out

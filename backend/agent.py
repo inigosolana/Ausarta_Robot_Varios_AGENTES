@@ -1,6 +1,7 @@
 import logging
 from typing import Optional, Any
 import os
+import time
 import aiohttp
 import asyncio
 import redis.asyncio as aioredis
@@ -1074,6 +1075,7 @@ async def entrypoint(ctx: JobContext):
             agent_config = {}
 
     # --- PASO 2: Conectar a la sala ---
+    call_start_time = time.time()
     is_duplicate = False
     try:
         logger.info(f"⏱️ [{job_id}] Intentando conectar a sala {room_name}...")
@@ -1791,6 +1793,10 @@ async def entrypoint(ctx: JobContext):
                 
                 # SIEMPRE guardar transcripción y datos finales en Supabase
                 url_guardar = f"{internal_api_url}/guardar-encuesta"
+
+                seconds_used = 0
+                if "call_start_time" in locals() and call_start_time is not None:
+                    seconds_used = max(0, int(time.time() - call_start_time))
             
                 # Analytics post-llamada: Clasificar disposición + extraer datos
                 agent_type = agent_config.get("agent_type", "ENCUESTA_NUMERICA")
@@ -1907,7 +1913,8 @@ async def entrypoint(ctx: JobContext):
                         transcript_payload = {
                             "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
                             "transcription": transcript,
-                            "datos_extra": datos_extra
+                            "datos_extra": datos_extra,
+                            "seconds_used": seconds_used,
                         }
                         try:
                             async with aiohttp.ClientSession() as sess:
@@ -1923,7 +1930,8 @@ async def entrypoint(ctx: JobContext):
                             "transcription": transcript,
                             "status": call_disposition,
                             "comentarios": "Llamada finalizada sin interacción" if call_disposition == "no_contesta" else f"Llamada {call_disposition} via post-call",
-                            "datos_extra": datos_extra
+                            "datos_extra": datos_extra,
+                            "seconds_used": seconds_used,
                         }
                         try:
                             async with aiohttp.ClientSession() as sess:
