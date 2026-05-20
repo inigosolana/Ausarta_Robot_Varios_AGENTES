@@ -149,6 +149,29 @@ export function getIdioma(r: SurveyResult): string | null {
 // Mapeo canónico de disposición para gráficos (usa los nombres del backend)
 export type CallDisposition = 'completed' | 'incomplete' | 'rejected_opt_out' | 'failed' | 'unreached' | 'pending';
 
+/** Sala LiveKit activa (métricas admin). */
+export interface LiveCallRoomMetric {
+  sid: string;
+  name: string;
+  num_participants: number;
+  created_at: number;
+  created_at_iso?: string | null;
+}
+
+export interface LiveCallsMetricsResponse {
+  total: number;
+  rooms: LiveCallRoomMetric[];
+}
+
+/** Métricas Redis para el panel de administración. */
+export interface RedisMetricsResponse {
+  memory_used: string;
+  memory_peak: string;
+  connected_clients: number;
+  ops_per_second: number;
+  uptime_days: number;
+}
+
 export function getCallDisposition(status: string | null): CallDisposition {
   if (!status) return 'pending';
   const s = status.toLowerCase();

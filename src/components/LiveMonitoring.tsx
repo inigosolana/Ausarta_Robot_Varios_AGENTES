@@ -20,8 +20,13 @@ import {
     ChevronDown,
     AlertCircle,
     User,
-    Bot
+    Bot,
+    Database,
+    Zap,
+    Plug
 } from 'lucide-react';
+import { fetchLiveCallsMetrics, fetchRedisMetrics } from '../lib/adminMetrics';
+import type { LiveCallsMetricsResponse, RedisMetricsResponse } from '../types';
 import { useTranslation } from 'react-i18next';
 import {
     Room,
@@ -99,6 +104,10 @@ export const LiveMonitoring: React.FC = () => {
     const [participantCount, setParticipantCount] = useState(0);
     const [error, setError] = useState<string | null>(null);
     const [autoScroll, setAutoScroll] = useState(true);
+    const [liveCallsMetrics, setLiveCallsMetrics] = useState<LiveCallsMetricsResponse | null>(null);
+    const [redisMetrics, setRedisMetrics] = useState<RedisMetricsResponse | null>(null);
+    const [metricsLoading, setMetricsLoading] = useState(true);
+    const [metricsError, setMetricsError] = useState<string | null>(null);
 
     const roomRef = useRef<Room | null>(null);
     const transcriptsEndRef = useRef<HTMLDivElement>(null);
@@ -106,15 +115,48 @@ export const LiveMonitoring: React.FC = () => {
     const audioElementsRef = useRef<HTMLAudioElement[]>([]);
     const entryIdCounter = useRef(0);
 
-    // Auto-refresh de sesiones activas
+    const loadMetrics = useCallback(async () => {
+        try {
+            setMetricsError(null);
+            const [live, redis] = await Promise.all([
+                fetchLiveCallsMetrics(),
+                fetchRedisMetrics(),
+            ]);
+            setLiveCallsMetrics(live);
+            setRedisMetrics(redis);
+            setSessions(
+                live.rooms.map((r) => ({
+                    sid: r.sid,
+                    name: r.name,
+                    num_participants: r.num_participants,
+                    created_at: r.created_at,
+                }))
+            );
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Error cargando métricas';
+            setMetricsError(msg);
+            console.error('Metrics polling error:', err);
+        } finally {
+            setMetricsLoading(false);
+        }
+    }, []);
+
+    // Polling métricas admin (LiveKit + Redis) cada 8s
     useEffect(() => {
+        loadMetrics();
+        const metricsInterval = setInterval(loadMetrics, 8000);
+        return () => clearInterval(metricsInterval);
+    }, [loadMetrics]);
+
+    // Fallback: sesiones vía dashboard solo si fallan las métricas admin
+    useEffect(() => {
+        if (!metricsError) return;
         loadSessions();
         const interval = setInterval(loadSessions, 15000);
-        return () => {
-            clearInterval(interval);
-            stopMonitoring();
-        };
-    }, []);
+        return () => clearInterval(interval);
+    }, [metricsError]);
+
+    useEffect(() => () => { stopMonitoring(); }, []);
 
     // Scroll automático en transcripciones
     useEffect(() => {
@@ -371,8 +413,65 @@ export const LiveMonitoring: React.FC = () => {
         );
     };
 
+    const activeCallsCount = liveCallsMetrics?.total ?? sessions.length;
+
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden h-full flex flex-col"
+        <div className="flex flex-col gap-4 h-full">
+            {/* Métricas en tiempo real */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <MetricCard
+                    icon={Phone}
+                    iconClass="text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30"
+                    label={t('Active Calls', 'Llamadas Activas')}
+                    value={metricsLoading ? '—' : String(activeCallsCount)}
+                    sub={metricsError ? t('Unavailable', 'No disponible') : t('LiveKit rooms', 'Salas LiveKit')}
+                    loading={metricsLoading}
+                    error={!!metricsError}
+                />
+                <MetricCard
+                    icon={Database}
+                    iconClass="text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/30"
+                    label={t('Redis RAM', 'Memoria Redis')}
+                    value={metricsLoading ? '—' : (redisMetrics?.memory_used ?? 'N/A')}
+                    sub={redisMetrics ? `Peak: ${redisMetrics.memory_peak}` : undefined}
+                    loading={metricsLoading}
+                    error={!!metricsError}
+                />
+                <MetricCard
+                    icon={Zap}
+                    iconClass="text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30"
+                    label={t('Cache ops/s', 'Ops/s caché')}
+                    value={metricsLoading ? '—' : String(redisMetrics?.ops_per_second ?? 0)}
+                    sub={redisMetrics ? `${redisMetrics.uptime_days}d uptime` : undefined}
+                    loading={metricsLoading}
+                    error={!!metricsError}
+                />
+                <MetricCard
+                    icon={Plug}
+                    iconClass="text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30"
+                    label={t('Redis Clients', 'Clientes Redis')}
+                    value={metricsLoading ? '—' : String(redisMetrics?.connected_clients ?? 0)}
+                    sub={t('Workers / connections', 'Workers / conexiones')}
+                    loading={metricsLoading}
+                    error={!!metricsError}
+                />
+            </div>
+
+            {metricsError && (
+                <div className="px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800 flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
+                    <AlertCircle size={14} className="shrink-0" />
+                    <span>{metricsError}</span>
+                    <button
+                        type="button"
+                        onClick={() => { setMetricsLoading(true); loadMetrics(); }}
+                        className="ml-auto text-[10px] font-bold underline hover:no-underline"
+                    >
+                        {t('Retry', 'Reintentar')}
+                    </button>
+                </div>
+            )}
+
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden flex-1 flex flex-col min-h-0"
              style={{ animation: 'slideUp 0.3s ease-out' }}>
 
             {/* Header */}
@@ -401,8 +500,8 @@ export const LiveMonitoring: React.FC = () => {
                         </div>
                     )}
                     <button
-                        onClick={loadSessions}
-                        disabled={isLoading}
+                        onClick={() => { loadSessions(); loadMetrics(); }}
+                        disabled={isLoading || metricsLoading}
                         className="p-1.5 hover:bg-white dark:hover:bg-gray-600 rounded-lg transition-colors disabled:opacity-50"
                         title={t('Refresh', 'Actualizar')}
                     >
@@ -620,7 +719,7 @@ export const LiveMonitoring: React.FC = () => {
                     LiveKit Cloud
                 </span>
                 <span className="font-medium">
-                    {sessions.length} {t('Active Rooms', sessions.length === 1 ? 'Sala Activa' : 'Salas Activas')}
+                    {activeCallsCount} {t('Active Rooms', activeCallsCount === 1 ? 'Sala Activa' : 'Salas Activas')}
                 </span>
             </div>
 
@@ -631,5 +730,51 @@ export const LiveMonitoring: React.FC = () => {
                 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
             `}</style>
         </div>
+        </div>
     );
 };
+
+interface MetricCardProps {
+    icon: React.ComponentType<{ size?: number; className?: string }>;
+    iconClass: string;
+    label: string;
+    value: string;
+    sub?: string;
+    loading?: boolean;
+    error?: boolean;
+}
+
+const MetricCard: React.FC<MetricCardProps> = ({
+    icon: Icon,
+    iconClass,
+    label,
+    value,
+    sub,
+    loading,
+    error,
+}) => (
+    <div
+        className={`rounded-2xl border p-4 shadow-sm transition-all ${
+            error
+                ? 'border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-900/10'
+                : 'border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800'
+        } ${loading ? 'opacity-70 animate-pulse' : ''}`}
+    >
+        <div className="flex items-start justify-between gap-2">
+            <div className={`p-2 rounded-xl ${iconClass}`}>
+                <Icon size={20} />
+            </div>
+        </div>
+        <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mt-3">
+            {label}
+        </p>
+        <p className="text-3xl font-black text-gray-900 dark:text-white tabular-nums mt-1 leading-none">
+            {value}
+        </p>
+        {sub && (
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1.5 truncate" title={sub}>
+                {sub}
+            </p>
+        )}
+    </div>
+);
