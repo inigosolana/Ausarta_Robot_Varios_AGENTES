@@ -70,3 +70,30 @@ async def dispatch_agent_explicit(room_name: str, metadata: dict | None = None, 
         metadata=meta_str,
     )
     return await lkapi.agent_dispatch.create_dispatch(req)
+
+
+async def create_outbound_call(
+    number_to_dial: str,
+    trunk_id: str,
+    room_name: str,
+    empresa_id: str,
+    survey_id: str,
+):
+    """
+    Inicia una llamada SIP saliente: crea un participante SIP en la sala indicada.
+    """
+    req = api.CreateSIPParticipantRequest(
+        sip_trunk_id=trunk_id,
+        sip_call_to=number_to_dial,
+        room_name=room_name,
+        participant_identity=f"user_{number_to_dial}_{survey_id}",
+        participant_name="Cliente",
+    )
+    logger.info(
+        "☎️ Outbound SIP: %s → room=%s (empresa=%s, survey=%s)",
+        number_to_dial,
+        room_name,
+        empresa_id,
+        survey_id,
+    )
+    return await lkapi.sip.create_sip_participant(req)

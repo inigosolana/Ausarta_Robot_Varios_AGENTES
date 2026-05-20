@@ -76,6 +76,13 @@ class EncuestaData(BaseModel):
 class CallEndRequest(BaseModel):
     nombre_sala: str
 
+
+class TestOutboundCallRequest(BaseModel):
+    """Payload para pruebas de llamada saliente vía LiveKit SIP."""
+    phone_number: str
+    empresa_id: str
+    survey_id: str
+
 class AIPromptRequest(BaseModel):
     user_request: str
     empresa_id: Optional[int] = None

@@ -19,12 +19,18 @@ from models.schemas import (
     CallTransferRequest,
     EncuestaData,
     TelephonyTransferRequest,
+    TestOutboundCallRequest,
     YeastarPSeriesConfigCreate,
     YeastarPSeriesConfigResponse,
     YeastarPSeriesConfigTest,
 )
 from services.supabase_service import supabase, sb_query
-from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
+from services.livekit_service import (
+    lkapi,
+    create_isolated_room,
+    create_outbound_call,
+    dispatch_agent_explicit,
+)
 from services.yeastar_service import YeastarPSeriesClient
 from services.auth import get_current_user, CurrentUser, require_admin, require_outbound_auth
 from services.crypto_service import encrypt_data, decrypt_data
@@ -858,6 +864,76 @@ async def _notify_n8n_post_call(encuesta_id: int, status: str, result_data: dict
 # ──────────────────────────────────────────────
 # Llamada saliente (individual o desde campaña)
 # ──────────────────────────────────────────────
+
+
+@router.post("/api/telephony/test-outbound")
+async def test_outbound_call(payload: TestOutboundCallRequest):
+    """
+    Endpoint de prueba: dispara una llamada saliente LiveKit SIP al número indicado.
+    Crea sala, despacha agente y luego inicia el participante SIP.
+    """
+    trunk_id = (os.getenv("LIVEKIT_OUTBOUND_TRUNK_ID") or "").strip()
+    if not trunk_id:
+        raise HTTPException(
+            status_code=500,
+            detail="LIVEKIT_OUTBOUND_TRUNK_ID no está configurado. Configure el trunk de salida en LiveKit.",
+        )
+
+    phone = payload.phone_number.strip()
+    if not phone:
+        raise HTTPException(status_code=400, detail="phone_number es obligatorio")
+
+    empresa_id = str(payload.empresa_id).strip()
+    survey_id = str(payload.survey_id).strip()
+    room_name = f"llamada_ausarta_{empresa_id}_{survey_id}"
+
+    room_metadata = {
+        "empresa_id": int(empresa_id) if empresa_id.isdigit() else 0,
+        "survey_id": int(survey_id) if survey_id.isdigit() else 0,
+    }
+
+    try:
+        try:
+            await create_isolated_room(room_name, metadata=room_metadata)
+        except Exception as room_err:
+            logger.warning(f"⚠️ [test-outbound] Aviso al crear sala {room_name}: {room_err}")
+
+        agent_name_dispatch = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
+        try:
+            await dispatch_agent_explicit(
+                room_name=room_name,
+                agent_name=agent_name_dispatch,
+                metadata=room_metadata,
+            )
+            await asyncio.sleep(float(os.getenv("DRIP_AGENT_JOIN_DELAY_SECONDS", "3")))
+        except Exception as dispatch_err:
+            logger.warning(f"⚠️ [test-outbound] Dispatch fallido: {dispatch_err}")
+
+        sip_response = await create_outbound_call(
+            number_to_dial=phone,
+            trunk_id=trunk_id,
+            room_name=room_name,
+            empresa_id=empresa_id,
+            survey_id=survey_id,
+        )
+
+        participant_id = getattr(sip_response, "participant_id", None) or getattr(
+            sip_response, "participant_identity", None
+        )
+
+        return {
+            "status": "ok",
+            "message": "Llamada saliente iniciada",
+            "room_name": room_name,
+            "phone_number": phone,
+            "participant_id": participant_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ [test-outbound] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
 
 # Lock para evitar doble despacho accidental
 # Fallback en memoria si Redis no está disponible
