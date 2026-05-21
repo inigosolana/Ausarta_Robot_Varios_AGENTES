@@ -1,0 +1,81 @@
+# =============================================================================
+# Kamailio SIP Edge Proxy — Easypanel / Docker Compose
+# =============================================================================
+# Proxy de borde delante del clúster LiveKit SIP:
+#   - 5060 UDP/TCP (SIP plano)
+#   - 5061 TCP (SIP TLS)
+#   - Balanceo dispatcher → nodos LiveKit
+#   - Mitigación REGISTER flood (pike + htable)
+#
+# Despliegue en Easypanel:
+#   1. Crear app tipo "Docker Compose" o servicio desde este archivo.
+#   2. Montar el directorio deploy/kamailio como contexto (o copiar archivos).
+#   3. Publicar puertos 5060/5061 en el host (UDP 5060 es obligatorio para carriers).
+#   4. Editar dispatcher.list con IPs/hostnames reales de LiveKit.
+#   5. Añadir cert.pem y key.pem en ./certs/ para TLS 5061.
+#
+# Variables (Easypanel → Environment):
+#   EXTERNAL_SIP_IP  — IP pública del proxy (opcional, para anuncios SDP/RTP)
+# =============================================================================
+
+services:
+  kamailio-edge:
+    image: kamailio/kamailio:5.8-bookworm
+    container_name: kamailio-sip-edge
+    hostname: kamailio-edge
+    restart: unless-stopped
+
+    ports:
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "5061:5061/tcp"
+
+    volumes:
+      - ./kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
+      - ./dispatcher.list:/etc/kamailio/dispatcher.list:ro
+      - ./certs:/etc/kamailio/tls:ro
+
+    environment:
+      # Dominio SIP anunciado (debe coincidir con alias en kamailio.cfg o sustituir allí)
+      SIP_DOMAIN: ${SIP_DOMAIN:-sip.ausarta.net}
+      # Opcional: IP pública del nodo (Easypanel suele exponerla en la UI)
+      EXTERNAL_SIP_IP: ${EXTERNAL_SIP_IP:-}
+
+    # Foreground + debug a stderr (Easypanel logs)
+    command:
+      - kamailio
+      - -f
+      - /etc/kamailio/kamailio.cfg
+      - -E
+      - -DD
+      - -e
+
+    healthcheck:
+      test: ["CMD-SHELL", "kamcmd core.ping 2>/dev/null | grep -q pong || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+    # Límites recomendados en borde telecom (ajustar según tráfico)
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+    networks:
+      - kamailio-edge-net
+
+networks:
+  kamailio-edge-net:
+    driver: bridge

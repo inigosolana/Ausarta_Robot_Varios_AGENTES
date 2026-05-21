@@ -1,0 +1,9 @@
+# Dispatcher set 1 — nodos SIP LiveKit (backend)
+# Formato: setid flags priority attrs destination
+# Sustituye las IPs/hostnames por tus nodos reales (Easypanel / variables de entorno en despliegue).
+#
+# flags: 0=activo, 1=inactive, 2=probing, 4=disabled
+# attrs: opcional (ej. duid para sticky sessions)
+
+1 0 0 sip:livekit-node-1:5060
+1 0 0 sip:livekit-node-2:5060

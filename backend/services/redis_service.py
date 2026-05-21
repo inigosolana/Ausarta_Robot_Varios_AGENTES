@@ -14,6 +14,8 @@ from typing import Optional
 
 import redis.asyncio as aioredis
 
+from services.tenant_context import get_current_empresa_id
+
 logger = logging.getLogger("api-backend")
 
 # ──────────────────────────────────────────────
@@ -131,15 +133,67 @@ async def get_active_call_count() -> int:
 # ──────────────────────────────────────────────
 
 CACHE_PREFIX = "ausarta:cache:"
+GLOBAL_PREFIX = "global:"
 
 
-async def cache_get(key: str) -> Optional[str]:
-    """Lee un valor de caché distribuida. Retorna None si no existe."""
+def build_tenant_redis_key(key: str, empresa_id: Optional[int] = None) -> str:
+    """
+    Prefija la clave con tenant_{empresa_id}: para aislamiento OWASP.
+    Sin tenant en contexto ni parámetro → prefijo global: (infra compartida).
+    """
+    eid = empresa_id if empresa_id is not None else get_current_empresa_id()
+    if eid is not None:
+        try:
+            eid_int = int(eid)
+            if eid_int > 0:
+                return f"tenant_{eid_int}:{key}"
+        except (TypeError, ValueError):
+            pass
+    return f"{GLOBAL_PREFIX}{key}"
+
+
+async def tenant_redis_get(
+    key: str,
+    *,
+    empresa_id: Optional[int] = None,
+) -> Optional[str]:
+    """GET con prefijo de tenant automático (ContextVar o empresa_id explícito)."""
     r = await get_redis()
-    return await r.get(f"{CACHE_PREFIX}{key}")
+    return await r.get(build_tenant_redis_key(key, empresa_id))
 
 
-async def cache_set(key: str, value: str, ttl_seconds: int) -> None:
-    """Guarda un valor en caché distribuida con TTL."""
+async def tenant_redis_set(
+    key: str,
+    value: str,
+    ttl_seconds: Optional[int] = None,
+    *,
+    empresa_id: Optional[int] = None,
+) -> None:
+    """SET con prefijo de tenant automático."""
     r = await get_redis()
-    await r.set(f"{CACHE_PREFIX}{key}", value, ex=ttl_seconds)
+    full_key = build_tenant_redis_key(key, empresa_id)
+    if ttl_seconds is not None:
+        await r.set(full_key, value, ex=int(ttl_seconds))
+    else:
+        await r.set(full_key, value)
+
+
+async def cache_get(key: str, *, empresa_id: Optional[int] = None) -> Optional[str]:
+    """Lee caché distribuida con aislamiento por tenant."""
+    return await tenant_redis_get(f"{CACHE_PREFIX}{key}", empresa_id=empresa_id)
+
+
+async def cache_set(
+    key: str,
+    value: str,
+    ttl_seconds: int,
+    *,
+    empresa_id: Optional[int] = None,
+) -> None:
+    """Guarda caché distribuida con TTL y prefijo de tenant."""
+    await tenant_redis_set(
+        f"{CACHE_PREFIX}{key}",
+        value,
+        ttl_seconds,
+        empresa_id=empresa_id,
+    )

@@ -122,7 +122,10 @@ class YeastarPSeriesClient:
         """
         cache_key = _token_cache_key(self.base_url, self.client_id)
         try:
-            cached = await cache_get(cache_key)
+            cached = await cache_get(
+                cache_key,
+                empresa_id=int(self.tenant_id) if self.tenant_id is not None else None,
+            )
             if cached:
                 return cached
         except Exception as cache_err:
@@ -147,7 +150,12 @@ class YeastarPSeriesClient:
             token = data["access_token"]
 
             try:
-                await cache_set(cache_key, token, _TOKEN_TTL_SECONDS)
+                await cache_set(
+                    cache_key,
+                    token,
+                    _TOKEN_TTL_SECONDS,
+                    empresa_id=int(self.tenant_id) if self.tenant_id is not None else None,
+                )
             except Exception as cache_err:
                 logger.warning(
                     f"[Yeastar] [{self.tenant_label}] No se pudo guardar token en Redis: {cache_err}"

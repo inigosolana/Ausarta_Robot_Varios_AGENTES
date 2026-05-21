@@ -14,6 +14,7 @@ from services.rate_limiter import limiter
 from services.auth import get_supabase_jwt_secret
 from services.redis_service import get_redis, close_redis
 from services.queue_service import get_arq_pool, close_arq_pool
+from middleware.tenant_context import TenantContextMiddleware
 
 # Routers
 from routers.logs import router as logs_router
@@ -116,6 +117,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Aislamiento multi-tenant: ContextVar empresa_id por request (OWASP)
+app.add_middleware(TenantContextMiddleware)
 
 # --- REGISTRO DE ROUTERS ---
 app.include_router(logs_router)

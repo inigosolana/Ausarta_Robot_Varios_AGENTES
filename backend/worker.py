@@ -661,6 +661,71 @@ async def dispatch_lead_drip_task(ctx: dict[str, Any], lead_id: int, campaign_id
     await _dispatch_single_lead_drip(lead, campaign)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Puente HTTP agente LiveKit → API FastAPI (no bloquea el event loop del agente)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _agent_bridge_url() -> str:
+    url = (
+        os.getenv("BRIDGE_SERVER_URL_INTERNAL")
+        or os.getenv("BRIDGE_SERVER_URL")
+        or "http://backend:8001"
+    )
+    return url.strip().rstrip("/")
+
+
+async def agent_post_guardar_encuesta(ctx: dict[str, Any], payload: dict) -> None:
+    """POST /guardar-encuesta desde el worker ARQ."""
+    import aiohttp
+
+    url = f"{_agent_bridge_url()}/guardar-encuesta"
+    async with aiohttp.ClientSession() as sess:
+        async with sess.post(url, json=payload, timeout=15) as resp:
+            logger.info("[agent_bridge] guardar-encuesta HTTP %s encuesta=%s", resp.status, payload.get("id_encuesta"))
+
+
+async def agent_post_colgar(ctx: dict[str, Any], room_name: str) -> None:
+    """POST /colgar desde el worker ARQ."""
+    import aiohttp
+
+    url = f"{_agent_bridge_url()}/colgar"
+    async with aiohttp.ClientSession() as sess:
+        async with sess.post(url, json={"nombre_sala": room_name}, timeout=10) as resp:
+            logger.info("[agent_bridge] colgar HTTP %s room=%s", resp.status, room_name)
+
+
+async def agent_post_transfer(ctx: dict[str, Any], payload: dict) -> None:
+    """Persiste estado transferred y llama a /api/calls/transfer."""
+    import aiohttp
+
+    base = _agent_bridge_url()
+    guardar_payload = payload.get("guardar_payload") or {}
+    transfer_payload = payload.get("transfer_payload") or {}
+
+    async with aiohttp.ClientSession() as sess:
+        if guardar_payload:
+            async with sess.post(
+                f"{base}/guardar-encuesta",
+                json=guardar_payload,
+                timeout=10,
+            ) as resp:
+                logger.info("[agent_bridge] transfer→guardar HTTP %s", resp.status)
+
+        if transfer_payload:
+            async with sess.post(
+                f"{base}/api/calls/transfer",
+                json=transfer_payload,
+                timeout=20,
+            ) as resp:
+                body = await resp.text()
+                logger.info(
+                    "[agent_bridge] transfer HTTP %s room=%s body=%s",
+                    resp.status,
+                    transfer_payload.get("room_name"),
+                    body[:200],
+                )
+
+
 # ──────────────────────────────────────────────
 # WorkerSettings — clase leída por `arq` CLI
 # ──────────────────────────────────────────────
@@ -693,6 +758,9 @@ class WorkerSettings:
         process_n8n_webhook,
         process_system_alert,
         campaign_orchestrator,
+        agent_post_guardar_encuesta,
+        agent_post_colgar,
+        agent_post_transfer,
     ]
 
     # Cron jobs:

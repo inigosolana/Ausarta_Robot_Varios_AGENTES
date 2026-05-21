@@ -24,6 +24,7 @@ from fastapi import Security, HTTPException, status, Depends, Header
 from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 
 from services.supabase_service import supabase
+from services.tenant_context import set_current_empresa_id
 
 logger = logging.getLogger("api-backend")
 
@@ -388,12 +389,14 @@ async def get_current_user(
             f"role={effective_role}, empresa_id={effective_empresa_id}"
         )
 
-    return CurrentUser(
+    user = CurrentUser(
         user_id=user_id,
         email=profile.get("email"),
         role=effective_role,
         empresa_id=effective_empresa_id,
     )
+    set_current_empresa_id(user.empresa_id)
+    return user
 
 
 async def require_superadmin(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:

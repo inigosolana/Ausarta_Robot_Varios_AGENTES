@@ -155,6 +155,11 @@ def _build_guardar_encuesta_raw_schema(extraction_schema: list) -> dict[str, Any
 from prompts import _LANG_OVERRIDE_MSGS
 from utils.call_analyzer import analyze_call_disposition
 from utils.prompt_builder import build_agent_prompt
+from services.queue_service import (
+    enqueue_colgar_sala,
+    enqueue_guardar_encuesta,
+    enqueue_transfer_to_human,
+)
 
 _GLOBAL_VAD_MODEL = None
 _VAD_LOCK = asyncio.Lock()
@@ -169,6 +174,46 @@ async def get_vad_model(min_silence_duration: float):
             )
             logger.info("✅ VAD Silero cargado (singleton global)")
     return _GLOBAL_VAD_MODEL
+
+
+def _build_stt_plugin(
+    stt_provider: str, stt_model: str, language: str
+) -> tuple[Any, bool]:
+    """
+    Construye el plugin STT. Si delegate_turn_to_stt es True, el turno se delega al STT
+    (Deepgram vad_events) y AgentSession puede omitir Silero VAD.
+    """
+    import inspect
+
+    if language in ("eu", "gl") or stt_provider == "openai":
+        logger.info("🎙️ Usando STT: OpenAI Whisper")
+        return openai.STT(language=language), False
+
+    dg_kwargs: dict[str, Any] = {
+        "model": stt_model,
+        "language": language,
+        "vad_events": True,
+        "endpointing_ms": int(os.getenv("AGENT_DEEPGRAM_ENDPOINTING_MS", "300")),
+        "no_delay": True,
+        "interim_results": True,
+    }
+    try:
+        sig = inspect.signature(deepgram.STT.__init__)
+        if "flush_signal" in sig.parameters:
+            dg_kwargs["flush_signal"] = True
+            logger.info("🎙️ Deepgram STT: flush_signal=True")
+    except Exception:
+        pass
+
+    try:
+        plugin = deepgram.STT(**dg_kwargs)
+    except TypeError:
+        dg_kwargs.pop("flush_signal", None)
+        plugin = deepgram.STT(**dg_kwargs)
+        logger.warning("🎙️ Deepgram STT: flush_signal no soportado en esta versión del SDK")
+
+    logger.info(f"🎙️ Usando STT: Deepgram {stt_model} (vad_events=True)")
+    return plugin, True
 
 
 def anonymize_text(text: str) -> str:
@@ -592,7 +637,6 @@ class DynamicAgent(Agent):
         """Persiste datos de encuesta en el backend (invocado por la tool pública)."""
         self.data_saved = True
 
-        url = f"{self.server_url}/guardar-encuesta"
         real_id = int(self.survey_id) if str(self.survey_id).isdigit() else id_encuesta
 
         if status == "completed" and not comentarios:
@@ -615,14 +659,13 @@ class DynamicAgent(Agent):
                 except Exception:
                     payload["datos_extra"] = {"raw": datos_extra}
 
-        try:
-            async with aiohttp.ClientSession() as sess:
-                async with sess.post(url, json=payload, timeout=10) as resp:
-                    logger.info(
-                        f"✅ [{self.room_name}] guardar_encuesta HTTP {resp.status} encuesta={real_id}"
-                    )
-        except Exception as e:
-            logger.error(f"❌ [{self.room_name}] Error en guardar_encuesta: {e}")
+        job_id = await enqueue_guardar_encuesta(payload)
+        if job_id:
+            logger.info(
+                f"📬 [{self.room_name}] guardar_encuesta encolado (job={job_id}, encuesta={real_id})"
+            )
+        else:
+            logger.warning(f"⚠️ [{self.room_name}] guardar_encuesta no encolado (encuesta={real_id})")
 
         return "Dato guardado."
 
@@ -649,109 +692,69 @@ class DynamicAgent(Agent):
 
         busy_message = "Lo siento, nuestros agentes están ocupados, ¿puedo tomar nota?"
 
+        empresa_id_raw = (
+            getattr(self, "empresa_id", None)
+            or self.agent_config.get("empresa_id")
+            or "0"
+        )
         try:
-            async with aiohttp.ClientSession() as sess:
-                await sess.post(
-                    f"{self.server_url}/guardar-encuesta",
-                    json={
-                        "id_encuesta": survey_id or 0,
-                        "status": "transferred",
-                        "comentarios": f"Transferido a humano: {motivo}",
-                    },
-                    timeout=8,
-                )
+            empresa_id_int = int(empresa_id_raw)
+        except (TypeError, ValueError):
+            empresa_id_int = 0
 
-                empresa_id_raw = (
-                    getattr(self, "empresa_id", None)
-                    or self.agent_config.get("empresa_id")
-                    or "0"
-                )
+        if not empresa_id_int:
+            logger.warning(f"⚠️ [{self.room_name}] empresa_id no disponible para transferencia")
+            return busy_message
+
+        datos_extra = self.agent_config.get("datos_extra") or {}
+        if isinstance(datos_extra, str):
+            try:
+                datos_extra = json.loads(datos_extra)
+            except Exception:
+                datos_extra = {}
+        yeastar_call_id = (
+            datos_extra.get("yeastar_callid") or datos_extra.get("yeastar_call_id")
+            if isinstance(datos_extra, dict)
+            else None
+        )
+
+        transfer_payload: dict[str, Any] = {
+            "room_name": self.room_name,
+            "empresa_id": empresa_id_int,
+            "call_id": str(yeastar_call_id or self.room_name),
+            "extension": os.getenv("YEASTAR_HUMAN_TRANSFER_EXTENSION", "1000"),
+        }
+        if survey_id is not None:
+            transfer_payload["survey_id"] = survey_id
+        if motivo:
+            transfer_payload["motivo"] = motivo
+
+        queue_payload = {
+            "guardar_payload": {
+                "id_encuesta": survey_id or 0,
+                "status": "transferred",
+                "comentarios": f"Transferido a humano: {motivo}",
+            },
+            "transfer_payload": transfer_payload,
+        }
+
+        current_session = getattr(self, "session", None)
+        try:
+            job_id = await enqueue_transfer_to_human(queue_payload)
+            logger.info(
+                f"📬 [{self.room_name}] Transferencia encolada (job={job_id}, survey={survey_id_raw})"
+            )
+            if current_session:
                 try:
-                    empresa_id_int = int(empresa_id_raw)
-                except (TypeError, ValueError):
-                    empresa_id_int = 0
-
-                datos_extra = self.agent_config.get("datos_extra") or {}
-                if isinstance(datos_extra, str):
-                    try:
-                        datos_extra = json.loads(datos_extra)
-                    except Exception:
-                        datos_extra = {}
-                yeastar_call_id = (
-                    datos_extra.get("yeastar_callid")
-                    or datos_extra.get("yeastar_call_id")
-                    if isinstance(datos_extra, dict)
-                    else None
-                )
-
-                transfer_payload: dict[str, Any] = {
-                    "room_name": self.room_name,
-                    "empresa_id": empresa_id_int,
-                    "call_id": str(yeastar_call_id or self.room_name),
-                    "extension": os.getenv("YEASTAR_HUMAN_TRANSFER_EXTENSION", "1000"),
-                }
-                if survey_id is not None:
-                    transfer_payload["survey_id"] = survey_id
-                if motivo:
-                    transfer_payload["motivo"] = motivo
-
-                if not empresa_id_int:
-                    logger.warning(f"⚠️ [{self.room_name}] empresa_id no disponible para transferencia")
-                    return busy_message
-
-                async with sess.post(
-                    f"{self.server_url}/api/calls/transfer",
-                    json=transfer_payload,
-                    timeout=15,
-                ) as resp:
-                    current_session = getattr(self, "session", None)
-                    if resp.status == 200:
-                        logger.info(f"✅ [{self.room_name}] Transferencia OK (survey={survey_id_raw})")
-                        if current_session:
-                            try:
-                                await current_session.say(
-                                    "Transferencia en curso, un momento por favor",
-                                    allow_interruptions=False,
-                                )
-                            except Exception as say_err:
-                                logger.warning(f"⚠️ [{self.room_name}] No se pudo reproducir aviso TTS: {say_err}")
-                        return "Transferencia iniciada"
-
-                    elif resp.status == 409:
-                        logger.warning(
-                            f"⚠️ [{self.room_name}] Extensión ocupada (HTTP 409) empresa={empresa_id_int}"
-                        )
-                        extension_busy_msg = (
-                            "Lo siento, acabo de comprobarlo y todos mis compañeros están ocupados "
-                            "en este momento. ¿Le importaría contarme el motivo de su consulta o "
-                            "prefiere que le tomemos nota para llamarle más tarde?"
-                        )
-                        if current_session:
-                            try:
-                                await current_session.say(
-                                    extension_busy_msg,
-                                    allow_interruptions=True,
-                                )
-                            except Exception:
-                                pass
-                        return (
-                            "La transferencia falló porque la extensión está ocupada. "
-                            "Sigue la conversación ofreciendo tomar nota."
-                        )
-
-                    body = await resp.text()
-                    logger.warning(
-                        f"⚠️ [{self.room_name}] Transferencia HTTP {resp.status}: {body[:300]}"
+                    await current_session.say(
+                        "Transferencia en curso, un momento por favor",
+                        allow_interruptions=False,
                     )
-                    if current_session:
-                        try:
-                            await current_session.say(busy_message, allow_interruptions=True)
-                        except Exception:
-                            pass
-                    return busy_message
+                except Exception as say_err:
+                    logger.warning(f"⚠️ [{self.room_name}] No se pudo reproducir aviso TTS: {say_err}")
+            return "Transferencia iniciada"
         except Exception as transfer_err:
-            logger.error(f"❌ [{self.room_name}] Error en transferencia: {transfer_err}")
-            current_session = getattr(self, "session", None)
+            logger.error(f"❌ [{self.room_name}] Error encolando transferencia: {transfer_err}")
             if current_session:
                 try:
                     await current_session.say(busy_message, allow_interruptions=True)
@@ -825,14 +828,11 @@ class DynamicAgent(Agent):
                 logger.error(f"❌ Error diciendo despedida: {say_err}")
                 await asyncio.sleep(0.5)
             finally:
-                url = f"{self.server_url}/colgar"
-                payload = {"nombre_sala": self.room_name}
-                try:
-                    async with aiohttp.ClientSession() as sess:
-                        await sess.post(url, timeout=5, json=payload)
-                    logger.info(f"📵 Sala {self.room_name} colgada correctamente.")
-                except Exception as hang_err:
-                    logger.error(f"❌ Error colgando sala: {hang_err}")
+                job_id = await enqueue_colgar_sala(self.room_name)
+                if job_id:
+                    logger.info(f"📬 Sala {self.room_name} colgar encolado (job={job_id}).")
+                else:
+                    logger.warning(f"⚠️ No se pudo encolar colgar para sala {self.room_name}.")
 
         asyncio.create_task(process_goodbye_and_hangup())
         return "Llamada finalizada."
@@ -1038,15 +1038,6 @@ async def entrypoint(ctx: JobContext):
 
         logger.info(f"✅ [{job_id}] Conectado a sala {room_name}. Participantes: {len(ctx.room.remote_participants)}")
 
-        # --- PASO 3: Cargar configuración VAD ---
-        # min_silence_duration: tiempo mínimo de silencio para detectar fin de turno.
-        # 0.25 → responde muy rápido tras silencio. Si el cliente habla poco o entrecortado,
-        # sube a 0.4-0.5 para no interrumpir antes de que acabe.
-        min_silence_duration = float(os.getenv("AGENT_MIN_SILENCE_SECONDS", "0.65"))
-        min_silence_duration = max(0.55, min(min_silence_duration, 1.0))
-        vad_model = await get_vad_model(min_silence_duration)
-        logger.info(f"✅ [{job_id}] VAD (singleton) y configuración cargados.")
-
         # --- PASO 4: Crear el asistente ---
         agent_instance = DynamicAgent(room_name=room_name, agent_config=agent_config)
         
@@ -1067,12 +1058,17 @@ async def entrypoint(ctx: JobContext):
             f"Lang='{language}', STT='{stt_provider}/{stt_model}', Speed='{speaking_speed}'"
         )
 
-        if language in ["eu", "gl"] or stt_provider == "openai":
-            stt_plugin = openai.STT(language=language)
-            logger.info("🎙️ Usando STT: OpenAI Whisper")
+        stt_plugin, delegate_turn_to_stt = _build_stt_plugin(stt_provider, stt_model, language)
+
+        # VAD Silero solo si el STT no gestiona el turno (p. ej. OpenAI Whisper)
+        vad_model = None
+        if delegate_turn_to_stt:
+            logger.info(f"✅ [{job_id}] Turn detection delegado al STT (sin VAD Silero).")
         else:
-            stt_plugin = deepgram.STT(model=stt_model, language=language)
-            logger.info(f"🎙️ Usando STT: Deepgram {stt_model}")
+            min_silence_duration = float(os.getenv("AGENT_MIN_SILENCE_SECONDS", "0.65"))
+            min_silence_duration = max(0.55, min(min_silence_duration, 1.0))
+            vad_model = await get_vad_model(min_silence_duration)
+            logger.info(f"✅ [{job_id}] VAD Silero cargado (min_silence={min_silence_duration}s).")
 
         from livekit.agents.llm.fallback_adapter import FallbackAdapter  # type: ignore
 
@@ -1110,28 +1106,51 @@ async def entrypoint(ctx: JobContext):
         # Usar FallbackAdapter transparente al cliente
         final_llm = FallbackAdapter([main_llm, fallback_llm], attempt_timeout=10.0)
 
-        # --- Crear sesión del agente ---
-        # min_endpointing_delay: segundos de espera mínima tras silencio VAD antes de procesar
-        # max_endpointing_delay: tope máximo de espera (por defecto 3s → usuario lo notaba como pausa larga)
-        # preemptive_generation: empieza a generar respuesta mientras el usuario habla → menos latencia percibida
-        endpointing_min = float(os.getenv("AGENT_ENDPOINTING_MIN", "0.7"))
-        endpointing_max = float(os.getenv("AGENT_ENDPOINTING_MAX", "1.8"))
-        endpointing_min = max(0.6, min(endpointing_min, 1.2))
-        endpointing_max = max(endpointing_min + 0.2, min(endpointing_max, 2.5))
-        session = AgentSession(
-            vad=vad_model,
-            stt=stt_plugin,
-            llm=final_llm,
-            tts=_build_tts_plugin(
-                voice_id=voice_id, 
-                language=language, 
+        # --- Crear sesión del agente (latencia objetivo <500ms) ---
+        endpointing_min = float(os.getenv("AGENT_ENDPOINTING_MIN", "0.07"))
+        endpointing_max = float(os.getenv("AGENT_ENDPOINTING_MAX", "0.5"))
+        endpointing_min = max(0.05, min(endpointing_min, 0.3))
+        endpointing_max = max(endpointing_min + 0.05, min(endpointing_max, 1.0))
+
+        session_kwargs: dict[str, Any] = {
+            "stt": stt_plugin,
+            "llm": final_llm,
+            "tts": _build_tts_plugin(
+                voice_id=voice_id,
+                language=language,
                 speaking_speed=speaking_speed,
-                tts_model=tts_model
+                tts_model=tts_model,
             ),
-            min_endpointing_delay=endpointing_min,
-            max_endpointing_delay=endpointing_max,
-            preemptive_generation=True,
-            use_tts_aligned_transcript=True,
+            "min_endpointing_delay": endpointing_min,
+            "max_endpointing_delay": endpointing_max,
+            "preemptive_generation": True,
+            "use_tts_aligned_transcript": True,
+        }
+        if vad_model is not None:
+            session_kwargs["vad"] = vad_model
+        turn_mode = "vad"
+        if delegate_turn_to_stt:
+            session_kwargs["turn_detection"] = "stt"
+            turn_mode = "stt"
+
+        try:
+            session = AgentSession(**session_kwargs)
+        except TypeError as session_err:
+            if delegate_turn_to_stt and "turn_detection" in str(session_err):
+                logger.warning(
+                    f"⚠️ [{job_id}] turn_detection='stt' no soportado; fallback a VAD Silero: {session_err}"
+                )
+                session_kwargs.pop("turn_detection", None)
+                min_silence = float(os.getenv("AGENT_MIN_SILENCE_SECONDS", "0.65"))
+                session_kwargs["vad"] = await get_vad_model(max(0.55, min(min_silence, 1.0)))
+                turn_mode = "vad"
+                session = AgentSession(**session_kwargs)
+            else:
+                raise
+
+        logger.info(
+            f"⚡ [{job_id}] AgentSession endpointing={endpointing_min}-{endpointing_max}s "
+            f"turn_detection={turn_mode}"
         )
 
         await session.start(
@@ -1182,27 +1201,18 @@ async def entrypoint(ctx: JobContext):
                             amd_state["detected"] = True
                             logger.warning(f"📵 [{job_id}] AMD: BUZÓN DETECTADO — patrón '{pattern}' en '{anonymize_text(text)}'")
 
-                            # Guardar como no_contesta y colgar
+                            # Guardar como no_contesta y colgar (vía cola, sin bloquear el loop)
                             try:
-                                _api_url = agent_instance.server_url
-                                async with aiohttp.ClientSession() as _s:
-                                    await _s.post(
-                                        f"{_api_url}/guardar-encuesta",
-                                        json={
-                                            "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
-                                            "status": "failed",
-                                            "comentarios": f"Buzón de voz detectado automáticamente (AMD): {pattern}",
-                                        },
-                                        timeout=8,
-                                    )
-                                    await _s.post(
-                                        f"{_api_url}/colgar",
-                                        json={"nombre_sala": room_name},
-                                        timeout=5,
-                                    )
-                                logger.info(f"📵 [{job_id}] AMD: Encuesta {survey_id} marcada failed; sala cerrada.")
+                                enc_id = int(survey_id) if str(survey_id).isdigit() else 0
+                                await enqueue_guardar_encuesta({
+                                    "id_encuesta": enc_id,
+                                    "status": "failed",
+                                    "comentarios": f"Buzón de voz detectado automáticamente (AMD): {pattern}",
+                                })
+                                await enqueue_colgar_sala(room_name)
+                                logger.info(f"📵 [{job_id}] AMD: encuesta {survey_id} failed + colgar encolados.")
                             except Exception as amd_err:
-                                logger.error(f"❌ [{job_id}] AMD: Error al cerrar por buzón: {amd_err}")
+                                logger.error(f"❌ [{job_id}] AMD: Error al encolar cierre por buzón: {amd_err}")
                             return
 
                     user_msgs = [i for i in transcript_event_buffer if i.get("role") == "user"]
@@ -1388,15 +1398,13 @@ async def entrypoint(ctx: JobContext):
                 if t:
                     transcript_snapshot["transcript"] = t
                     transcript_snapshot["raw"] = raw
-                    _internal = getattr(agent_instance, "server_url", BRIDGE_SERVER_URL_INTERNAL)
-                    async with aiohttp.ClientSession() as _http:
-                        _resp = await _http.post(
-                            f"{_internal}/guardar-encuesta",
-                            json={"id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
-                                  "transcription": t},
-                            timeout=8,
-                        )
-                        logger.info(f"✅ [{job_id}] Transcripción snapshot guardada ({reason}): HTTP {_resp.status}")
+                    snap_job = await enqueue_guardar_encuesta({
+                        "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
+                        "transcription": t,
+                    })
+                    logger.info(
+                        f"📬 [{job_id}] Transcripción snapshot encolada ({reason}, job={snap_job})"
+                    )
             except Exception as _e:
                 logger.warning(f"⚠️ [{job_id}] Error guardando snapshot transcripción ({reason}): {_e}")
 
@@ -1655,13 +1663,11 @@ async def entrypoint(ctx: JobContext):
                 async def disconnect_tasks():
                     # 1. Guardar transcripción ANTES de que LiveKit limpie la sesión
                     await _save_transcript_snapshot("client-hangup")
-                    # 2. Colgar la sala
-                    url = f"{agent_instance.server_url}/colgar"
+                    # 2. Colgar la sala (cola ARQ, no bloquea)
                     try:
-                        async with aiohttp.ClientSession() as http_sess:
-                            await http_sess.post(url, timeout=5, json={"nombre_sala": room_name})
+                        await enqueue_colgar_sala(room_name)
                     except Exception as e:
-                        logger.error(f"Error colgando sala desde participant_disconnected: {e}")
+                        logger.error(f"Error encolando colgar desde participant_disconnected: {e}")
                 asyncio.create_task(disconnect_tasks())
 
         # Kill switch: si la sala no se cierra en 10 minutos, forzamos la desconexión
@@ -1708,9 +1714,6 @@ async def entrypoint(ctx: JobContext):
             data_saved = getattr(agent_instance, 'data_saved', False) if agent_instance_exists else False
             
             try:
-                # Guardados post-llamada deben ir al mismo backend accesible desde este worker
-                internal_api_url = getattr(agent_instance, "server_url", BRIDGE_SERVER_URL_INTERNAL)
-            
                 raw_messages = []
                 transcript = ""
                 try:
@@ -1739,9 +1742,6 @@ async def entrypoint(ctx: JobContext):
                         transcript = transcript_snapshot["transcript"]
                         raw_messages = transcript_snapshot.get("raw", [])
                 
-                # SIEMPRE guardar transcripción y datos finales en Supabase
-                url_guardar = f"{internal_api_url}/guardar-encuesta"
-
                 seconds_used = 0
                 if "call_start_time" in locals() and call_start_time is not None:
                     seconds_used = max(0, int(time.time() - call_start_time))
@@ -1782,11 +1782,10 @@ async def entrypoint(ctx: JobContext):
                             "seconds_used": seconds_used,
                         }
                         try:
-                            async with aiohttp.ClientSession() as sess:
-                                async with sess.post(url_guardar, json=transcript_payload, timeout=10) as resp:
-                                    logger.info(f"✅ Extras guardados: HTTP {resp.status}")
+                            job_id = await enqueue_guardar_encuesta(transcript_payload)
+                            logger.info(f"📬 Extras post-llamada encolados (job={job_id})")
                         except Exception as save_err:
-                            logger.error(f"Error guardando extras: {save_err}")
+                            logger.error(f"Error encolando extras: {save_err}")
                     else:
                         # No se guardaron datos numéricos → fallback completo con disposición del LLM
                         logger.warning(f"⚠️ La sesión terminó sin guardar datos explícitos por tool (Survey ID: {survey_id}) → Disposición: {call_disposition}")
@@ -1799,11 +1798,12 @@ async def entrypoint(ctx: JobContext):
                             "seconds_used": seconds_used,
                         }
                         try:
-                            async with aiohttp.ClientSession() as sess:
-                                async with sess.post(url_guardar, json=fallback_payload, timeout=10) as resp:
-                                    logger.info(f"✅ Fallback guardado (disposición: {call_disposition}): HTTP {resp.status}")
+                            job_id = await enqueue_guardar_encuesta(fallback_payload)
+                            logger.info(
+                                f"📬 Fallback post-llamada encolado (disposición: {call_disposition}, job={job_id})"
+                            )
                         except Exception as save_err:
-                            logger.error(f"Error en guardado final de fallback: {save_err}")
+                            logger.error(f"Error encolando fallback: {save_err}")
                 except Exception as ex:
                      logger.error(f"❌ Error salvando datos finales: {ex}")
             except Exception as fatal_post:
