@@ -17,6 +17,10 @@ interface AuthContextType {
     refreshProfile: () => Promise<void>;
     realProfile: UserProfile | null;
     isPlatformOwner: boolean;
+    /** Superadmin o admin de empresa Ausarta: acceso global a datos */
+    hasGlobalAccess: boolean;
+    /** Solo superadmin: crear administradores de la empresa Ausarta */
+    canCreateAusartaAdmins: boolean;
     setSpoofedRole: (role: UserRole | null) => void;
     setSpoofedEmpresa: (empresaId: number | null) => void;
     setImpersonateToken: (token: string | null) => void;
@@ -206,8 +210,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const hasPermission = (module: string): boolean => {
         if (!profile) return false;
 
-        // Special case: Superadmins always have full access
-        if (profile.role === 'superadmin') return true;
+        // Superadmin y admin de Ausarta: acceso completo a módulos (misma visibilidad de datos)
+        const isAusartaAdmin =
+            profile.role === 'admin' &&
+            (profile.empresas?.nombre?.toLowerCase() === 'ausarta' || profile.empresa_id === 1);
+        if (profile.role === 'superadmin' || isAusartaAdmin) return true;
 
         // Modules enabled for the company
         const companyModules = profile.empresas?.enabled_modules || [];
@@ -235,14 +242,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return roles.includes(profile.role);
     };
 
-    // Centralised Platform Management Check
-    const isPlatformOwner = !!profile && (profile.empresas?.nombre?.toLowerCase() === 'ausarta' || profile.role === 'superadmin') && (profile.role === 'superadmin' || profile.role === 'admin');
+    // Plataforma Ausarta: admin de empresa Ausarta o superadmin
+    const isPlatformOwner =
+        !!profile &&
+        (profile.empresas?.nombre?.toLowerCase() === 'ausarta' || profile.role === 'superadmin') &&
+        (profile.role === 'superadmin' || profile.role === 'admin');
+
+    const hasGlobalAccess = isPlatformOwner;
+    const canCreateAusartaAdmins = profile?.role === 'superadmin';
 
     return (
         <AuthContext.Provider value={{
             user, session, profile, permissions, loading,
             signIn, signUp, signOut, hasPermission, isRole, refreshProfile,
-            realProfile, isPlatformOwner, setSpoofedRole, setSpoofedEmpresa, setImpersonateToken
+            realProfile, isPlatformOwner, hasGlobalAccess, canCreateAusartaAdmins,
+            setSpoofedRole, setSpoofedEmpresa, setImpersonateToken
         }}>
             {children}
         </AuthContext.Provider>

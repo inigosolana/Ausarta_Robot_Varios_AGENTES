@@ -3,6 +3,11 @@ from fastapi.responses import JSONResponse
 from supabase import create_client
 from services.supabase_service import supabase, clear_ui_cache, sb_query
 from services.auth import CurrentUser, require_admin, require_superadmin, invalidate_user_profile_cache
+from services.platform_access import (
+    get_master_empresa_id,
+    has_global_access,
+    is_ausarta_platform_admin,
+)
 from services.audit import log_audit_event
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -33,18 +38,11 @@ def _canonical_role(raw_role: str | None) -> str:
     return role
 
 
-def _get_master_empresa_id() -> int | None:
-    """
-    Tenant maestro (Ausarta):
-    1) Preferencia: env AUSARTA_MASTER_EMPRESA_ID o MASTER_EMPRESA_ID
-    2) Fallback: buscar empresa cuyo nombre sea "Ausarta"
-    """
-    raw = os.getenv("AUSARTA_MASTER_EMPRESA_ID") or os.getenv("MASTER_EMPRESA_ID")
-    if raw:
-        try:
-            return int(raw)
-        except ValueError:
-            logger.warning(f"⚠️ [admin] MASTER_EMPRESA_ID inválido: {raw}")
+def _resolve_master_empresa_id() -> int | None:
+    """Tenant Ausarta: env primero, luego consulta BD."""
+    env_id = get_master_empresa_id()
+    if env_id:
+        return env_id
     if not supabase:
         return None
     try:
@@ -60,14 +58,6 @@ def _get_master_empresa_id() -> int | None:
     except Exception as e:
         logger.warning(f"⚠️ [admin] No se pudo resolver empresa maestra Ausarta: {e}")
     return None
-
-
-def _is_admin_ausarta(current_user: CurrentUser, master_empresa_id: int | None) -> bool:
-    return (
-        current_user.role == "admin"
-        and master_empresa_id is not None
-        and current_user.empresa_id == master_empresa_id
-    )
 
 
 def _b64url(data: bytes) -> str:
@@ -185,7 +175,7 @@ async def create_auth_user(request: Request, payload: dict, current_user: Curren
         return JSONResponse(status_code=400, content={"error": "Rol es obligatorio"})
 
     # ── Hardening roles/tenant (matriz de permisos) ─────────────────────────
-    master_empresa_id = _get_master_empresa_id()
+    master_empresa_id = _resolve_master_empresa_id()
     requested_role = _canonical_role(role)
     if requested_role not in {"superadmin", "admin", "user"}:
         raise HTTPException(status_code=400, detail="Rol inválido")
@@ -193,15 +183,15 @@ async def create_auth_user(request: Request, payload: dict, current_user: Curren
     if current_user.role == "superadmin":
         effective_role = requested_role
         effective_empresa_id = empresa_id
-    elif _is_admin_ausarta(current_user, master_empresa_id):
-        # Admin de Ausarta:
-        # - puede gestionar clientes
-        # - NO puede crear superadmin
-        # - NO puede crear admin dentro de Ausarta
+    elif is_ausarta_platform_admin(current_user):
+        # Admin de Ausarta: mismos datos que superadmin; NO puede crear superadmin ni admin de Ausarta
         if requested_role == "superadmin":
             raise HTTPException(status_code=403, detail="Solo superadmin puede crear superadmins")
         if requested_role == "admin" and empresa_id == master_empresa_id:
-            raise HTTPException(status_code=403, detail="Admin Ausarta no puede crear admin de Ausarta")
+            raise HTTPException(
+                status_code=403,
+                detail="Solo superadmin puede crear administradores de la empresa Ausarta",
+            )
         effective_role = requested_role
         effective_empresa_id = empresa_id
     else:
@@ -393,7 +383,7 @@ async def delete_auth_user(request: Request, user_id: str, current_user: Current
         service_role_key = os.getenv("SUPABASE_KEY")
 
     try:
-        master_empresa_id = _get_master_empresa_id()
+        master_empresa_id = _resolve_master_empresa_id()
         prof = await sb_query(
             lambda: supabase.table("user_profiles")
             .select("id,role,empresa_id")
@@ -410,11 +400,11 @@ async def delete_auth_user(request: Request, user_id: str, current_user: Current
         # Matriz de borrado por jerarquía de negocio
         if current_user.role == "superadmin":
             pass
-        elif _is_admin_ausarta(current_user, master_empresa_id):
+        elif is_ausarta_platform_admin(current_user):
             if target_role == "superadmin":
                 raise HTTPException(status_code=403, detail="Admin Ausarta no puede borrar superadmin")
             if target_role == "admin" and target_empresa == master_empresa_id:
-                raise HTTPException(status_code=403, detail="Admin Ausarta no puede borrar admin de Ausarta")
+                raise HTTPException(status_code=403, detail="Solo superadmin puede eliminar admins de Ausarta")
         else:
             # Admin cliente: solo usuarios role=user de su propia empresa
             if target_empresa != current_user.empresa_id:
@@ -586,7 +576,6 @@ async def get_usage_per_tenant(current_user: CurrentUser = Depends(require_admin
             except (TypeError, ValueError):
                 pass
 
-    is_super = current_user.role == "superadmin"
     admin_empresa = current_user.empresa_id
 
     out: list[dict] = []
@@ -595,7 +584,7 @@ async def get_usage_per_tenant(current_user: CurrentUser = Depends(require_admin
             eid = int(emp["id"])
         except (TypeError, ValueError, KeyError):
             continue
-        if not is_super:
+        if not has_global_access(current_user):
             if admin_empresa is None or eid != int(admin_empresa):
                 continue
 

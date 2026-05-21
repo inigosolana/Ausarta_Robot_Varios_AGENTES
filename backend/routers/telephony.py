@@ -25,6 +25,7 @@ from models.schemas import (
     YeastarPSeriesConfigTest,
 )
 from services.supabase_service import supabase, sb_query
+from services.platform_access import has_global_access
 from services.livekit_service import (
     lkapi,
     create_isolated_room,
@@ -71,7 +72,7 @@ async def get_yeastar_config(
         raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
 
     target_empresa_id = empresa_id if empresa_id else current_user.empresa_id
-    if target_empresa_id != current_user.empresa_id and current_user.role not in ["superadmin", "admin"]:
+    if target_empresa_id != current_user.empresa_id and not has_global_access(current_user):
         raise HTTPException(status_code=403, detail="No tienes permisos para ver esta configuración")
 
     if not target_empresa_id:
@@ -119,7 +120,7 @@ async def save_yeastar_config(
         raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
 
     target_empresa_id = payload.empresa_id if payload.empresa_id else current_user.empresa_id
-    if target_empresa_id != current_user.empresa_id and current_user.role not in ["superadmin", "admin"]:
+    if target_empresa_id != current_user.empresa_id and not has_global_access(current_user):
         raise HTTPException(status_code=403, detail="No tienes permisos para editar esta configuración")
 
     if not target_empresa_id:

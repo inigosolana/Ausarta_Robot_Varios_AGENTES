@@ -25,7 +25,7 @@ const SkeletonRow = () => (
 );
 
 const UserManagementView: React.FC = () => {
-    const { profile: currentProfile, isRole, isPlatformOwner } = useAuth();
+    const { profile: currentProfile, isRole, isPlatformOwner, canCreateAusartaAdmins } = useAuth();
     const { t } = useTranslation();
 
     const [users, setUsers] = useState<(UserProfile & { permissions: UserPermission[], empresas?: Empresa | null })[]>([]);
@@ -128,10 +128,14 @@ const UserManagementView: React.FC = () => {
             return;
         }
 
-        // AUSARTA PROTECTION: Admins of Ausarta cannot create users IN Ausarta
         const selectedEmpresa = empresas.find(e => e.id === Number(newEmpresaId));
-        if (currentProfile?.empresas?.nombre === 'Ausarta' && currentProfile?.role === 'admin' && selectedEmpresa?.nombre === 'Ausarta') {
-            alert(t('As an administrator, you cannot create users within the Ausarta company. This action is reserved for Superadmins.', 'Como administrador, no puedes crear usuarios dentro de la empresa Ausarta. Esta acción está reservada para Superadmins.'));
+        const isAusartaCompany = selectedEmpresa?.nombre?.toLowerCase() === 'ausarta';
+        // Solo superadmin puede crear administradores de Ausarta
+        if (!canCreateAusartaAdmins && isAusartaCompany && newRole === 'admin') {
+            alert(t(
+                'Only Superadmin can create Ausarta company administrators.',
+                'Solo el Superadmin puede crear administradores de la empresa Ausarta.'
+            ));
             return;
         }
 
@@ -349,16 +353,14 @@ const UserManagementView: React.FC = () => {
         if (!currentProfile) return false;
         if (currentProfile.id === targetUser.id) return false; // Can't manage self
 
-        // 1. Superadmin has full control
-        if (currentProfile.role === 'superadmin') return true;
+        if (canCreateAusartaAdmins) return true;
 
-        // 2. Ausarta Admin Case (Platform Owner)
-        if (currentProfile.role === 'admin' && currentProfile.empresas?.nombre === 'Ausarta') {
-            // PROTECTION: Cannot manage other Ausarta Admins or Superadmins
-            if (targetUser.empresas?.nombre === 'Ausarta' && (targetUser.role === 'admin' || targetUser.role === 'superadmin')) {
-                return false;
-            }
-            // Can manage ALL other users and admins from ANY company
+        // Admin Ausarta: mismos datos globales, pero no gestiona admins/superadmins de Ausarta
+        if (isPlatformOwner) {
+            const targetIsAusartaStaff =
+                targetUser.empresas?.nombre?.toLowerCase() === 'ausarta' &&
+                (targetUser.role === 'admin' || targetUser.role === 'superadmin');
+            if (targetIsAusartaStaff) return false;
             return true;
         }
 
