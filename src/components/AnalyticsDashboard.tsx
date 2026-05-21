@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
     ResponsiveContainer, PieChart, Pie, Cell, Legend,
-    LineChart, Line,
+    AreaChart, Area,
 } from 'recharts';
-import { Database, Hash, ToggleLeft, AlignLeft, List, Download, Phone, Clock, TrendingUp, Euro, Loader2 } from 'lucide-react';
+import { Database, Hash, ToggleLeft, AlignLeft, List, Download, Phone, Clock, TrendingUp, Euro, Loader2, Voicemail, PhoneOff, PhoneMissed } from 'lucide-react';
 import { SurveyResult, getCallDisposition, ExtractionSchemaProperty, getSentimiento, getIdioma, Sentimiento } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useAnalyticsFromSupabase } from '../hooks/useAnalyticsFromSupabase';
@@ -25,6 +25,35 @@ const DISPOSITION_COLORS: Record<string, string> = {
     rejected: '#EF4444',
     failed: '#8B5CF6',
     pending: '#9CA3AF',
+};
+
+const OUTCOME_COLORS = {
+    completed: '#10B981',
+    voicemail: '#6366F1',
+    busy: '#F59E0B',
+    failed: '#EF4444',
+} as const;
+
+type OutcomeKey = keyof typeof OUTCOME_COLORS;
+
+function mapOutcomeCategory(status: string | null): OutcomeKey {
+    const s = (status || '').toLowerCase();
+    if (s.includes('voicemail') || s.includes('buzon') || s.includes('buzón') || s === 'unreached' || s === 'no_contesta') return 'voicemail';
+    if (s.includes('busy') || s.includes('ocupado') || s === 'incomplete' || s === 'parcial' || s === 'calling') return 'busy';
+    if (s === 'completed' || s === 'completada') return 'completed';
+    return 'failed';
+}
+
+const ChartTooltip = ({ active, payload, label }: { active?: boolean; payload?: { value: number; name: string; payload?: { date?: string } }[]; label?: string }) => {
+    if (!active || !payload?.length) return null;
+    const p = payload[0];
+    return (
+        <div className="rounded-xl border border-slate-100 bg-white px-4 py-3 shadow-lg shadow-slate-200/60">
+            <p className="text-xs font-medium text-slate-500 mb-1">{label ?? p.payload?.date}</p>
+            <p className="text-lg font-bold text-slate-900 tabular-nums">{p.value}</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wide">{p.name}</p>
+        </div>
+    );
 };
 
 const DISPOSITION_LABELS: Record<string, string> = {
@@ -356,7 +385,8 @@ function buildCsv(results: SurveyResult[], schema?: ExtractionSchemaProperty[]):
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
-const KPI_CARD_CLASS = 'bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex items-start gap-4';
+const KPI_CARD_CLASS =
+    'group bg-white rounded-xl p-5 shadow-sm border border-slate-100/80 hover:border-slate-200 hover:shadow-md transition-all duration-300 flex items-start gap-4';
 
 export const AnalyticsDashboard: React.FC<AnalyticsProps> = ({
     results: resultsProp,
@@ -391,6 +421,22 @@ export const AnalyticsDashboard: React.FC<AnalyticsProps> = ({
             .filter(d => d.value > 0)
             .sort((a, b) => b.value - a.value);
     }, [results]);
+
+    const outcomeDonutData = useMemo(() => {
+        const counts: Record<OutcomeKey, number> = { completed: 0, voicemail: 0, busy: 0, failed: 0 };
+        results.forEach(r => {
+            counts[mapOutcomeCategory(r.status)]++;
+        });
+        const labels: Record<OutcomeKey, string> = {
+            completed: t('Completada', 'Completada'),
+            voicemail: t('Buzón', 'Buzón'),
+            busy: t('Ocupado', 'Ocupado'),
+            failed: t('Fallida', 'Fallida'),
+        };
+        return (Object.keys(counts) as OutcomeKey[])
+            .map(key => ({ key, name: labels[key], value: counts[key], fill: OUTCOME_COLORS[key] }))
+            .filter(d => d.value > 0);
+    }, [results, t]);
 
     const totalCalls = results.length;
     const completedCount = dispositionData.find(d => d.key === 'completed')?.value || 0;
@@ -458,10 +504,10 @@ export const AnalyticsDashboard: React.FC<AnalyticsProps> = ({
     if (!metricsLoading && results.length === 0) return null;
 
     const kpiCards = [
-        { label: t('Llamadas Totales', 'Llamadas Totales'), value: metrics.totalCalls, icon: Phone, iconBg: 'bg-blue-50', iconColor: 'text-blue-600' },
-        { label: t('Minutos Consumidos', 'Minutos Consumidos'), value: metrics.totalMinutes.toLocaleString(), icon: Clock, iconBg: 'bg-violet-50', iconColor: 'text-violet-600' },
-        { label: t('Tasa de Éxito', 'Tasa de Éxito'), value: `${metrics.successRate}%`, icon: TrendingUp, iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600' },
-        { label: t('Coste', 'Coste'), value: `€${metrics.estimatedCostEur.toFixed(2)}`, icon: Euro, iconBg: 'bg-amber-50', iconColor: 'text-amber-600' },
+        { label: t('Llamadas Totales', 'Llamadas Totales'), value: metrics.totalCalls, icon: Phone, iconBg: 'bg-blue-50', iconColor: 'text-blue-600', ring: 'ring-blue-100' },
+        { label: t('Minutos Consumidos', 'Minutos Consumidos'), value: metrics.totalMinutes.toLocaleString(), icon: Clock, iconBg: 'bg-violet-50', iconColor: 'text-violet-600', ring: 'ring-violet-100' },
+        { label: t('Tasa de Éxito', 'Tasa de Éxito'), value: `${metrics.successRate}%`, icon: TrendingUp, iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600', ring: 'ring-emerald-100' },
+        { label: t('Coste', 'Coste'), value: `€${metrics.estimatedCostEur.toFixed(2)}`, icon: Euro, iconBg: 'bg-amber-50', iconColor: 'text-amber-600', ring: 'ring-amber-100' },
     ];
 
     return (
@@ -479,7 +525,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsProps> = ({
                     const Icon = kpi.icon;
                     return (
                         <div key={kpi.label} className={KPI_CARD_CLASS}>
-                            <div className={`p-2.5 rounded-xl ${kpi.iconBg}`}>
+                            <div className={`p-2.5 rounded-xl ring-4 ${kpi.ring} ${kpi.iconBg} group-hover:scale-105 transition-transform`}>
                                 <Icon className={`w-5 h-5 ${kpi.iconColor}`} />
                             </div>
                             <div className="min-w-0 flex-1">
@@ -495,31 +541,88 @@ export const AnalyticsDashboard: React.FC<AnalyticsProps> = ({
                 })}
             </div>
 
-            {/* ── 7-day line chart (Supabase) ── */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                <h3 className="text-base font-bold text-gray-900 mb-1">
-                    {t('Evolución de llamadas', 'Evolución de llamadas')}
-                </h3>
-                <p className="text-xs text-gray-500 mb-4">{t('Últimos 7 días', 'Últimos 7 días')}</p>
-                <div className="h-56 w-full">
-                    {metricsLoading ? (
-                        <div className="h-full flex items-center justify-center">
-                            <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-                        </div>
-                    ) : (
-                        <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={metrics.dailySeries} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-                                <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-                                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-                                <RechartsTooltip
-                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgb(0 0 0 / 0.08)' }}
-                                    labelFormatter={(_, payload) => payload?.[0]?.payload?.date ?? ''}
-                                />
-                                <Line type="monotone" dataKey="calls" stroke="#2563eb" strokeWidth={2.5} dot={{ r: 4, fill: '#2563eb' }} activeDot={{ r: 6 }} name={t('Llamadas', 'Llamadas')} />
-                            </LineChart>
-                        </ResponsiveContainer>
-                    )}
+            {/* ── Charts row: trend + outcome donut ── */}
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                <div className="xl:col-span-2 bg-white rounded-xl shadow-sm border border-slate-100/80 p-6">
+                    <h3 className="text-sm font-semibold text-slate-900 tracking-tight">
+                        {t('Evolución de llamadas', 'Evolución de llamadas')}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5 mb-5">{t('Últimos 7 días', 'Últimos 7 días')}</p>
+                    <div className="h-64 w-full">
+                        {metricsLoading ? (
+                            <div className="h-full flex items-center justify-center">
+                                <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+                            </div>
+                        ) : (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={metrics.dailySeries} margin={{ top: 8, right: 12, left: -8, bottom: 0 }}>
+                                    <defs>
+                                        <linearGradient id="callsGradient" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
+                                            <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="4 4" stroke="#f1f5f9" vertical={false} />
+                                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8', fontFamily: 'inherit' }} axisLine={false} tickLine={false} dy={8} />
+                                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8', fontFamily: 'inherit' }} axisLine={false} tickLine={false} dx={-4} />
+                                    <RechartsTooltip content={<ChartTooltip />} />
+                                    <Area type="monotone" dataKey="calls" stroke="#4f46e5" strokeWidth={2.5} fill="url(#callsGradient)" dot={{ r: 3, fill: '#4f46e5', strokeWidth: 0 }} activeDot={{ r: 5, fill: '#312e81' }} name={t('Llamadas', 'Llamadas')} />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        )}
+                    </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-slate-100/80 p-6">
+                    <h3 className="text-sm font-semibold text-slate-900 tracking-tight">
+                        {t('Resultados de llamadas', 'Resultados de llamadas')}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5 mb-4">{t('Desglose por estado', 'Desglose por estado')}</p>
+                    <div className="h-52 w-full relative">
+                        {metricsLoading ? (
+                            <div className="h-full flex items-center justify-center">
+                                <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+                            </div>
+                        ) : outcomeDonutData.length === 0 ? (
+                            <div className="h-full flex items-center justify-center text-sm text-slate-400">{t('Sin datos', 'Sin datos')}</div>
+                        ) : (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie data={outcomeDonutData} cx="50%" cy="45%" innerRadius={52} outerRadius={72} paddingAngle={4} dataKey="value" stroke="none">
+                                        {outcomeDonutData.map(entry => (
+                                            <Cell key={entry.key} fill={entry.fill} />
+                                        ))}
+                                    </Pie>
+                                    <RechartsTooltip content={<ChartTooltip />} />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        )}
+                        {!metricsLoading && outcomeDonutData.length > 0 && (
+                            <div className="absolute inset-0 flex items-center justify-center flex-col pointer-events-none" style={{ paddingBottom: '2.5rem' }}>
+                                <span className="text-2xl font-bold text-slate-900 tabular-nums">{totalCalls}</span>
+                                <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">{t('Total', 'Total')}</span>
+                            </div>
+                        )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                        {([
+                            { key: 'completed' as OutcomeKey, icon: Phone, label: t('Completada', 'Completada') },
+                            { key: 'voicemail' as OutcomeKey, icon: Voicemail, label: t('Buzón', 'Buzón') },
+                            { key: 'busy' as OutcomeKey, icon: PhoneMissed, label: t('Ocupado', 'Ocupado') },
+                            { key: 'failed' as OutcomeKey, icon: PhoneOff, label: t('Fallida', 'Fallida') },
+                        ]).map(item => {
+                            const Icon = item.icon;
+                            const count = outcomeDonutData.find(d => d.key === item.key)?.value ?? 0;
+                            return (
+                                <div key={item.key} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-2">
+                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: OUTCOME_COLORS[item.key] }} />
+                                    <Icon size={12} className="text-slate-400 shrink-0" />
+                                    <span className="text-xs text-slate-600 truncate">{item.label}</span>
+                                    <span className="text-xs font-bold text-slate-900 ml-auto tabular-nums">{count}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             </div>
 

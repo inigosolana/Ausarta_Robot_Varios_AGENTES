@@ -33,6 +33,7 @@ interface Props {
 }
 
 type Phase = 'idle' | 'calling' | 'done' | 'error';
+type CallStage = 'connecting_livekit' | 'dialing' | 'online';
 type AgentState = 'connecting' | 'listening' | 'thinking' | 'speaking';
 
 interface TranscriptEntry {
@@ -84,6 +85,7 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, onClose }) 
     const [agentState, setAgentState] = useState<AgentState>('connecting');
     const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
     const [lkConnected, setLkConnected] = useState(false);
+    const [callStage, setCallStage] = useState<CallStage>('connecting_livekit');
 
     const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -113,11 +115,24 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, onClose }) 
     useEffect(() => {
         if (phase === 'calling') {
             setElapsedSecs(0);
+            setCallStage('connecting_livekit');
             timerRef.current = setInterval(() => setElapsedSecs(s => s + 1), 1000);
-        } else {
-            if (timerRef.current) clearInterval(timerRef.current);
+            const dialTimer = setTimeout(() => {
+                setCallStage(prev => (prev === 'connecting_livekit' ? 'dialing' : prev));
+            }, 2800);
+            return () => {
+                clearTimeout(dialTimer);
+                if (timerRef.current) clearInterval(timerRef.current);
+            };
         }
+        if (timerRef.current) clearInterval(timerRef.current);
     }, [phase]);
+
+    useEffect(() => {
+        if (phase === 'calling' && (lkConnected || agentState === 'speaking' || agentState === 'listening')) {
+            setCallStage('online');
+        }
+    }, [phase, lkConnected, agentState]);
 
     // Auto-scroll transcripts
     useEffect(() => {
@@ -334,29 +349,34 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, onClose }) 
     const stCfg = AGENT_STATE_CONFIG[agentState];
     const StateIcon = stCfg.icon;
 
-    return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col"
-                 style={{ maxHeight: 'min(92vh, 720px)' }}>
+    const stageMessages: Record<CallStage, string> = {
+        connecting_livekit: t('Conectando con LiveKit...', 'Conectando con LiveKit...'),
+        dialing: t('Llamando...', 'Llamando...'),
+        online: t('Agente en línea 🎙️', 'Agente en línea 🎙️'),
+    };
 
-                {/* Header */}
-                <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-indigo-950/30 shrink-0">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-blue-100 dark:bg-blue-900/40 p-2 rounded-xl">
-                            <FlaskConical size={20} className="text-blue-600 dark:text-blue-400" />
+    return (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-md flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl shadow-2xl shadow-slate-900/10 w-full max-w-md overflow-hidden border border-slate-100 flex flex-col animate-in zoom-in-95 duration-300"
+                 style={{ maxHeight: 'min(92vh, 640px)' }}>
+
+                <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center shrink-0">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <div className="bg-indigo-50 p-2.5 rounded-xl shrink-0">
+                            <FlaskConical size={18} className="text-indigo-600" />
                         </div>
-                        <div>
-                            <h3 className="text-base font-bold text-gray-900 dark:text-white">{t('Probar Agente', 'Probar Agente')}</h3>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">{agentName}</p>
+                        <div className="min-w-0">
+                            <h3 className="text-sm font-semibold text-slate-900 tracking-tight">{t('Probar Agente', 'Probar Agente')}</h3>
+                            <p className="text-xs text-slate-500 truncate">{agentName}</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                         {phase === 'calling' && (
-                            <span className="font-mono text-xs text-gray-400 tabular-nums">{fmtSecs(elapsedSecs)}</span>
+                            <span className="font-mono text-xs text-slate-400 tabular-nums bg-slate-50 px-2 py-1 rounded-lg">{fmtSecs(elapsedSecs)}</span>
                         )}
                         <button
                             onClick={phase === 'calling' ? handleCancel : onClose}
-                            className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-900 dark:hover:text-white bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full hover:shadow-sm transition-all"
+                            className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-50 rounded-full transition-all"
                         >
                             <X size={16} />
                         </button>
@@ -368,9 +388,9 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, onClose }) 
 
                     {/* === IDLE / ERROR === */}
                     {(phase === 'idle' || phase === 'error') && (
-                        <div className="p-8 space-y-6 animate-in fade-in duration-300">
+                        <div className="p-8 space-y-5">
                             <div className="space-y-2">
-                                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                <label className="block text-xs font-medium text-slate-500">
                                     {t('Tu número de teléfono', 'Tu número de teléfono')}
                                 </label>
                                 <input
@@ -379,51 +399,60 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, onClose }) 
                                     onChange={e => setPhone(e.target.value)}
                                     onKeyDown={e => e.key === 'Enter' && handleCall()}
                                     placeholder="+34 600 000 000"
-                                    className="w-full px-4 py-3 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 font-mono tracking-wider text-gray-900 dark:text-white"
+                                    className="w-full px-4 py-3.5 border border-slate-200 bg-slate-50/50 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 focus:bg-white font-mono tracking-wide text-slate-900 transition-all"
                                     autoFocus
                                 />
                             </div>
                             {phase === 'error' && (
-                                <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-xl">
+                                <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-100 rounded-xl">
                                     <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
-                                    <p className="text-sm text-red-700 dark:text-red-400">{errorMsg}</p>
+                                    <p className="text-sm text-red-700">{errorMsg}</p>
                                 </div>
                             )}
                             <button
                                 onClick={handleCall}
                                 disabled={!phone.trim()}
-                                className="w-full flex items-center justify-center gap-2 py-4 bg-gradient-to-r from-green-600 to-emerald-500 text-white text-base font-bold rounded-xl hover:from-green-500 hover:to-emerald-400 transition-all shadow-lg shadow-green-500/25 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]"
+                                className="w-full flex items-center justify-center gap-2 py-4 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold rounded-xl transition-all shadow-lg shadow-slate-900/15 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]"
                             >
-                                <Phone size={20} />
+                                <Phone size={18} />
                                 {t('Llamar Ahora', 'Llamar Ahora')}
                             </button>
                         </div>
                     )}
 
-                    {/* === CALLING — minimal connecting state === */}
                     {phase === 'calling' && (
-                        <div className="p-10 flex flex-col items-center justify-center gap-6 animate-in fade-in zoom-in-95 duration-300 min-h-[240px]">
-                            <div className="relative">
-                                <div className="w-20 h-20 rounded-full bg-emerald-50 flex items-center justify-center">
-                                    <Loader2 size={36} className="text-emerald-600 animate-spin" />
+                        <div className="p-8 flex flex-col items-center justify-center gap-6 min-h-[260px]">
+                            <div className="relative w-full max-w-[200px]">
+                                <div className={`w-full flex items-center justify-center gap-2 py-4 rounded-xl text-sm font-semibold transition-all duration-500 ${
+                                    callStage === 'online'
+                                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-100'
+                                        : 'bg-indigo-50 text-indigo-800 border border-indigo-100'
+                                }`}>
+                                    <Loader2 size={18} className="animate-spin shrink-0" />
+                                    <span className="transition-all duration-300">{stageMessages[callStage]}</span>
                                 </div>
-                                <span className="absolute inset-0 rounded-full border-2 border-emerald-400/40 animate-ping" />
                             </div>
-                            <div className="text-center space-y-1">
-                                <p className="text-lg font-bold text-gray-900">
-                                    {t('Conectando...', 'Conectando...')}
-                                </p>
-                                <p className="text-sm text-gray-500">
-                                    {lkConnected
-                                        ? t(stCfg.text, stCfg.text)
-                                        : t('Iniciando LiveKit y marcando tu número', 'Iniciando LiveKit y marcando tu número')}
-                                </p>
-                                <p className="font-mono text-xs text-gray-400 tabular-nums pt-2">{fmtSecs(elapsedSecs)}</p>
+                            <div className="flex gap-2 w-full max-w-xs">
+                                {(['connecting_livekit', 'dialing', 'online'] as CallStage[]).map((s, i) => (
+                                    <div
+                                        key={s}
+                                        className={`h-1 flex-1 rounded-full transition-all duration-500 ${
+                                            (['connecting_livekit', 'dialing', 'online'].indexOf(callStage) >= i)
+                                                ? 'bg-indigo-500'
+                                                : 'bg-slate-100'
+                                        }`}
+                                    />
+                                ))}
                             </div>
+                            <p className="text-xs text-slate-400 text-center max-w-[240px]">
+                                {callStage === 'online'
+                                    ? t('La conversación está activa. Puedes colgar cuando quieras.', 'La conversación está activa. Puedes colgar cuando quieras.')
+                                    : t('Estamos preparando tu llamada de prueba en tiempo real.', 'Estamos preparando tu llamada de prueba en tiempo real.')}
+                            </p>
                             <button
                                 type="button"
                                 onClick={handleCancel}
-                                className="text-sm text-gray-500 hover:text-red-600 transition-colors"
+                                className="w-full py-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
                             >
                                 {t('Cancel', 'Cancelar')}
                             </button>

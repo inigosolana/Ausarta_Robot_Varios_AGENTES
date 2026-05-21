@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Bot, Edit2, Trash2, Loader2, Search, Building2, ArrowLeft, Phone, Languages } from "lucide-react";
+import { Plus, Bot, Edit2, Trash2, Loader2, Search, Building2, ArrowLeft, Phone, Languages, Sparkles } from "lucide-react";
 import { TestCallModal } from "../components/TestCallModal";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -267,56 +267,70 @@ const AgentManagementView: React.FC = () => {
                     </p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
                     {filteredAgents.map((agent) => {
                         const lang = agent.ai_config?.language || 'es';
+                        const langColors: Record<string, string> = {
+                            es: 'bg-blue-50 text-blue-700 border-blue-100',
+                            en: 'bg-violet-50 text-violet-700 border-violet-100',
+                            eu: 'bg-amber-50 text-amber-800 border-amber-100',
+                        };
+                        const langBadge = langColors[lang.slice(0, 2).toLowerCase()] || 'bg-slate-50 text-slate-700 border-slate-100';
+                        const initials = agent.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
                         return (
                         <div
                             key={agent.id}
-                            className="group bg-white rounded-2xl border border-gray-100 hover:border-blue-200 hover:shadow-lg shadow-sm overflow-hidden p-6 transition-all duration-300 flex flex-col"
+                            className="group relative bg-white rounded-xl border border-slate-100 hover:border-indigo-200 hover:shadow-lg shadow-sm overflow-hidden transition-all duration-300 flex flex-col"
                         >
-                            <div className="flex items-start justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-3 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 text-blue-600">
-                                        <Bot size={22} />
+                            <div className="h-1 w-full bg-gradient-to-r from-indigo-500 via-violet-500 to-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <div className="p-6 flex flex-col flex-1">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="flex items-center gap-4 min-w-0">
+                                    <div className="relative shrink-0">
+                                        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-lg shadow-md shadow-indigo-500/25">
+                                            {initials}
+                                        </div>
+                                        <span className="absolute -bottom-1 -right-1 w-6 h-6 rounded-lg bg-white border border-slate-100 flex items-center justify-center shadow-sm">
+                                            <Bot size={12} className="text-indigo-600" />
+                                        </span>
                                     </div>
-                                    <div>
-                                        <h3 className="font-bold text-gray-900 text-lg">{agent.name}</h3>
-                                        <span className="inline-flex items-center gap-1 mt-1 text-xs text-gray-500 font-medium">
-                                            <Languages size={12} className="text-blue-500" />
+                                    <div className="min-w-0">
+                                        <h3 className="font-semibold text-slate-900 text-lg tracking-tight truncate">{agent.name}</h3>
+                                        <span className={`inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${langBadge}`}>
+                                            <Languages size={11} />
                                             {lang.toUpperCase()}
                                         </span>
                                     </div>
                                 </div>
                                 <button
                                     onClick={() => setAgentToDelete(agent.id!)}
-                                    className="p-2 opacity-0 group-hover:opacity-100 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition-all"
+                                    className="p-2 opacity-0 group-hover:opacity-100 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-lg transition-all shrink-0"
                                     title={t("Delete", "Eliminar")}
                                 >
                                     <Trash2 size={16} />
                                 </button>
                             </div>
-                            <p className="text-sm text-gray-500 my-4 line-clamp-2 flex-1">{agent.description || agent.use_case || t("No description", "Sin descripción")}</p>
+                            <p className="text-sm text-slate-500 my-4 line-clamp-2 flex-1 leading-relaxed">{agent.description || agent.use_case || t("No description", "Sin descripción")}</p>
 
                             <button
                                 type="button"
                                 onClick={() => setTestCallAgent(agent)}
-                                className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-emerald-600 to-green-500 text-white font-bold rounded-xl hover:from-emerald-500 hover:to-green-400 shadow-lg shadow-green-500/25 transition-all active:scale-[0.98] mb-3"
+                                className="w-full flex items-center justify-center gap-2 py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl shadow-md shadow-slate-900/20 transition-all active:scale-[0.98] group/btn"
                             >
+                                <Sparkles size={16} className="text-amber-300 group-hover/btn:animate-pulse" />
                                 <Phone size={18} />
-                                {t("Test Call", "Probar Llamada")}
+                                {t("Test agent now", "Probar Agente ahora")}
                             </button>
 
                             <button
                                 type="button"
                                 onClick={() => setEditingAgent(agent)}
-                                className="w-full py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                                className="w-full mt-2 py-2.5 text-sm font-medium text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
                             >
                                 {t("Edit agent", "Editar agente")}
                             </button>
 
-                            {/* Tags */}
-                            <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-gray-50">
+                            <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-slate-50">
                                 {agent.empresas && (
                                     <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full text-[11px] font-medium border border-indigo-100">
                                         <Building2 size={12} /> {agent.empresas.nombre}
@@ -333,6 +347,7 @@ const AgentManagementView: React.FC = () => {
                                         {agent.tipo_resultados.replace('_', ' ')}
                                     </span>
                                 )}
+                            </div>
                             </div>
                         </div>
                     );})}

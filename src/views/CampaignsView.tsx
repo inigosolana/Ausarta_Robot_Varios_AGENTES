@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Plus, Upload, Clock, AlertCircle, History, Trash2, X, Edit2, Building2, FileText, Target, ThumbsDown, Calendar,
-  Bot, Users, CalendarClock, ChevronRight, ChevronLeft, Loader2, Check
+  Bot, Users, CalendarClock, ChevronRight, ChevronLeft, Loader2, Check, Zap, FileSpreadsheet
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -109,6 +109,10 @@ export function CampaignsView() {
   const [editRetriesCount, setEditRetriesCount] = useState<number>(3);
   const [intervalMinutes, setIntervalMinutes] = useState<number>(2);
   const [editIntervalMinutes, setEditIntervalMinutes] = useState<number>(2);
+  const [scheduleMode, setScheduleMode] = useState<'now' | 'later'>('now');
+  const [csvLeadCount, setCsvLeadCount] = useState<number | null>(null);
+  const [csvParsing, setCsvParsing] = useState(false);
+  const [csvDragActive, setCsvDragActive] = useState(false);
 
   // Dynamic Schema Extraction State
   const [extractionSchema, setExtractionSchema] = useState<{key: string; type: string; label: string; options?: string[]}[]>([]);
@@ -343,10 +347,45 @@ export function CampaignsView() {
     setName('');
     setSelectedAgent('');
     setCsvFile(null);
+    setCsvLeadCount(null);
+    setCsvParsing(false);
+    setCsvDragActive(false);
     setManualInput('');
     setScheduledTime('');
+    setScheduleMode('now');
     setError('');
     setDataSource('csv');
+  };
+
+  const processCsvFile = async (file: File) => {
+    setCsvFile(file);
+    setCsvParsing(true);
+    setCsvLeadCount(null);
+    try {
+      const leads = await parseCSV(file);
+      setCsvLeadCount(leads.length);
+    } catch {
+      setCsvLeadCount(0);
+    } finally {
+      setCsvParsing(false);
+    }
+  };
+
+  const CampaignProgressBar = ({ called, total }: { called: number; total: number }) => {
+    const pct = total > 0 ? Math.min(100, (called / total) * 100) : 0;
+    return (
+      <div className="space-y-1.5 min-w-[140px]">
+        <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-indigo-500 to-emerald-500 rounded-full transition-all duration-700 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <p className="text-xs text-slate-500 tabular-nums">
+          {called} / {total} {t('calls processed', 'llamadas procesadas')}
+        </p>
+      </div>
+    );
   };
 
   const canWizardNext = () => {
@@ -387,7 +426,7 @@ export function CampaignsView() {
           name,
           agent_id: selectedAgent,
           empresa_id: selectedEmpresa || (selectedAgentData ? (selectedAgentData as any).empresa_id : profile?.empresa_id),
-          scheduled_time: scheduledTime ? new Date(scheduledTime).toISOString() : null,
+          scheduled_time: scheduleMode === 'later' && scheduledTime ? new Date(scheduledTime).toISOString() : null,
           status: 'pending',
           retry_interval: retryInterval || 60,
           retry_unit: retryUnit,
@@ -951,40 +990,47 @@ export function CampaignsView() {
 
   if (showCreate) {
     return (
-      <div className="max-w-3xl mx-auto space-y-8 pb-12 animate-in fade-in duration-300">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="px-8 py-6 border-b border-gray-100 flex justify-between items-center">
+      <div className="max-w-3xl mx-auto space-y-8 pb-12">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{t("Create Campaign", "Crear Campaña")}</h2>
-              <p className="text-sm text-gray-500 mt-1">{t("Step-by-step wizard", "Asistente paso a paso")}</p>
+              <h2 className="text-xl font-bold text-slate-900 tracking-tight">{t("Create Campaign", "Crear Campaña")}</h2>
+              <p className="text-sm text-slate-500 mt-0.5">{t("Step-by-step wizard", "Asistente paso a paso")}</p>
             </div>
-            <button onClick={() => { setShowCreate(false); resetWizard(); }} className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-50">
+            <button onClick={() => { setShowCreate(false); resetWizard(); }} className="text-slate-400 hover:text-slate-600 p-2 rounded-lg hover:bg-white transition-colors">
               <X className="w-5 h-5" />
             </button>
           </div>
 
-          {/* Step tabs */}
-          <div className="px-8 pt-6 flex gap-2">
-            {WIZARD_STEPS.map((step, idx) => {
-              const Icon = step.icon;
-              const active = wizardStep === idx;
-              const done = wizardStep > idx;
-              return (
-                <button
-                  key={step.key}
-                  type="button"
-                  onClick={() => idx < wizardStep && setWizardStep(idx)}
-                  className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-semibold transition-all ${
-                    active ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' :
-                    done ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
-                    'bg-gray-50 text-gray-400 border border-gray-100'
-                  }`}
-                >
-                  {done ? <Check className="w-4 h-4" /> : <Icon className="w-4 h-4" />}
-                  {step.label}
-                </button>
-              );
-            })}
+          <div className="px-8 pt-8 pb-2">
+            <div className="flex items-center justify-between relative">
+              <div className="absolute left-0 right-0 top-5 h-px bg-slate-100 mx-12" aria-hidden />
+              {WIZARD_STEPS.map((step, idx) => {
+                const Icon = step.icon;
+                const active = wizardStep === idx;
+                const done = wizardStep > idx;
+                return (
+                  <button
+                    key={step.key}
+                    type="button"
+                    onClick={() => idx < wizardStep && setWizardStep(idx)}
+                    disabled={idx > wizardStep}
+                    className="relative flex flex-col items-center gap-2 flex-1 z-10 disabled:cursor-default"
+                  >
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-300 ${
+                      active ? 'bg-slate-900 border-slate-900 text-white shadow-lg shadow-slate-900/20' :
+                      done ? 'bg-emerald-500 border-emerald-500 text-white' :
+                      'bg-white border-slate-200 text-slate-400'
+                    }`}>
+                      {done ? <Check className="w-4 h-4" /> : <Icon className="w-4 h-4" />}
+                    </div>
+                    <span className={`text-xs font-semibold ${active ? 'text-slate-900' : done ? 'text-emerald-700' : 'text-slate-400'}`}>
+                      {step.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
         <div className="px-8 py-8 space-y-8 min-h-[320px]">
@@ -998,10 +1044,10 @@ export function CampaignsView() {
           {wizardStep === 0 && (
           <>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">{t("Campaign Name", "Nombre de la Campaña")}</label>
+            <label className="block text-xs font-medium text-slate-500 mb-2">{t("Campaign Name", "Nombre de la Campaña")}</label>
             <input
               type="text"
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent outline-none"
+              className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none bg-slate-50/30 focus:bg-white transition-all"
               placeholder={t("e.g. Q1 Customer Survey", "Ej: Encuesta Clientes Q1")}
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -1010,9 +1056,9 @@ export function CampaignsView() {
 
           {isPlatformOwner && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Company / Project", "Empresa / Proyecto")}</label>
+              <label className="block text-xs font-medium text-slate-500 mb-2">{t("Company / Project", "Empresa / Proyecto")}</label>
               <select
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent outline-none bg-white"
+                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none bg-white"
                 value={selectedEmpresa || ''}
                 onChange={(e) => setSelectedEmpresa(e.target.value ? Number(e.target.value) : null)}
               >
@@ -1025,17 +1071,34 @@ export function CampaignsView() {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">{t("Agent", "Agente")}</label>
-            <select
-              className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent outline-none"
-              value={selectedAgent}
-              onChange={(e) => setSelectedAgent(e.target.value)}
-            >
-              <option value="">{t("Select an agent", "Selecciona un agente")}</option>
-              {agents.map(a => (
-                <option key={a.id} value={a.id}>{a.name}</option>
+            <label className="block text-xs font-medium text-slate-500 mb-3">{t("Select Agent", "Selecciona el agente")}</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {agents.length === 0 ? (
+                <p className="text-sm text-slate-400 col-span-2 py-4 text-center">{t("No agents available", "No hay agentes disponibles")}</p>
+              ) : agents.map(a => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => setSelectedAgent(String(a.id))}
+                  className={`flex items-center gap-3 p-4 rounded-xl border text-left transition-all ${
+                    String(selectedAgent) === String(a.id)
+                      ? 'border-indigo-400 bg-indigo-50/50 ring-2 ring-indigo-500/20 shadow-sm'
+                      : 'border-slate-100 bg-white hover:border-slate-200 hover:shadow-sm'
+                  }`}
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${
+                    String(selectedAgent) === String(a.id) ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {a.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900 truncate">{a.name}</p>
+                    <p className="text-xs text-slate-500">{t('Voice agent', 'Agente de voz')}</p>
+                  </div>
+                  {String(selectedAgent) === String(a.id) && <Check className="w-4 h-4 text-indigo-600 ml-auto shrink-0" />}
+                </button>
               ))}
-            </select>
+            </div>
           </div>
           </>
           )}
@@ -1068,19 +1131,53 @@ export function CampaignsView() {
             </div>
           ) : dataSource === 'csv' ? (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t("CSV File", "Archivo CSV")}</label>
-              <div className="border-2 border-dashed border-gray-200 rounded-lg p-8 text-center hover:border-black transition-colors cursor-pointer relative">
+              <label className="block text-xs font-medium text-slate-500 mb-2">{t("CSV File", "Archivo CSV")}</label>
+              <div
+                className={`relative border-2 border-dashed rounded-2xl p-10 text-center transition-all duration-300 ${
+                  csvDragActive ? 'border-indigo-400 bg-indigo-50/30 scale-[1.01]' :
+                  csvFile ? 'border-emerald-300 bg-emerald-50/20' :
+                  'border-slate-200 bg-slate-50/30 hover:border-slate-300 hover:bg-slate-50/50'
+                }`}
+                onDragOver={(e) => { e.preventDefault(); setCsvDragActive(true); }}
+                onDragLeave={() => setCsvDragActive(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setCsvDragActive(false);
+                  const f = e.dataTransfer.files?.[0];
+                  if (f?.name.endsWith('.csv')) processCsvFile(f);
+                }}
+              >
                 <input
                   type="file"
                   accept=".csv"
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) processCsvFile(f);
+                  }}
                 />
-                <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                <p className="text-sm text-gray-600">
-                  {csvFile ? csvFile.name : t('Click to upload or drag and drop', 'Haz clic para subir o arrastra y suelta')}
-                </p>
-                <p className="text-xs text-gray-400 mt-1">{t("Only .csv files", "Solo archivos .csv")}</p>
+                {csvParsing ? (
+                  <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="w-10 h-10 text-indigo-500 animate-spin" />
+                    <p className="text-sm font-medium text-slate-600">{t('Analyzing contacts...', 'Analizando contactos...')}</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className={`w-14 h-14 mx-auto mb-4 rounded-2xl flex items-center justify-center ${csvFile ? 'bg-emerald-100' : 'bg-white border border-slate-100 shadow-sm'}`}>
+                      {csvFile ? <FileSpreadsheet className="w-7 h-7 text-emerald-600" /> : <Upload className="w-7 h-7 text-slate-400" />}
+                    </div>
+                    <p className="text-sm font-medium text-slate-700">
+                      {csvFile ? csvFile.name : t('Drag & drop your CSV here', 'Arrastra tu CSV aquí')}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">{t('or click to browse · phone, name columns', 'o haz clic · columnas teléfono, nombre')}</p>
+                    {csvLeadCount !== null && csvFile && (
+                      <div className="mt-5 inline-flex items-center gap-2 px-4 py-2 bg-emerald-100 text-emerald-800 rounded-full text-sm font-semibold">
+                        <Check className="w-4 h-4" />
+                        {csvLeadCount} {t('valid numbers detected', 'números válidos detectados')}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
               <div className="mt-2 text-right">
                 <a
@@ -1119,19 +1216,43 @@ export function CampaignsView() {
 
           {wizardStep === 2 && (
           <>
-          <div className="border-t border-gray-100 pt-2">
-            <h3 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
-              <CalendarClock className="w-4 h-4 text-blue-600" />
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800 mb-4 flex items-center gap-2">
+              <CalendarClock className="w-4 h-4 text-indigo-600" />
               {t("Schedule launch", "Programar lanzamiento")}
             </h3>
-            <label className="block text-sm font-medium text-gray-700 mb-2">{t("Scheduled Start Time (Optional)", "Fecha y hora de inicio (opcional)")}</label>
-            <input
-              type="datetime-local"
-              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 outline-none"
-              value={scheduledTime}
-              onChange={(e) => setScheduledTime(e.target.value)}
-            />
-            <p className="text-xs text-gray-500 mt-2">{t("Leave blank to start immediately.", "Dejar en blanco para empezar inmediatamente.")}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+              <button
+                type="button"
+                onClick={() => { setScheduleMode('now'); setScheduledTime(''); }}
+                className={`p-4 rounded-xl border text-left transition-all ${
+                  scheduleMode === 'now' ? 'border-indigo-400 bg-indigo-50/50 ring-2 ring-indigo-500/15' : 'border-slate-100 hover:border-slate-200'
+                }`}
+              >
+                <Zap className={`w-5 h-5 mb-2 ${scheduleMode === 'now' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                <p className="text-sm font-semibold text-slate-900">{t('Launch immediately', 'Lanzar de inmediato')}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{t('Campaign starts as soon as you confirm', 'La campaña arranca al confirmar')}</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setScheduleMode('later')}
+                className={`p-4 rounded-xl border text-left transition-all ${
+                  scheduleMode === 'later' ? 'border-indigo-400 bg-indigo-50/50 ring-2 ring-indigo-500/15' : 'border-slate-100 hover:border-slate-200'
+                }`}
+              >
+                <CalendarClock className={`w-5 h-5 mb-2 ${scheduleMode === 'later' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                <p className="text-sm font-semibold text-slate-900">{t('Schedule date & time', 'Programar fecha y hora')}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{t('Pick when calls should begin', 'Elige cuándo deben empezar las llamadas')}</p>
+              </button>
+            </div>
+            {scheduleMode === 'later' && (
+              <input
+                type="datetime-local"
+                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none bg-slate-50/30 focus:bg-white"
+                value={scheduledTime}
+                onChange={(e) => setScheduledTime(e.target.value)}
+              />
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
@@ -1418,18 +1539,11 @@ export function CampaignsView() {
                             <td className="px-6 py-4">
                               <StatusBadge status={campaign.status} />
                             </td>
-                            <td className="px-6 py-4 w-48">
-                              <div className="flex flex-col gap-1">
-                                <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-                                  <div
-                                    className="h-full bg-green-500"
-                                    style={{ width: `${Math.min(100, ((campaign.called_leads || 0) / (campaign.total_leads || 1)) * 100)}%` }}
-                                  />
-                                </div>
-                                <div className="text-xs text-gray-500">
-                                  {campaign.called_leads || 0} / {campaign.total_leads || 0} {t("calls", "llamadas")}
-                                </div>
-                              </div>
+                            <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                              <CampaignProgressBar
+                                called={campaign.called_leads || 0}
+                                total={campaign.total_leads || 0}
+                              />
                             </td>
                             <td className="px-6 py-4 text-sm text-gray-500 font-mono text-center">
                               {campaign.scheduled_time ? new Date(campaign.scheduled_time).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : '-'}
