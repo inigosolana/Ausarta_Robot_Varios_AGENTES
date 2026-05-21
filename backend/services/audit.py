@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from services.supabase_service import supabase
+from services.supabase_service import insert_row_async, supabase
 
 logger = logging.getLogger("api-backend")
 
@@ -29,7 +29,7 @@ async def log_audit_event(
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "metadata": metadata or {},
         }
-        supabase.table("audit_logs").insert(payload).execute()
+        await insert_row_async("audit_logs", payload)
     except Exception as e:
         logger.warning(f"⚠️ [Audit] Error registrando evento {action} {target_type}/{target_id}: {e}")
 

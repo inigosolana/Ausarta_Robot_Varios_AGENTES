@@ -368,13 +368,7 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, onClose }) 
 
                     {/* === IDLE / ERROR === */}
                     {(phase === 'idle' || phase === 'error') && (
-                        <div className="p-6 space-y-5">
-                            <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-                                {t(
-                                    'Introduce tu número de teléfono. El agente te llamará ahora mismo para que puedas probar cómo funciona en una conversación real.',
-                                    'Introduce tu número de teléfono. El agente te llamará ahora mismo para que puedas probar cómo funciona en una conversación real.'
-                                )}
-                            </p>
+                        <div className="p-8 space-y-6 animate-in fade-in duration-300">
                             <div className="space-y-2">
                                 <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                     {t('Tu número de teléfono', 'Tu número de teléfono')}
@@ -398,110 +392,41 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, onClose }) 
                             <button
                                 onClick={handleCall}
                                 disabled={!phone.trim()}
-                                className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-green-600 to-emerald-500 text-white font-semibold rounded-xl hover:from-green-500 hover:to-emerald-400 transition-all shadow-lg shadow-green-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="w-full flex items-center justify-center gap-2 py-4 bg-gradient-to-r from-green-600 to-emerald-500 text-white text-base font-bold rounded-xl hover:from-green-500 hover:to-emerald-400 transition-all shadow-lg shadow-green-500/25 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]"
                             >
-                                <Phone size={18} />
-                                {t('Llamarme ahora', 'Llamarme ahora')}
+                                <Phone size={20} />
+                                {t('Llamar Ahora', 'Llamar Ahora')}
                             </button>
-                            <p className="text-[11px] text-gray-400 text-center leading-relaxed">
-                                {t(
-                                    'Esta es una llamada de prueba real. El agente ejecutará su guion completo y al finalizar verás los datos que extrajo.',
-                                    'Esta es una llamada de prueba real. El agente ejecutará su guion completo y al finalizar verás los datos que extrajo.'
-                                )}
-                            </p>
                         </div>
                     )}
 
-                    {/* === CALLING — SANDBOX VIEW === */}
+                    {/* === CALLING — minimal connecting state === */}
                     {phase === 'calling' && (
-                        <div className="flex-1 flex flex-col overflow-hidden">
-
-                            {/* Agent State Indicator */}
-                            <div className={`mx-4 mt-4 mb-2 flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${stCfg.bg}`}>
-                                <div className="relative">
-                                    <StateIcon size={22} className={stCfg.color} />
-                                    {stCfg.pulse && (
-                                        <span className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full ${stCfg.color.replace('text-', 'bg-')} animate-pulse`} />
-                                    )}
+                        <div className="p-10 flex flex-col items-center justify-center gap-6 animate-in fade-in zoom-in-95 duration-300 min-h-[240px]">
+                            <div className="relative">
+                                <div className="w-20 h-20 rounded-full bg-emerald-50 flex items-center justify-center">
+                                    <Loader2 size={36} className="text-emerald-600 animate-spin" />
                                 </div>
-                                <div className="flex-1 min-w-0">
-                                    <p className={`text-sm font-bold ${stCfg.color}`}>{t(stCfg.text)}</p>
-                                    <p className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
-                                        {lkConnected
-                                            ? t('Sandbox conectado — transcripción en vivo', 'Sandbox conectado — transcripción en vivo')
-                                            : t('Conectando al sandbox…', 'Conectando al sandbox…')
-                                        }
-                                    </p>
-                                </div>
-                                <span className="font-mono text-xs text-gray-400 tabular-nums shrink-0">{fmtSecs(elapsedSecs)}</span>
+                                <span className="absolute inset-0 rounded-full border-2 border-emerald-400/40 animate-ping" />
                             </div>
-
-                            {/* Live Transcript */}
-                            <div className="flex-1 mx-4 mb-2 overflow-y-auto rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-950/50">
-                                {transcripts.length === 0 ? (
-                                    <div className="h-full flex flex-col items-center justify-center text-gray-400 py-10 gap-3">
-                                        <div className="w-12 h-12 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center animate-pulse">
-                                            <Mic size={22} className="text-gray-300 dark:text-gray-600" />
-                                        </div>
-                                        <p className="text-xs font-medium">{t('Esperando transcripción…', 'Esperando transcripción…')}</p>
-                                        <p className="text-[10px] text-gray-300 dark:text-gray-600 px-6 text-center">
-                                            {t('La conversación aparecerá aquí en tiempo real', 'La conversación aparecerá aquí en tiempo real')}
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <div className="p-3 space-y-1.5">
-                                        {transcripts.map(entry => (
-                                            <div
-                                                key={entry.id}
-                                                className={`flex gap-2 items-start py-1 transition-opacity duration-200 ${entry.isFinal ? 'opacity-100' : 'opacity-60'}`}
-                                            >
-                                                <div className={`shrink-0 w-6 h-6 rounded-lg flex items-center justify-center mt-0.5 ${
-                                                    entry.speaker === 'agent'
-                                                        ? 'bg-blue-100 dark:bg-blue-900/40'
-                                                        : entry.speaker === 'client'
-                                                        ? 'bg-emerald-100 dark:bg-emerald-900/40'
-                                                        : 'bg-gray-100 dark:bg-gray-700'
-                                                }`}>
-                                                    {entry.speaker === 'agent'
-                                                        ? <Bot size={13} className="text-blue-600 dark:text-blue-400" />
-                                                        : entry.speaker === 'client'
-                                                        ? <User size={13} className="text-emerald-600 dark:text-emerald-400" />
-                                                        : <Radio size={11} className="text-gray-400" />
-                                                    }
-                                                </div>
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="flex items-center gap-1.5 mb-0.5">
-                                                        <span className={`text-[10px] font-bold uppercase tracking-wider ${
-                                                            entry.speaker === 'agent' ? 'text-blue-600 dark:text-blue-400'
-                                                            : entry.speaker === 'client' ? 'text-emerald-600 dark:text-emerald-400'
-                                                            : 'text-gray-400'
-                                                        }`}>{entry.label}</span>
-                                                        <span className="text-[9px] text-gray-300 dark:text-gray-600 tabular-nums">
-                                                            {new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                                                        </span>
-                                                        {!entry.isFinal && <span className="text-[8px] text-yellow-500 font-medium animate-pulse">●</span>}
-                                                    </div>
-                                                    <p className={`text-xs leading-relaxed ${
-                                                        entry.speaker === 'system' ? 'text-gray-400 italic' : 'text-gray-700 dark:text-gray-200'
-                                                    }`}>{entry.text}</p>
-                                                </div>
-                                            </div>
-                                        ))}
-                                        <div ref={transcriptsEndRef} />
-                                    </div>
-                                )}
+                            <div className="text-center space-y-1">
+                                <p className="text-lg font-bold text-gray-900">
+                                    {t('Conectando...', 'Conectando...')}
+                                </p>
+                                <p className="text-sm text-gray-500">
+                                    {lkConnected
+                                        ? t(stCfg.text, stCfg.text)
+                                        : t('Iniciando LiveKit y marcando tu número', 'Iniciando LiveKit y marcando tu número')}
+                                </p>
+                                <p className="font-mono text-xs text-gray-400 tabular-nums pt-2">{fmtSecs(elapsedSecs)}</p>
                             </div>
-
-                            {/* Cancel button */}
-                            <div className="px-4 pb-4 pt-1 shrink-0">
-                                <button
-                                    onClick={handleCancel}
-                                    className="w-full flex items-center justify-center gap-2 py-2.5 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-xl text-sm font-medium transition-colors"
-                                >
-                                    <PhoneOff size={16} />
-                                    {t('Cancelar seguimiento', 'Cancelar seguimiento')}
-                                </button>
-                            </div>
+                            <button
+                                type="button"
+                                onClick={handleCancel}
+                                className="text-sm text-gray-500 hover:text-red-600 transition-colors"
+                            >
+                                {t('Cancel', 'Cancelar')}
+                            </button>
                         </div>
                     )}
 

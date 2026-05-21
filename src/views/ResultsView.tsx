@@ -9,7 +9,7 @@ import { AnalyticsDashboard } from '../components/AnalyticsDashboard';
 import { DateRangePicker, getDatesFromRange, DateRange } from '../components/DateRangePicker';
 import { CallResultModal } from '../components/CallResultModal';
 import { SurveyResult, ExtractionSchemaProperty, getSentimiento, getIdioma, Sentimiento } from '../types';
-import { apiFetch } from '../lib/apiFetch';
+import { fetchSurveyResults } from '../lib/resultsSupabase';
 
 interface Props {
     empresaId?: number;
@@ -41,19 +41,16 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     const resultsQueryKey = ['results', effectiveEmpresaId, selectedAgentId, agentId, campaignId, dateRange] as const;
 
     const fetchResults = async (): Promise<SurveyResult[]> => {
-        const BASE_URL = (import.meta as any).env.VITE_API_URL || '';
-        const params = new URLSearchParams();
-        if (effectiveEmpresaId !== 'all') params.append('empresa_id', String(effectiveEmpresaId));
-        if (selectedAgentId !== 'all') params.append('agent_id', String(selectedAgentId));
-        if (agentId) params.append('agent_id', String(agentId));
-        if (campaignId) params.append('campaign_id', String(campaignId));
         const dates = getDatesFromRange(dateRange);
-        if (dates.start) params.append('start_date', dates.start);
-        if (dates.end) params.append('end_date', dates.end);
-        const queryStr = params.toString() ? `?${params.toString()}` : '';
-        const res = await fetch(`${BASE_URL}/api/results${queryStr}`);
-        if (!res.ok) throw new Error('Failed to load results');
-        return res.json();
+        return fetchSurveyResults({
+            empresaId: effectiveEmpresaId,
+            agentId:
+                agentId ??
+                (selectedAgentId !== 'all' ? selectedAgentId : undefined),
+            campaignId,
+            startDate: dates.start,
+            endDate: dates.end,
+        });
     };
 
     const { data: results = [], isLoading: loading, refetch: loadResults } = useQuery({
@@ -283,17 +280,16 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
             </div>
 
             {/* Dashboard Section */}
-            {
-                filteredResults.length > 0 && (
-                    <div className="mb-6">
-                        <AnalyticsDashboard
-                            tipoResultados={activeAgentType}
-                            results={filteredResults}
-                            schema={schema}
-                        />
-                    </div>
-                )
-            }
+            <div className="mb-6">
+                <AnalyticsDashboard
+                    tipoResultados={activeAgentType}
+                    results={filteredResults}
+                    schema={schema}
+                    empresaId={effectiveEmpresaId}
+                    agentId={agentId ?? (selectedAgentId !== 'all' ? selectedAgentId : undefined)}
+                    campaignId={campaignId}
+                />
+            </div>
 
             {/* Mobile / Tablet cards */}
             <div className="lg:hidden space-y-3">

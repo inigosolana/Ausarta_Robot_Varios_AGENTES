@@ -21,6 +21,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { apiFetch } from '../lib/apiFetch';
+import {
+    fetchDashboardStats,
+    fetchRecentCalls,
+    fetchTopPerformers,
+    type DashboardStats as SupabaseDashboardStats,
+} from '../lib/dashboardSupabase';
 import { DateRangePicker, getDatesFromRange, DateRange } from './DateRangePicker';
 import { LiveMonitoring } from './LiveMonitoring';
 import { ApiStatusWidget } from './ApiStatusWidget';
@@ -171,18 +177,30 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const usageQueryKey = ['admin-usage-per-tenant'] as const;
 
     const fetchDashboardData = async () => {
-        const queryStr = buildQueryStr();
-        const [statsRes, callsRes, topRes, intRes] = await Promise.all([
-            fetch(`${API_URL}/api/dashboard/stats${queryStr}`),
-            fetch(`${API_URL}/api/dashboard/recent-calls${queryStr}`),
-            fetch(`${API_URL}/api/dashboard/top-performers${queryStr}`),
-            hideIntegrations ? Promise.resolve({ ok: true, json: () => [] } as any as Response) : fetch(`${API_URL}/api/dashboard/integrations`)
+        const finalEmpresaId = empresaId || (isPlatformOwner ? undefined : profile?.empresa_id);
+        const dates = getDatesFromRange(dateRange);
+        const filters = {
+            empresaId: finalEmpresaId,
+            agentId,
+            campaignId,
+            startDate: dates.start,
+            endDate: dates.end,
+        };
+
+        const [stats, recentCalls, topPerformers, intRes] = await Promise.all([
+            fetchDashboardStats(filters) as Promise<SupabaseDashboardStats>,
+            fetchRecentCalls(filters),
+            fetchTopPerformers(filters),
+            hideIntegrations
+                ? Promise.resolve([] as Integration[])
+                : fetch(`${API_URL}/api/dashboard/integrations`).then((r) => (r.ok ? r.json() : [])),
         ]);
+
         return {
-            stats: statsRes.ok ? (await statsRes.json()) as DashboardStats : null,
-            recentCalls: callsRes.ok ? (await callsRes.json()) as Call[] : [],
-            topPerformers: topRes.ok ? (await topRes.json()) as TopPerformers : { top_campaign: null, top_agent: null },
-            integrations: (intRes.ok && !hideIntegrations) ? (await intRes.json()) as Integration[] : [],
+            stats: stats as DashboardStats,
+            recentCalls: recentCalls as Call[],
+            topPerformers: topPerformers as TopPerformers,
+            integrations: intRes as Integration[],
         };
     };
 

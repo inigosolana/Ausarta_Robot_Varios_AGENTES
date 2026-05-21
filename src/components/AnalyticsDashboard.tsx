@@ -3,14 +3,20 @@ import { useTranslation } from 'react-i18next';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
     ResponsiveContainer, PieChart, Pie, Cell, Legend,
+    LineChart, Line,
 } from 'recharts';
-import { Database, Hash, ToggleLeft, AlignLeft, List, Download } from 'lucide-react';
+import { Database, Hash, ToggleLeft, AlignLeft, List, Download, Phone, Clock, TrendingUp, Euro, Loader2 } from 'lucide-react';
 import { SurveyResult, getCallDisposition, ExtractionSchemaProperty, getSentimiento, getIdioma, Sentimiento } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import { useAnalyticsFromSupabase } from '../hooks/useAnalyticsFromSupabase';
 
 interface AnalyticsProps {
     tipoResultados: string;
     results: SurveyResult[];
     schema?: ExtractionSchemaProperty[];
+    empresaId?: number | 'all';
+    agentId?: number;
+    campaignId?: number;
 }
 
 const DISPOSITION_COLORS: Record<string, string> = {
@@ -350,8 +356,29 @@ function buildCsv(results: SurveyResult[], schema?: ExtractionSchemaProperty[]):
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
-export const AnalyticsDashboard: React.FC<AnalyticsProps> = ({ results, schema }) => {
+const KPI_CARD_CLASS = 'bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex items-start gap-4';
+
+export const AnalyticsDashboard: React.FC<AnalyticsProps> = ({
+    results: resultsProp,
+    schema,
+    empresaId: empresaIdProp,
+    agentId,
+    campaignId,
+}) => {
     const { t } = useTranslation();
+    const { profile, isPlatformOwner } = useAuth();
+
+    const effectiveEmpresaId = empresaIdProp ?? (
+        !isPlatformOwner && profile?.empresa_id ? profile.empresa_id : 'all'
+    );
+
+    const { metrics, loading: metricsLoading, error: metricsError } = useAnalyticsFromSupabase({
+        empresaId: effectiveEmpresaId,
+        agentId,
+        campaignId,
+    });
+
+    const results = metrics.rows.length > 0 ? metrics.rows : resultsProp;
 
     const dispositionData = useMemo(() => {
         const counts: Record<string, number> = {};
@@ -428,27 +455,71 @@ export const AnalyticsDashboard: React.FC<AnalyticsProps> = ({ results, schema }
         URL.revokeObjectURL(url);
     }, [results, schema]);
 
-    if (results.length === 0) return null;
+    if (!metricsLoading && results.length === 0) return null;
+
+    const kpiCards = [
+        { label: t('Llamadas Totales', 'Llamadas Totales'), value: metrics.totalCalls, icon: Phone, iconBg: 'bg-blue-50', iconColor: 'text-blue-600' },
+        { label: t('Minutos Consumidos', 'Minutos Consumidos'), value: metrics.totalMinutes.toLocaleString(), icon: Clock, iconBg: 'bg-violet-50', iconColor: 'text-violet-600' },
+        { label: t('Tasa de Éxito', 'Tasa de Éxito'), value: `${metrics.successRate}%`, icon: TrendingUp, iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600' },
+        { label: t('Coste', 'Coste'), value: `€${metrics.estimatedCostEur.toFixed(2)}`, icon: Euro, iconBg: 'bg-amber-50', iconColor: 'text-amber-600' },
+    ];
 
     return (
         <div className="space-y-6 mb-8">
 
-            {/* ── Universal KPIs ── */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-                    <p className="text-xs text-gray-500 font-medium mb-1">{t('Total Llamadas')}</p>
-                    <h3 className="text-2xl font-bold text-gray-900">{totalCalls}</h3>
+            {metricsError && (
+                <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                    {metricsError}
                 </div>
-                <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-                    <p className="text-xs text-gray-500 font-medium mb-1">{t('Completadas')}</p>
-                    <h3 className="text-2xl font-bold text-green-600">
-                        {completedCount}
-                        <span className="text-sm text-gray-400 font-normal ml-1">({completionRate}%)</span>
-                    </h3>
-                </div>
-                <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 col-span-2 md:col-span-1">
-                    <p className="text-xs text-gray-500 font-medium mb-1">{t('Con Datos Extra')}</p>
-                    <h3 className="text-2xl font-bold text-gray-900">{localInsights.length}</h3>
+            )}
+
+            {/* ── SaaS KPI Cards (Supabase) ── */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                {kpiCards.map((kpi) => {
+                    const Icon = kpi.icon;
+                    return (
+                        <div key={kpi.label} className={KPI_CARD_CLASS}>
+                            <div className={`p-2.5 rounded-xl ${kpi.iconBg}`}>
+                                <Icon className={`w-5 h-5 ${kpi.iconColor}`} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <p className="text-xs text-gray-500 font-medium mb-1">{kpi.label}</p>
+                                {metricsLoading ? (
+                                    <Loader2 className="w-6 h-6 animate-spin text-gray-300" />
+                                ) : (
+                                    <h3 className="text-2xl font-bold text-gray-900 tabular-nums">{kpi.value}</h3>
+                                )}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            {/* ── 7-day line chart (Supabase) ── */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                <h3 className="text-base font-bold text-gray-900 mb-1">
+                    {t('Evolución de llamadas', 'Evolución de llamadas')}
+                </h3>
+                <p className="text-xs text-gray-500 mb-4">{t('Últimos 7 días', 'Últimos 7 días')}</p>
+                <div className="h-56 w-full">
+                    {metricsLoading ? (
+                        <div className="h-full flex items-center justify-center">
+                            <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                        </div>
+                    ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={metrics.dailySeries} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                                <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} />
+                                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} />
+                                <RechartsTooltip
+                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgb(0 0 0 / 0.08)' }}
+                                    labelFormatter={(_, payload) => payload?.[0]?.payload?.date ?? ''}
+                                />
+                                <Line type="monotone" dataKey="calls" stroke="#2563eb" strokeWidth={2.5} dot={{ r: 4, fill: '#2563eb' }} activeDot={{ r: 6 }} name={t('Llamadas', 'Llamadas')} />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    )}
                 </div>
             </div>
 

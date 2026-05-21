@@ -18,6 +18,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
+import {
+    fetchDashboardStats,
+    fetchRecentCalls,
+    fetchUsageStats,
+    fetchAgentsForEmpresa,
+} from '../lib/dashboardSupabase';
 import { DateRangePicker, getDatesFromRange, DateRange } from './DateRangePicker';
 import { LiveMonitoring } from './LiveMonitoring';
 
@@ -84,25 +90,28 @@ const ClientDashboard: React.FC<Props> = ({ empresaId }) => {
     const clientQueryKey = ['client-dashboard', finalEmpresaId, dateRange] as const;
 
     const fetchClientData = async () => {
-        const params = new URLSearchParams();
-        if (finalEmpresaId) params.append('empresa_id', String(finalEmpresaId));
+        if (!finalEmpresaId) {
+            return { stats: null, usage: null, agents: [], recentCalls: [] };
+        }
         const dates = getDatesFromRange(dateRange);
-        if (dates.start) params.append('start_date', dates.start);
-        if (dates.end) params.append('end_date', dates.end);
-        const queryStr = params.toString() ? `?${params.toString()}` : '';
+        const filters = {
+            empresaId: finalEmpresaId,
+            startDate: dates.start,
+            endDate: dates.end,
+        };
 
-        const [statsRes, usageRes, agentsRes, callsRes] = await Promise.all([
-            fetch(`${API_URL}/api/dashboard/stats${queryStr}`),
-            fetch(`${API_URL}/api/dashboard/usage-stats${queryStr}`),
-            fetch(`${API_URL}/api/agents?empresa_id=${finalEmpresaId}`),
-            fetch(`${API_URL}/api/dashboard/recent-calls${queryStr}`)
+        const [stats, usage, agents, recentCalls] = await Promise.all([
+            fetchDashboardStats(filters),
+            fetchUsageStats(filters),
+            fetchAgentsForEmpresa(finalEmpresaId),
+            fetchRecentCalls(filters, 5),
         ]);
 
         return {
-            stats: statsRes.ok ? (await statsRes.json()) as DashboardStats : null,
-            usage: usageRes.ok ? (await usageRes.json()) as UsageStats : null,
-            agents: agentsRes.ok ? (await agentsRes.json()) as Agent[] : [],
-            recentCalls: callsRes.ok ? ((await callsRes.json()) as Call[]).slice(0, 5) : [],
+            stats: stats as DashboardStats,
+            usage: { total_minutes: usage.total_minutes } as UsageStats,
+            agents: agents as Agent[],
+            recentCalls,
         };
     };
 

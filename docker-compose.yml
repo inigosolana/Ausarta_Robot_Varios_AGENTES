@@ -28,11 +28,6 @@ services:
       - redis
     networks:
       - ausarta-network
-    volumes:
-      # NOTA: Este volumen SQLite es exclusivo de entornos locales/desarrollo o como fallback temporal.
-      # La base de datos principal en PRODUCCIÓN es Supabase (PostgreSQL).
-      # En producción, este mount puede eliminarse si el código no lo referencia.
-      - sqlite-data:/app/data
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8001/" ]
       interval: 30s
@@ -126,8 +121,5 @@ networks:
     driver: bridge
 
 volumes:
-  # SQLite: solo desarrollo local / fallback. BD principal en producción: Supabase (PostgreSQL).
-  sqlite-data:
-    driver: local
   redis-data:
     driver: local

@@ -1,6 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || 'https://afrrxeibtrwjaiqmhytu.supabase.co';
-const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || (import.meta as any).env.VITE_SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmcnJ4ZWlidHJ3amFpcW1oeXR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE0MTA4NjAsImV4cCI6MjA4Njk4Njg2MH0.9k0C1EGjxAG47DJZx1jAweODFiaXenrjirYz91ZNpWs';
+const env = import.meta.env;
+const supabaseUrl = env.VITE_SUPABASE_URL;
+const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || env.VITE_SUPABASE_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error(
+    '[Supabase] Defina VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en .env.local (ver .env.local.example).'
+  );
+}
+
+/** Cliente único del frontend — todas las lecturas/escrituras van a Supabase (RLS). */
+export const supabase = createClient(
+  supabaseUrl || 'https://afrrxeibtrwjaiqmhytu.supabase.co',
+  supabaseAnonKey || ''
+);

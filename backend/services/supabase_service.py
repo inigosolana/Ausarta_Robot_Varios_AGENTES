@@ -147,3 +147,79 @@ async def clear_ui_cache(key: str):
         logger.info(f"🗑️ Cache CLEARED for {key}")
     except Exception as e:
         logger.error(f"Error clearing cache {key}: {e}")
+
+
+def _client_or_raise() -> Client:
+    if not supabase:
+        raise RuntimeError("Supabase no configurado: defina SUPABASE_URL y SUPABASE_KEY")
+    return supabase
+
+
+async def count_rows_async(
+    table: str,
+    *,
+    count_column: str = "id",
+    **filters,
+) -> int:
+    """Conteo exacto PostgREST con filtros .eq()."""
+    client = _client_or_raise()
+
+    def _run():
+        q = client.table(table).select(count_column, count="exact")
+        q = _apply_eq_filters(q, filters)
+        r = q.execute()
+        return int(r.count) if r.count is not None else 0
+
+    return await sb_query(_run)
+
+
+async def insert_row_async(table: str, data: dict[str, Any] | list[dict[str, Any]]):
+    client = _client_or_raise()
+    return await sb_query(lambda: client.table(table).insert(data).execute())
+
+
+async def update_row_async(table: str, data: dict[str, Any], **filters):
+    client = _client_or_raise()
+
+    def _run():
+        q = client.table(table).update(data)
+        q = _apply_eq_filters(q, filters)
+        return q.execute()
+
+    return await sb_query(_run)
+
+
+async def delete_rows_async(table: str, **filters):
+    client = _client_or_raise()
+
+    def _run():
+        q = client.table(table).delete()
+        q = _apply_eq_filters(q, filters)
+        return q.execute()
+
+    return await sb_query(_run)
+
+
+async def select_rows_async(
+    table: str,
+    select: str = "*",
+    *,
+    order: tuple[str, bool] | None = None,
+    limit: int | None = None,
+    **filters,
+) -> list[dict[str, Any]]:
+    """Select con filtros eq; order=(column, desc)."""
+    client = _client_or_raise()
+
+    def _run():
+        q = client.table(table).select(select)
+        q = _apply_eq_filters(q, filters)
+        if order:
+            col, desc = order
+            q = q.order(col, desc=desc)
+        if limit is not None:
+            q = q.limit(limit)
+        return q.execute()
+
+    res = await sb_query(_run)
+    return list(res.data or [])

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Bot, Edit2, Trash2, Loader2, Search, Building2, ArrowLeft } from "lucide-react";
+import { Plus, Bot, Edit2, Trash2, Loader2, Search, Building2, ArrowLeft, Phone, Languages } from "lucide-react";
+import { TestCallModal } from "../components/TestCallModal";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useTranslation } from "react-i18next";
@@ -21,6 +22,7 @@ const AgentManagementView: React.FC = () => {
     const [showTemplateGallery, setShowTemplateGallery] = useState(false);
     const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | "all">("all");
     const [templatePreload, setTemplatePreload] = useState<Partial<AgentConfig> | null>(null);
+    const [testCallAgent, setTestCallAgent] = useState<AgentConfig | null>(null);
 
     useEffect(() => {
         loadData();
@@ -148,6 +150,14 @@ const AgentManagementView: React.FC = () => {
     return (
         <div className="space-y-6 relative">
             {/* Template Gallery Modal */}
+            {testCallAgent && (
+                <TestCallModal
+                    agentId={testCallAgent.id!}
+                    agentName={testCallAgent.name}
+                    onClose={() => setTestCallAgent(null)}
+                />
+            )}
+
             {showTemplateGallery && (
                 <AgentTemplateGallery
                     onSelectTemplate={handleTemplateSelected}
@@ -257,34 +267,56 @@ const AgentManagementView: React.FC = () => {
                     </p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    {filteredAgents.map((agent) => (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    {filteredAgents.map((agent) => {
+                        const lang = agent.ai_config?.language || 'es';
+                        return (
                         <div
                             key={agent.id}
-                            onClick={() => setEditingAgent(agent)}
-                            className="group bg-white rounded-xl border border-gray-100 hover:border-blue-200 hover:shadow-lg cursor-pointer overflow-hidden p-5 transition-all text-left"
+                            className="group bg-white rounded-2xl border border-gray-100 hover:border-blue-200 hover:shadow-lg shadow-sm overflow-hidden p-6 transition-all duration-300 flex flex-col"
                         >
                             <div className="flex items-start justify-between">
                                 <div className="flex items-center gap-3">
-                                    <div className="p-2.5 rounded-xl bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all">
-                                        <Bot size={20} />
+                                    <div className="p-3 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 text-blue-600">
+                                        <Bot size={22} />
                                     </div>
                                     <div>
-                                        <h3 className="font-semibold text-gray-900 group-hover:text-blue-600">{agent.name}</h3>
-                                        <p className="text-xs text-gray-400">{agent.use_case || t("No use case", "Sin caso de uso")}</p>
+                                        <h3 className="font-bold text-gray-900 text-lg">{agent.name}</h3>
+                                        <span className="inline-flex items-center gap-1 mt-1 text-xs text-gray-500 font-medium">
+                                            <Languages size={12} className="text-blue-500" />
+                                            {lang.toUpperCase()}
+                                        </span>
                                     </div>
                                 </div>
                                 <button
-                                    onClick={(e) => { e.stopPropagation(); setAgentToDelete(agent.id!); }}
-                                    className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition-all"
+                                    onClick={() => setAgentToDelete(agent.id!)}
+                                    className="p-2 opacity-0 group-hover:opacity-100 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition-all"
+                                    title={t("Delete", "Eliminar")}
                                 >
                                     <Trash2 size={16} />
                                 </button>
                             </div>
-                            <p className="text-sm text-gray-500 my-3 line-clamp-2">{agent.description || t("No description", "Sin descripción")}</p>
+                            <p className="text-sm text-gray-500 my-4 line-clamp-2 flex-1">{agent.description || agent.use_case || t("No description", "Sin descripción")}</p>
+
+                            <button
+                                type="button"
+                                onClick={() => setTestCallAgent(agent)}
+                                className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-emerald-600 to-green-500 text-white font-bold rounded-xl hover:from-emerald-500 hover:to-green-400 shadow-lg shadow-green-500/25 transition-all active:scale-[0.98] mb-3"
+                            >
+                                <Phone size={18} />
+                                {t("Test Call", "Probar Llamada")}
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setEditingAgent(agent)}
+                                className="w-full py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                            >
+                                {t("Edit agent", "Editar agente")}
+                            </button>
 
                             {/* Tags */}
-                            <div className="flex flex-wrap items-center gap-2 mt-3">
+                            <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-gray-50">
                                 {agent.empresas && (
                                     <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full text-[11px] font-medium border border-indigo-100">
                                         <Building2 size={12} /> {agent.empresas.nombre}
@@ -303,7 +335,7 @@ const AgentManagementView: React.FC = () => {
                                 )}
                             </div>
                         </div>
-                    ))}
+                    );})}
                 </div>
             )}
         </div>

@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Plus, Upload, Clock, AlertCircle, History, Trash2, X, Edit2, Building2, FileText, Target, ThumbsDown, Calendar
+  Plus, Upload, Clock, AlertCircle, History, Trash2, X, Edit2, Building2, FileText, Target, ThumbsDown, Calendar,
+  Bot, Users, CalendarClock, ChevronRight, ChevronLeft, Loader2, Check
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
+import { fetchCampaignsList, fetchEmpresasList, fetchAgentsList } from '../lib/campaignsSupabase';
 import { Empresa, SurveyResult } from '../types';
 import DashboardView from './DashboardView';
 import ResultsView from './ResultsView';
@@ -57,10 +59,17 @@ export function CampaignsView() {
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [wizardStep, setWizardStep] = useState(0);
+  const WIZARD_STEPS = [
+    { id: 0, key: 'config', label: t('Configuración', 'Configuración'), icon: Bot },
+    { id: 1, key: 'contacts', label: t('Contactos', 'Contactos'), icon: Users },
+    { id: 2, key: 'schedule', label: t('Programación', 'Programación'), icon: CalendarClock },
+  ] as const;
   const [agents, setAgents] = useState<Agent[]>([]);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [selectedEmpresa, setSelectedEmpresa] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(true);
   const [error, setError] = useState('');
 
   // Selected Campaign Details
@@ -225,76 +234,44 @@ export function CampaignsView() {
 
   const loadEmpresas = async () => {
     try {
-      const resp = await fetch(`${API_URL}/api/empresas`);
-      if (resp.ok) {
-        const data = await resp.json();
-        // data here is a list of all companies
-        let filtered = data;
-
-        // If not platform owner, restrict to their own company
-        if (!isPlatformOwner && profile?.empresa_id) {
-          filtered = data.filter((e: Empresa) => e.id === profile.empresa_id);
-        }
-
-        setEmpresas(Array.isArray(filtered) ? filtered : []);
-      }
+      const empresaFilter = !isPlatformOwner && profile?.empresa_id ? profile.empresa_id : undefined;
+      const data = await fetchEmpresasList(empresaFilter);
+      setEmpresas(data as Empresa[]);
     } catch (e) {
-      console.error("Error loading empresas from API:", e);
-      // Fallback to Supabase direct if API fails
-      try {
-        let query = supabase.from('empresas').select('*').order('nombre');
-        if (!isPlatformOwner && profile?.empresa_id) {
-          query = query.eq('id', profile.empresa_id);
-        }
-        const { data } = await query;
-        if (data) setEmpresas(data);
-      } catch (e2) {
-        console.error("Fallback loadEmpresas failed:", e2);
-      }
+      console.error('Error loading empresas from Supabase:', e);
+      setEmpresas([]);
     }
   };
 
   const loadAgents = async () => {
     try {
-      let url = `${API_URL}/api/agents`;
-      if (profile && !isPlatformOwner && profile.empresa_id) {
-        url += `?empresa_id=${profile.empresa_id}`;
-      } else if (isPlatformOwner && selectedEmpresa) {
-        url += `?empresa_id=${selectedEmpresa}`;
-      }
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setAgents(Array.isArray(data) ? data : []);
-        // Auto-select first agent if available and selected agent is not in the list
-        if (Array.isArray(data) && data.length > 0) {
-          setSelectedAgent(data[0].id);
-        } else {
-          setSelectedAgent('');
-        }
-      }
+      const empresaFilter =
+        !isPlatformOwner && profile?.empresa_id
+          ? profile.empresa_id
+          : isPlatformOwner && selectedEmpresa
+            ? selectedEmpresa
+            : undefined;
+      const data = await fetchAgentsList(empresaFilter);
+      setAgents(data);
+      if (data.length > 0) setSelectedAgent(data[0].id);
+      else setSelectedAgent('');
     } catch (e) {
-      console.error("Error loading agents:", e);
+      console.error('Error loading agents from Supabase:', e);
       setAgents([]);
     }
   };
 
   const loadCampaigns = async () => {
+    setListLoading(true);
     try {
-      let url = `${API_URL}/api/campaigns`;
-      if (profile && !isPlatformOwner && profile.empresa_id) {
-        url += `?empresa_id=${profile.empresa_id}`;
-      }
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setCampaigns(Array.isArray(data) ? data : []);
-      } else {
-        setCampaigns([]);
-      }
+      const empresaFilter = !isPlatformOwner && profile?.empresa_id ? profile.empresa_id : undefined;
+      const data = await fetchCampaignsList(empresaFilter);
+      setCampaigns(data as Campaign[]);
     } catch (e) {
-      console.error("Error loading campaigns:", e);
+      console.error('Error loading campaigns from Supabase:', e);
       setCampaigns([]);
+    } finally {
+      setListLoading(false);
     }
   };
 
@@ -357,7 +334,29 @@ export function CampaignsView() {
 
   const handleCreateNewForCompany = (empId: number) => {
     setSelectedEmpresa(empId);
+    setWizardStep(0);
     setShowCreate(true);
+  };
+
+  const resetWizard = () => {
+    setWizardStep(0);
+    setName('');
+    setSelectedAgent('');
+    setCsvFile(null);
+    setManualInput('');
+    setScheduledTime('');
+    setError('');
+    setDataSource('csv');
+  };
+
+  const canWizardNext = () => {
+    if (wizardStep === 0) return Boolean(name.trim() && selectedAgent);
+    if (wizardStep === 1) {
+      if (dataSource === 'csv') return Boolean(csvFile);
+      if (dataSource === 'manual') return manualInput.trim().length > 0;
+      return true;
+    }
+    return true;
   };
 
   const handleCreate = async () => {
@@ -638,10 +637,10 @@ export function CampaignsView() {
 
   const StatusBadge = ({ status }: { status: string }) => {
     const colors: Record<string, string> = {
-      pending: 'bg-yellow-100 text-yellow-800',
-      running: 'bg-blue-100 text-blue-800',
-      completed: 'bg-green-100 text-green-800',
-      paused: 'bg-gray-100 text-gray-800',
+      pending: 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200',
+      running: 'bg-blue-100 text-blue-800 ring-1 ring-blue-200',
+      completed: 'bg-green-100 text-green-800 ring-1 ring-green-200',
+      paused: 'bg-yellow-50 text-yellow-700 ring-1 ring-yellow-200',
       called: 'bg-blue-100 text-blue-800',
       failed: 'bg-red-100 text-red-800',
       unreached: 'bg-orange-100 text-orange-800',
@@ -952,22 +951,52 @@ export function CampaignsView() {
 
   if (showCreate) {
     return (
-      <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-          <h2 className="text-xl font-bold">{t("Create Campaign", "Crear Campaña")}</h2>
-          <button onClick={() => setShowCreate(false)} className="text-gray-400 hover:text-gray-600">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+      <div className="max-w-3xl mx-auto space-y-8 pb-12 animate-in fade-in duration-300">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="px-8 py-6 border-b border-gray-100 flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">{t("Create Campaign", "Crear Campaña")}</h2>
+              <p className="text-sm text-gray-500 mt-1">{t("Step-by-step wizard", "Asistente paso a paso")}</p>
+            </div>
+            <button onClick={() => { setShowCreate(false); resetWizard(); }} className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-50">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
 
-        <div className="p-6 space-y-6">
+          {/* Step tabs */}
+          <div className="px-8 pt-6 flex gap-2">
+            {WIZARD_STEPS.map((step, idx) => {
+              const Icon = step.icon;
+              const active = wizardStep === idx;
+              const done = wizardStep > idx;
+              return (
+                <button
+                  key={step.key}
+                  type="button"
+                  onClick={() => idx < wizardStep && setWizardStep(idx)}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-semibold transition-all ${
+                    active ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' :
+                    done ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
+                    'bg-gray-50 text-gray-400 border border-gray-100'
+                  }`}
+                >
+                  {done ? <Check className="w-4 h-4" /> : <Icon className="w-4 h-4" />}
+                  {step.label}
+                </button>
+              );
+            })}
+          </div>
+
+        <div className="px-8 py-8 space-y-8 min-h-[320px]">
           {error && (
-            <div className="p-4 bg-red-50 text-red-600 rounded-lg text-sm flex items-center gap-2">
-              <AlertCircle className="w-4 h-4" />
+            <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
               {error}
             </div>
           )}
 
+          {wizardStep === 0 && (
+          <>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">{t("Campaign Name", "Nombre de la Campaña")}</label>
             <input
@@ -1008,7 +1037,11 @@ export function CampaignsView() {
               ))}
             </select>
           </div>
+          </>
+          )}
 
+          {wizardStep === 1 && (
+          <>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">{t("Data Input Method", "Método de Entrada de Datos")}</label>
             <select
@@ -1081,6 +1114,70 @@ export function CampaignsView() {
               </code>
             </div>
           )}
+          </>
+          )}
+
+          {wizardStep === 2 && (
+          <>
+          <div className="border-t border-gray-100 pt-2">
+            <h3 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
+              <CalendarClock className="w-4 h-4 text-blue-600" />
+              {t("Schedule launch", "Programar lanzamiento")}
+            </h3>
+            <label className="block text-sm font-medium text-gray-700 mb-2">{t("Scheduled Start Time (Optional)", "Fecha y hora de inicio (opcional)")}</label>
+            <input
+              type="datetime-local"
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 outline-none"
+              value={scheduledTime}
+              onChange={(e) => setScheduledTime(e.target.value)}
+            />
+            <p className="text-xs text-gray-500 mt-2">{t("Leave blank to start immediately.", "Dejar en blanco para empezar inmediatamente.")}</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Retry Interval", "Intervalo de Reintento")}</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                  value={retryInterval}
+                  onChange={(e) => setRetryInterval(Number(e.target.value))}
+                />
+                <select
+                  value={retryUnit}
+                  onChange={(e) => setRetryUnit(e.target.value as 'minutes' | 'hours' | 'days')}
+                  className="w-1/3 px-3 py-2.5 border border-gray-200 rounded-xl outline-none bg-white"
+                >
+                  <option value="minutes">{t("Minutes", "Minutos")}</option>
+                  <option value="hours">{t("Hours", "Horas")}</option>
+                  <option value="days">{t("Days", "Dias")}</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Number of Retries", "Número de Reintentos")}</label>
+              <input
+                type="number"
+                min="0"
+                max="10"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                value={retriesCount}
+                onChange={(e) => setRetriesCount(Number(e.target.value))}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Drip Interval (Minutes)", "Intervalo entre llamadas (min)")}</label>
+              <input
+                type="number"
+                min="1"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                value={intervalMinutes}
+                onChange={(e) => setIntervalMinutes(Number(e.target.value))}
+              />
+            </div>
+          </div>
 
           <div className="border-t border-gray-100 pt-6">
             <h3 className="text-sm font-medium text-gray-700 mb-1">{t("Dynamic Data Extraction", "Extracción de Datos Dinámica")}</h3>
@@ -1141,88 +1238,89 @@ export function CampaignsView() {
               </div>
             </div>
           </div>
-
-          <div className="border-t border-gray-100 pt-6">
-            <button className="flex items-center justify-between w-full text-left font-medium text-gray-700">
-              <span>{t("Advanced Settings / Scheduling", "Ajustes Avanzados / Programación")}</span>
-              <Clock className="w-4 h-4" />
-            </button>
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Scheduled Start Time (Optional)", "Hora de Inicio Programada (Opcional)")}</label>
-              <input
-                type="datetime-local"
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg"
-                value={scheduledTime}
-                onChange={(e) => setScheduledTime(e.target.value)}
-              />
-              <p className="text-xs text-gray-500 mt-1">{t("Leave blank to start immediately.", "Dejar en blanco para empezar inmediatamente.")}</p>
-            </div>
-
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Retry Interval", "Intervalo de Reintento")}</label>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none"
-                  value={retryInterval}
-                  onChange={(e) => setRetryInterval(Number(e.target.value))}
-                  placeholder={t("Default: 60", "Por defecto: 60")}
-                />
-                <select
-                  value={retryUnit}
-                  onChange={(e) => setRetryUnit(e.target.value as any)}
-                  className="w-1/3 px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none bg-white"
-                >
-                  <option value="minutes">{t("Minutes", "Minutos")}</option>
-                  <option value="hours">{t("Hours", "Horas")}</option>
-                  <option value="days">{t("Days", "Dias")}</option>
-                </select>
-              </div>
-              <p className="text-xs text-gray-500 mt-1">{t("Wait time before retrying a failed call.", "Tiempo de espera antes de reintentar una llamada fallida.")}</p>
-            </div>
-
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Number of Retries", "Número de Reintentos")}</label>
-              <input
-                type="number"
-                min="0"
-                max="10"
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none"
-                value={retriesCount}
-                onChange={(e) => setRetriesCount(Number(e.target.value))}
-              />
-              <p className="text-xs text-gray-500 mt-1">{t("Max number of automatic retries (0 to 10).", "Número máximo de reintentos automáticos (0 a 10).")}</p>
-            </div>
-
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t("Drip Interval (Minutes)", "Intervalo de Goteo (Minutos)")}</label>
-              <input
-                type="number"
-                min="1"
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none"
-                value={intervalMinutes}
-                onChange={(e) => setIntervalMinutes(Number(e.target.value))}
-              />
-              <p className="text-xs text-gray-500 mt-1">{t("Pace of the campaign: minutes to wait between each call.", "Ritmo de la campaña: minutos de espera entre cada llamada.")}</p>
-            </div>
-          </div>
+          </>
+          )}
         </div>
 
-        <div className="p-6 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+        <div className="px-8 py-6 bg-gray-50/80 border-t border-gray-100 flex justify-between items-center gap-3">
           <button
-            onClick={() => setShowCreate(false)}
-            className="px-4 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors"
+            type="button"
+            onClick={() => { setShowCreate(false); resetWizard(); }}
+            className="px-5 py-2.5 text-gray-600 font-medium hover:bg-gray-100 rounded-xl transition-colors"
           >
             {t("Cancel", "Cancelar")}
           </button>
-          <button
-            onClick={handleCreate}
-            disabled={loading}
-            className="px-4 py-2 bg-black text-white font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-2 disabled:opacity-50"
-          >
-            {loading ? t('Creating...', 'Creando...') : t('Launch Campaign', 'Lanzar Campaña')}
-          </button>
+          <div className="flex gap-3">
+            {wizardStep > 0 && (
+              <button
+                type="button"
+                onClick={() => setWizardStep((s) => s - 1)}
+                className="px-5 py-2.5 border border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-white flex items-center gap-1 transition-all"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                {t("Back", "Atrás")}
+              </button>
+            )}
+            {wizardStep < 2 ? (
+              <button
+                type="button"
+                disabled={!canWizardNext()}
+                onClick={() => setWizardStep((s) => s + 1)}
+                className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-500 flex items-center gap-1 disabled:opacity-40 shadow-md shadow-blue-500/20 transition-all"
+              >
+                {t("Next", "Siguiente")}
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleCreate}
+                disabled={loading || !canWizardNext()}
+                className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-500 flex items-center gap-2 disabled:opacity-40 shadow-md shadow-blue-500/20 transition-all min-w-[160px] justify-center"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {t('Saving...', 'Guardando...')}
+                  </>
+                ) : (
+                  t('Launch Campaign', 'Lanzar Campaña')
+                )}
+              </button>
+            )}
+          </div>
+        </div>
+        </div>
+
+        {/* Campaigns table below wizard */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100">
+            <h3 className="font-bold text-gray-900">{t("Current campaigns", "Campañas actuales")}</h3>
+          </div>
+          {campaigns.length === 0 ? (
+            <p className="px-6 py-10 text-center text-gray-400 text-sm">{t("No campaigns yet", "Aún no hay campañas")}</p>
+          ) : (
+            <table className="w-full text-left">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">{t("Name", "Nombre")}</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">{t("Status", "Estado")}</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase text-right">{t("Scheduled", "Programada")}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {campaigns.slice(0, 8).map((c) => (
+                  <tr key={c.id} className="hover:bg-gray-50/80 transition-colors">
+                    <td className="px-6 py-3 text-sm font-medium text-gray-900">{c.name}</td>
+                    <td className="px-6 py-3"><StatusBadge status={c.status} /></td>
+                    <td className="px-6 py-3 text-sm text-gray-500 text-right font-mono">
+                      {c.scheduled_time ? new Date(c.scheduled_time).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     );
@@ -1236,14 +1334,19 @@ export function CampaignsView() {
           <p className="text-gray-500">{t("Manage your bulk outbound call campaigns", "Gestiona tus campañas de llamadas salientes masivas")}</p>
         </div>
         <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors"
+          onClick={() => { resetWizard(); setShowCreate(true); }}
+          className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-500 shadow-md shadow-blue-500/20 font-semibold transition-all"
         >
           <Plus className="w-4 h-4" />
           {t("Create Campaign", "Crear Campaña")}
         </button>
       </div>
 
+      {listLoading ? (
+        <div className="flex justify-center py-16">
+          <Loader2 className="w-10 h-10 animate-spin text-blue-500" />
+        </div>
+      ) : (
       <div className="space-y-8">
         {empresas.length === 0 && campaigns.length === 0 ? (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center text-gray-500">
@@ -1391,6 +1494,7 @@ export function CampaignsView() {
           );
         })()}
       </div>
+      )}
       {renderEditModal()}
     </div>
   );
