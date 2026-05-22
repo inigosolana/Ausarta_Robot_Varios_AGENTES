@@ -1,22 +1,10 @@
-# =============================================================================
-# Kamailio SIP Edge Proxy — Easypanel / Docker Compose
-# =============================================================================
-# Proxy de borde delante del clúster LiveKit SIP:
-#   - 5060 UDP/TCP (SIP plano)
-#   - 5061 TCP (SIP TLS)
-#   - Balanceo dispatcher → nodos LiveKit
-#   - Mitigación REGISTER flood (pike + htable)
+# Kamailio SIP Edge Proxy — Easypanel (Docker Compose desde la raíz del repo)
+# Puertos: 5060 UDP/TCP, 5061 TLS → balanceo a LiveKit (dispatcher.list)
 #
-# Despliegue en Easypanel:
-#   1. Crear app tipo "Docker Compose" o servicio desde este archivo.
-#   2. Montar el directorio deploy/kamailio como contexto (o copiar archivos).
-#   3. Publicar puertos 5060/5061 en el host (UDP 5060 es obligatorio para carriers).
-#   4. Editar dispatcher.list con IPs/hostnames reales de LiveKit.
-#   5. Añadir cert.pem y key.pem en ./certs/ para TLS 5061.
-#
-# Variables (Easypanel → Environment):
-#   EXTERNAL_SIP_IP  — IP pública del proxy (opcional, para anuncios SDP/RTP)
-# =============================================================================
+# Easypanel: usar este compose con working directory = raíz del proyecto.
+# Variables en la UI de entorno (o .env en la raíz):
+#   SIP_DOMAIN       — dominio SIP (ej. sip.tudominio.com)
+#   EXTERNAL_SIP_IP  — IP pública del nodo (opcional, SDP/RTP)
 
 services:
   kamailio-edge:
@@ -31,17 +19,17 @@ services:
       - "5061:5061/tcp"
 
     volumes:
-      - ./kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
-      - ./dispatcher.list:/etc/kamailio/dispatcher.list:ro
-      - ./certs:/etc/kamailio/tls:ro
+      - ./deploy/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
+      - ./deploy/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list:ro
+      - ./deploy/kamailio/certs:/etc/kamailio/tls:ro
+
+    env_file:
+      - .env
 
     environment:
-      # Dominio SIP anunciado (debe coincidir con alias en kamailio.cfg o sustituir allí)
-      SIP_DOMAIN: ${SIP_DOMAIN:-sip.ausarta.net}
-      # Opcional: IP pública del nodo (Easypanel suele exponerla en la UI)
-      EXTERNAL_SIP_IP: ${EXTERNAL_SIP_IP:-}
+      SIP_DOMAIN: ${SIP_DOMAIN}
+      EXTERNAL_SIP_IP: ${EXTERNAL_SIP_IP}
 
-    # Foreground + debug a stderr (Easypanel logs)
     command:
       - kamailio
       - -f
@@ -57,7 +45,6 @@ services:
       retries: 3
       start_period: 15s
 
-    # Límites recomendados en borde telecom (ajustar según tráfico)
     deploy:
       resources:
         limits:
