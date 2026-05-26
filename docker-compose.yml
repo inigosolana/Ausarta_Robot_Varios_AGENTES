@@ -44,6 +44,9 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+      # FIX 7: esperar a que Redis esté realmente disponible (no sólo iniciado)
+      redis:
+        condition: service_healthy
     networks:
       - ausarta-network
 
@@ -66,7 +69,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      - redis
+      # FIX 7: esperar a que Redis esté realmente disponible antes de conectar el worker ARQ
+      redis:
+        condition: service_healthy
     networks:
       - ausarta-network
 
@@ -76,9 +81,21 @@ services:
     restart: unless-stopped
     networks:
       - ausarta-network
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en .env}
+    # FIX 7: AOF activo + snapshot cada 60 s si hay ≥1 cambio + noeviction para preservar colas ARQ
+    command: >
+      redis-server
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en .env}
+      --save 60 1
+      --maxmemory-policy noeviction
     volumes:
       - redis-data:/data
+    # FIX 7: healthcheck para que los servicios dependientes esperen a Redis real
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   frontend:
     build:

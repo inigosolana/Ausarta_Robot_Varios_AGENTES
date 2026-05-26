@@ -4,11 +4,15 @@ queue_service.py — Cliente ARQ compartido para encolar tareas desde la API.
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Optional
 
 from arq.connections import ArqRedis, RedisSettings, create_pool
 
 _arq_pool: Optional[ArqRedis] = None
+# FIX 2: timestamp del último uso del pool para limitar la frecuencia de pings
+_last_pool_use: float = 0.0
+_POOL_PING_INTERVAL = 30.0  # segundos sin usar el pool antes de ejecutar ping de salud
 
 
 def _redis_settings() -> RedisSettings:
@@ -21,9 +25,33 @@ def _redis_settings() -> RedisSettings:
 
 
 async def get_arq_pool() -> ArqRedis:
-    global _arq_pool
+    """
+    FIX 2 — ARQ pool sin health check.
+
+    Problema: si Redis se desconecta y reconecta, _arq_pool queda en estado
+    inválido pero _arq_pool is not None sigue siendo True, por lo que nunca
+    se reinicializa. Las llamadas a enqueue_* fallan silenciosamente.
+
+    Solución: ping de salud si el pool lleva >30 s sin usarse. Si falla,
+    se descarta y se crea uno nuevo antes de devolver.
+    """
+    global _arq_pool, _last_pool_use
+    import logging as _logging
+    now = time.monotonic()
+
+    if _arq_pool is not None and (now - _last_pool_use) > _POOL_PING_INTERVAL:
+        try:
+            await _arq_pool.ping()
+        except Exception:
+            _logging.getLogger("api-backend").warning(
+                "⚠️ ARQ pool ping fallido — estado inválido tras desconexión Redis. Recreando pool."
+            )
+            _arq_pool = None
+
     if _arq_pool is None:
         _arq_pool = await create_pool(_redis_settings())
+
+    _last_pool_use = now
     return _arq_pool
 
 

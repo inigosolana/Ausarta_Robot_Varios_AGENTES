@@ -451,7 +451,21 @@ async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
                 )
                 logger.info(f"[Orchestrator] Agente despachado para lead {lead_id} en sala {room_name}.")
 
-                await asyncio.sleep(float(os.getenv("DRIP_AGENT_JOIN_DELAY_SECONDS", "3")))
+                # FIX 1: polling real en vez de sleep fijo — aborta si el agente no arranca
+                from services.livekit_service import wait_for_agent_ready
+                agent_ready = await wait_for_agent_ready(room_name)
+                if not agent_ready:
+                    logger.error(
+                        f"[Orchestrator] Agente no listo para lead {lead_id} en sala {room_name}. "
+                        "Abortando SIP, revirtiendo lead a 'pending'."
+                    )
+                    await sb_query(
+                        lambda: supabase.table("campaign_leads")
+                        .update({"status": "pending"})
+                        .eq("id", lead_id)
+                        .execute()
+                    )
+                    return
 
                 # 7. Crear participante SIP
                 sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")

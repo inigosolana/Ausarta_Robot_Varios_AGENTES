@@ -97,3 +97,44 @@ async def create_outbound_call(
         survey_id,
     )
     return await lkapi.sip.create_sip_participant(req)
+
+
+async def wait_for_agent_ready(room_name: str, timeout: float = 15.0) -> bool:
+    """
+    FIX 1 — Race condition agente vs participante SIP.
+
+    Problema: un sleep fijo de 3 s no garantiza que el agente esté en sala cuando
+    Silero VAD o un cold start de CPU retrasan el worker más de ese tiempo.
+
+    Solución: polling real sobre list_participants cada 500 ms hasta detectar al
+    menos 1 participante no-SIP (el agente), o hasta agotar el timeout.
+    Retorna True si el agente está listo, False si se agotó el tiempo.
+    """
+    import asyncio as _asyncio
+    loop = _asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        try:
+            res = await lkapi.room.list_participants(
+                api.ListParticipantsRequest(room=room_name)
+            )
+            participants = getattr(res, "participants", []) or []
+            # Participantes no-SIP = el agente (SIP tiene identity user_* o sip_*)
+            non_sip = [
+                p for p in participants
+                if not (getattr(p, "identity", "") or "").startswith(("sip_", "user_"))
+            ]
+            if non_sip:
+                logger.info(
+                    "✅ wait_for_agent_ready: agente listo en sala %s (%d participante(s))",
+                    room_name, len(non_sip),
+                )
+                return True
+        except Exception as poll_err:
+            logger.debug("wait_for_agent_ready poll error room=%s: %s", room_name, poll_err)
+        await _asyncio.sleep(0.5)
+    logger.error(
+        "⏰ wait_for_agent_ready: timeout (%.0fs) alcanzado sin detectar agente en sala %s",
+        timeout, room_name,
+    )
+    return False

@@ -66,7 +66,8 @@ def _require_bridge_server_url() -> str:
 # Precalculada al arranque del worker: falla rápido si falta la variable.
 BRIDGE_SERVER_URL_INTERNAL = _require_bridge_server_url()
 
-_AGENT_CONFIG_CACHE_TTL = 3600
+# FIX 5: TTL reducido de 3600 → 300 s para que los cambios de prompt/voz se propaguen rápidamente
+_AGENT_CONFIG_CACHE_TTL = 300
 _REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
 
@@ -593,29 +594,36 @@ class DynamicAgent(Agent):
 
     async def on_enter(self, *args, **kwargs) -> None:
         """Método llamado cuando el agente entra en la sesión. Lanza el saludo inicial."""
-        # Aseguramos que survey_id sea correcto antes de saludar
         logger.info(f"--- 🎭 AGENTE EN SALA: {self.room_name} (Survey ID: {self.survey_id}) ---")
-        
-        # En versiones recientes de LiveKit, la sesión se accede vía self.session
-        # Si no está asoaciada aún, intentamos obtenerla de los argumentos si viniera
+
+        # FIX 3 — on_enter sin reintentos suficientes.
+        # Problema: un único reintento de 500 ms no era suficiente cuando la sesión
+        # tarda más en asociarse; el agente arrancaba mudo sin error visible.
+        # Solución: hasta 20 intentos x 300 ms (máx. 6 s de espera total).
         current_session = getattr(self, 'session', None)
         if not current_session:
-            logger.warning(f"⚠️ [{self.room_name}] No session available in on_enter immediately.")
-            # Pequeña espera para que se asocie
-            await asyncio.sleep(0.5)
-            current_session = getattr(self, 'session', None)
+            for attempt in range(1, 21):
+                await asyncio.sleep(0.3)
+                current_session = getattr(self, 'session', None)
+                if current_session:
+                    break
+                logger.info(
+                    f"⏳ [{self.room_name}] on_enter: esperando sesión (intento {attempt}/20)..."
+                )
 
         if not current_session:
-            logger.error(f"❌ [{self.room_name}] No se pudo obtener la sesión para saludar.")
+            logger.error(
+                f"❌ [{self.room_name}] No se pudo obtener la sesión tras 20 intentos (6 s). "
+                "El agente no puede saludar. Colgando sala."
+            )
+            await enqueue_colgar_sala(self.room_name)
             return
 
-        logger.info(f"🎙️ Saludando en sala: {self.room_name} con: {self.greeting}")
-        # Pausa natural al descolgar (casi inmediato por defecto)
+        logger.info(f"🎙️ Saludando en sala: {self.room_name} con: '{self.greeting}'")
         greeting_delay = float(os.getenv("AGENT_GREETING_DELAY_SECONDS", "0.15"))
         greeting_delay = max(0.1, min(greeting_delay, 3.0))
         await asyncio.sleep(greeting_delay)
         try:
-            # Permitimos interrupción para que no suene rígido si el cliente responde enseguida
             await current_session.say(self.greeting, allow_interruptions=True)
         except Exception as e:
             logger.error(f"❌ Error al saludar: {e}")
@@ -839,6 +847,713 @@ class DynamicAgent(Agent):
 
 
 # ============================================================================
+# CLASE CallSession — encapsula toda la lógica de una llamada activa
+# ============================================================================
+class CallSession:
+    """
+    REFACTOR — Extraer lógica de entrypoint() a métodos.
+
+    Problema: entrypoint() tenía ~600 líneas inline (AMD, backchannel, silencio,
+    ghost kicker, transcripción, timeouts), difícil de leer, testear y mantener.
+
+    Solución: cada bucle concurrente se convierte en un método, el estado
+    compartido en atributos de instancia y el bloque finally en finalize().
+    entrypoint() queda en ~80 líneas.
+    """
+
+    VOICEMAIL_PATTERNS = (
+        "buzón de voz", "buzon de voz", "contestador", "contestadora",
+        "fuera de cobertura", "apagado o fuera", "deje su mensaje",
+        "grabe su mensaje", "después de la señal", "despues de la señal",
+        "no está disponible", "no esta disponible", "no se encuentra",
+        "número no disponible", "numero no disponible",
+        "terminado el tiempo", "el usuario no contesta",
+        "mailbox", "voicemail", "leave a message", "not available",
+        "el número marcado", "el numero marcado",
+    )
+    REPROMPT_PHRASES = [
+        "¿Sigue ahí?",
+        "Perdone, ¿me escucha?",
+        "Disculpe, ¿puede responderme?",
+        "¿Está usted disponible?",
+        "Si le parece, seguimos con la siguiente pregunta.",
+    ]
+    LATENCY_FILLERS = ["Mmm...", "A ver...", "Vale..."]
+    INTERRUPTION_ACKS = ["Uy, perdona, dime.", "Sí, dime."]
+
+    def __init__(
+        self,
+        ctx: "JobContext",
+        job_id: str,
+        room_name: str,
+        survey_id: str,
+        agent_config: dict,
+        session: "AgentSession",
+        agent_instance: "DynamicAgent",
+        language: str,
+        voice_id: str,
+        speaking_speed: float,
+        tts_model: str,
+        call_start_time: float,
+    ) -> None:
+        self.ctx = ctx
+        self.job_id = job_id
+        self.room_name = room_name
+        self.survey_id = survey_id
+        self.agent_config = agent_config
+        self.session = session
+        self.agent_instance = agent_instance
+        self.language = language
+        self.voice_id = voice_id
+        self.speaking_speed = speaking_speed
+        self.tts_model = tts_model
+        self.call_start_time = call_start_time
+
+        # Configuración leída del entorno
+        self.AMD_WINDOW_SECONDS = float(os.getenv("AGENT_AMD_WINDOW_SECONDS", "15.0"))
+        self.SILENCE_REPROMPT_DELAY = float(os.getenv("AGENT_SILENCE_REPROMPT_SECONDS", "7.0"))
+        self.CALL_TIMEOUT_SECONDS = int(os.getenv("AGENT_CALL_TIMEOUT_SECONDS", "600"))
+        self.max_short_interrupt_words = int(os.getenv("AGENT_INTERRUPT_MIN_WORDS", "3"))
+
+        # Señales de control
+        self.stop_guard = asyncio.Event()
+        self.finished = asyncio.Event()
+        self.loop_obj = asyncio.get_running_loop()
+
+        # Estado de transcripción
+        self.transcript_event_buffer: list[dict] = []
+        self.transcript_snapshot: dict = {"transcript": "", "raw": []}
+
+        # Estado AMD
+        self.amd_state: dict = {"detected": False, "human_confirmed": False, "check_count": 0}
+
+        # Estado de reprompt
+        self.reprompt_state: dict = {
+            "last_assistant_at": 0.0,
+            "last_user_at": 0.0,
+            "waiting_user": False,
+            "reprompt_count": 0,
+        }
+        self.reprompt_phrases_lc = {p.lower() for p in self.REPROMPT_PHRASES}
+
+        # Estado de runtime del agente
+        self.runtime_state: dict = {
+            "agent_state": "listening",
+            "last_user_text": "",
+            "last_filler_at": 0.0,
+            "last_interrupt_ack_at": 0.0,
+        }
+
+        # Estado de detección de idioma
+        self.lang_state: dict = {
+            "detected": False,
+            "switched": False,
+            "original_lang": language,
+            "active_lang": language,
+        }
+
+        # Reproductor de audio de fondo (inicializado en start())
+        self.bg_player = None
+
+        # Referencias a las tareas en background
+        self._tasks: list[asyncio.Task] = []
+
+    # ── Helpers de transcripción ───────────────────────────────────────────────
+
+    def _append_transcript_event(self, role: str, content: str) -> None:
+        text = _normalize_message_text(content)
+        if role not in ("user", "assistant") or not text:
+            return
+        if self.transcript_event_buffer:
+            last = self.transcript_event_buffer[-1]
+            if last.get("role") == role and _normalize_message_text(last.get("content")) == text:
+                return
+        self.transcript_event_buffer.append({"role": role, "content": text})
+
+    def _build_transcript_from_event_buffer(self) -> tuple[list[dict], str]:
+        if not self.transcript_event_buffer:
+            return [], ""
+        lines: list[str] = []
+        raw: list[dict] = []
+        for item in self.transcript_event_buffer:
+            role = item.get("role")
+            content = _normalize_message_text(item.get("content"))
+            if role not in ("user", "assistant") or not content:
+                continue
+            raw.append({"role": role, "content": content})
+            lines.append(f"{'Cliente' if role == 'user' else 'Agente'}: {content}")
+        return raw, ("\n".join(lines).strip() + ("\n" if lines else ""))
+
+    async def _save_transcript_snapshot(self, reason: str = "auto") -> None:
+        try:
+            raw, t = self._build_transcript_from_event_buffer()
+            if not t:
+                raw, t = _extract_transcript_from_session(self.session)
+            logger.info(
+                f"📝 [{self.job_id}] Snapshot transcripción ({reason}): {len(t)} chars, {len(raw)} mensajes"
+            )
+            if t:
+                self.transcript_snapshot["transcript"] = t
+                self.transcript_snapshot["raw"] = raw
+                snap_job = await enqueue_guardar_encuesta({
+                    "id_encuesta": int(self.survey_id) if str(self.survey_id).isdigit() else 0,
+                    "transcription": t,
+                })
+                logger.info(
+                    f"📬 [{self.job_id}] Transcripción snapshot encolada ({reason}, job={snap_job})"
+                )
+        except Exception as _e:
+            logger.warning(
+                f"⚠️ [{self.job_id}] Error guardando snapshot transcripción ({reason}): {_e}"
+            )
+
+    # ── Detección de idioma ────────────────────────────────────────────────────
+
+    async def _try_switch_language(self, user_text: str) -> None:
+        if self.lang_state["detected"]:
+            return
+        self.lang_state["detected"] = True
+        detected = _detect_language(user_text)
+        if not detected or detected == self.lang_state["original_lang"]:
+            return
+        self.lang_state["switched"] = True
+        self.lang_state["active_lang"] = detected
+        logger.info(
+            f"🌐 [{self.job_id}] Idioma detectado: '{detected}' "
+            f"(configurado: '{self.lang_state['original_lang']}'). Cambiando idioma."
+        )
+        override_msg = _LANG_OVERRIDE_MSGS.get(detected)
+        if not override_msg:
+            return
+        try:
+            chat_ctx = getattr(self.session, "chat_ctx", getattr(self.session, "chat_context", None))
+            if chat_ctx is not None:
+                if hasattr(chat_ctx, "add_message"):
+                    chat_ctx.add_message(role="system", content=override_msg)
+                elif hasattr(self.session, "update_chat_ctx"):
+                    from livekit.agents.llm import ChatMessage
+                    new_ctx = chat_ctx.copy() if hasattr(chat_ctx, "copy") else chat_ctx
+                    new_ctx.messages.append(ChatMessage.create(text=override_msg, role="system"))
+                    await self.session.update_chat_ctx(new_ctx)
+                logger.info(f"🌐 [{self.job_id}] Override de idioma '{detected}' inyectado.")
+        except Exception as ctx_err:
+            logger.warning(f"⚠️ [{self.job_id}] No se pudo inyectar override de idioma: {ctx_err}")
+        try:
+            new_tts = _build_tts_plugin(
+                voice_id=self.voice_id,
+                language=detected,
+                speaking_speed=self.speaking_speed,
+                tts_model=self.tts_model,
+            )
+            await self.session.update_options(tts=new_tts)
+            logger.info(f"🎙️ [{self.job_id}] TTS actualizado a idioma '{detected}'.")
+        except Exception as tts_err:
+            logger.warning(f"⚠️ [{self.job_id}] No se pudo actualizar TTS al idioma '{detected}': {tts_err}")
+
+    # ── Tareas en background ───────────────────────────────────────────────────
+
+    async def run_amd(self) -> None:
+        """Monitoriza transcripciones tempranas para detectar contestador automático."""
+        start_time = self.loop_obj.time()
+        while not self.stop_guard.is_set():
+            await asyncio.sleep(0.5)
+            elapsed = self.loop_obj.time() - start_time
+            if elapsed > self.AMD_WINDOW_SECONDS or self.amd_state["human_confirmed"]:
+                logger.info(
+                    f"✅ [{self.job_id}] AMD: Interlocutor humano confirmado (elapsed={elapsed:.1f}s)"
+                )
+                return
+            if not self.transcript_event_buffer:
+                continue
+            for item in self.transcript_event_buffer:
+                if item.get("role") != "user":
+                    continue
+                text = item.get("content", "").lower()
+                self.amd_state["check_count"] += 1
+                for pattern in self.VOICEMAIL_PATTERNS:
+                    if pattern in text:
+                        self.amd_state["detected"] = True
+                        logger.warning(
+                            f"📵 [{self.job_id}] AMD: BUZÓN DETECTADO — "
+                            f"patrón '{pattern}' en '{anonymize_text(text)}'"
+                        )
+                        try:
+                            enc_id = int(self.survey_id) if str(self.survey_id).isdigit() else 0
+                            await enqueue_guardar_encuesta({
+                                "id_encuesta": enc_id,
+                                "status": "failed",
+                                "comentarios": f"Buzón de voz detectado automáticamente (AMD): {pattern}",
+                            })
+                            await enqueue_colgar_sala(self.room_name)
+                            logger.info(
+                                f"📵 [{self.job_id}] AMD: encuesta {self.survey_id} failed + colgar encolados."
+                            )
+                        except Exception as amd_err:
+                            logger.error(f"❌ [{self.job_id}] AMD: Error al encolar cierre: {amd_err}")
+                        return
+                user_msgs = [i for i in self.transcript_event_buffer if i.get("role") == "user"]
+                total_user_words = sum(_count_words(i.get("content", "")) for i in user_msgs)
+                if len(user_msgs) >= 2 or total_user_words > 8:
+                    self.amd_state["human_confirmed"] = True
+                    return
+
+    async def run_ghost_kicker(self) -> None:
+        """
+        FIX 4 — Ghost kicker demasiado agresivo.
+
+        Problema: allowed_prefixes limitado expulsaba participantes legítimos de
+        Yeastar/LiveKit; polling de 2 s era agresivo y no había período de gracia.
+
+        Solución:
+        - Prefijos extendidos: caller_, phone_, client_, agent-
+        - Período de gracia de 10 s antes de expulsar a cualquier desconocido
+        - Polling aumentado de 2 s → 5 s para reducir carga
+        - Log WARNING detallado con la identity completa antes de expulsar
+        """
+        # FIX 4: prefijos extendidos
+        allowed_prefixes = ("user_", "sip_", "caller_", "phone_", "client_", "agent-")
+        # dict identity → tiempo de primera detección (período de gracia)
+        first_seen: dict[str, float] = {}
+        grace_seconds = 10.0
+
+        while not self.stop_guard.is_set():
+            try:
+                now = self.loop_obj.time()
+                for p in list(self.ctx.room.remote_participants.values()):
+                    identity = getattr(p, "identity", "") or ""
+                    if identity.startswith(allowed_prefixes):
+                        first_seen.pop(identity, None)
+                        continue
+                    # Primera vez que se ve: registrar y dar período de gracia
+                    if identity not in first_seen:
+                        first_seen[identity] = now
+                        logger.info(
+                            f"👻 [{self.job_id}] Participante desconocido '{identity}' "
+                            f"en sala {self.room_name}. Período de gracia: {grace_seconds:.0f}s."
+                        )
+                        continue
+                    # Aún dentro del período de gracia
+                    time_in_room = now - first_seen[identity]
+                    if time_in_room < grace_seconds:
+                        continue
+                    # FIX 4: log WARNING detallado antes de expulsar
+                    logger.warning(
+                        f"👻 [{self.job_id}] Expulsando participante no autorizado '{identity}' "
+                        f"de sala {self.room_name} (en sala {time_in_room:.0f}s, "
+                        f"prefijos permitidos: {allowed_prefixes})"
+                    )
+                    try:
+                        from livekit import api as _lk_api
+                        _lk = _lk_api.LiveKitAPI()
+                        await _lk.room.remove_participant(
+                            _lk_api.RoomParticipantIdentity(room=self.room_name, identity=identity)
+                        )
+                        await _lk.aclose()
+                        first_seen.pop(identity, None)
+                        logger.info(
+                            f"✅ [{self.job_id}] Participante '{identity}' expulsado de {self.room_name}"
+                        )
+                    except Exception as kick_err:
+                        logger.error(
+                            f"❌ [{self.job_id}] Error expulsando '{identity}': {kick_err}"
+                        )
+            except Exception as guard_err:
+                logger.error(f"⚠️ [{self.job_id}] Error en ghost kicker: {guard_err}")
+            # FIX 4: intervalo aumentado de 2 s → 5 s para reducir carga
+            await asyncio.sleep(5)
+
+    async def run_backchannel(self) -> None:
+        """Backchanneling: inserta señal de escucha activa si el usuario habla largo."""
+        pending_user_idx = None
+        pending_since = None
+        last_backchannel_at = 0.0
+        cooldown_seconds = 14.0
+        trigger_seconds = 5.0
+        fillers = [
+            "Entiendo...", "Sí, claro.", "Ya veo...", "Ajá, sí.",
+            "Mhm, le escucho.", "Sí, sigo con usted.", "Perfecto, adelante.", "Claro, dígame.",
+        ]
+        while not self.stop_guard.is_set():
+            try:
+                chat_ctx = getattr(
+                    self.session, "chat_ctx", getattr(self.session, "chat_context", None)
+                )
+                if not chat_ctx or not getattr(chat_ctx, "messages", None):
+                    await asyncio.sleep(0.7)
+                    continue
+                normalized_msgs = []
+                for m in chat_ctx.messages:
+                    role = getattr(m, "role", "")
+                    content = _normalize_message_text(getattr(m, "content", None))
+                    if role in ("user", "assistant") and content:
+                        normalized_msgs.append((role, content))
+                if not normalized_msgs:
+                    await asyncio.sleep(0.7)
+                    continue
+                last_idx = len(normalized_msgs) - 1
+                last_role, last_content = normalized_msgs[last_idx]
+                now = self.loop_obj.time()
+                if last_role == "user" and len(last_content) >= 25:
+                    if pending_user_idx != last_idx:
+                        pending_user_idx = last_idx
+                        pending_since = now
+                    if (
+                        pending_since is not None
+                        and (float(now) - float(pending_since)) >= trigger_seconds
+                        and (float(now) - float(last_backchannel_at)) >= cooldown_seconds
+                    ):
+                        try:
+                            await self.session.say(random.choice(fillers), allow_interruptions=True)
+                            last_backchannel_at = now
+                        except Exception as be:
+                            logger.debug(f"[{self.job_id}] Backchannel no enviado: {be}")
+                        finally:
+                            pending_since = None
+                else:
+                    pending_user_idx = None
+                    pending_since = None
+            except Exception as e:
+                logger.debug(f"[{self.job_id}] Error en backchannel loop: {e}")
+            await asyncio.sleep(0.7)
+
+    async def run_autosave(self) -> None:
+        """Guarda la transcripción parcial cada 40 s durante la llamada."""
+        await asyncio.sleep(30)
+        while not self.stop_guard.is_set():
+            await self._save_transcript_snapshot("autosave-30s")
+            await asyncio.sleep(40)
+
+    async def run_silence_watchdog(self) -> None:
+        """Reprompt cuando el cliente no responde tras SILENCE_REPROMPT_DELAY segundos."""
+        self.reprompt_state["last_assistant_at"] = self.loop_obj.time()
+        self.reprompt_state["waiting_user"] = True
+        while not self.stop_guard.is_set():
+            await asyncio.sleep(0.25)
+            try:
+                now = self.loop_obj.time()
+                if not self.reprompt_state["waiting_user"]:
+                    continue
+                assistant_silent_for = now - float(self.reprompt_state["last_assistant_at"])
+                user_silent_for = now - float(self.reprompt_state["last_user_at"])
+                can_reprompt = self.reprompt_state["reprompt_count"] < 3
+                if (
+                    assistant_silent_for >= self.SILENCE_REPROMPT_DELAY
+                    and user_silent_for >= self.SILENCE_REPROMPT_DELAY
+                    and can_reprompt
+                ):
+                    self.reprompt_state["reprompt_count"] += 1
+                    self.reprompt_state["last_assistant_at"] = now
+                    try:
+                        await self.session.say(
+                            random.choice(self.REPROMPT_PHRASES), allow_interruptions=True
+                        )
+                        logger.info(
+                            f"🔁 [{self.job_id}] Reprompt por silencio "
+                            f"(#{self.reprompt_state['reprompt_count']})"
+                        )
+                    except Exception as _re:
+                        logger.debug(f"[{self.job_id}] Reprompt no enviado: {_re}")
+            except Exception as _e:
+                logger.debug(f"[{self.job_id}] Error en silence_reprompt_loop: {_e}")
+
+    # ── Registro de eventos ────────────────────────────────────────────────────
+
+    def setup_events(self) -> None:
+        """Registra todos los handlers de session y ctx.room."""
+
+        @self.session.on("user_input_transcribed")
+        def _on_user_input_transcribed(ev):
+            try:
+                content = _normalize_message_text(getattr(ev, "transcript", ""))
+                is_final = bool(getattr(ev, "is_final", True))
+                if not content or not is_final:
+                    return
+                if _is_likely_noise_transcript(content):
+                    logger.debug(
+                        f"🔇 [{self.job_id}] Transcripción descartada como ruido: '{anonymize_text(content)}'"
+                    )
+                    return
+                word_count = _count_words(content)
+                self.runtime_state["last_user_text"] = content
+                if not self.lang_state["detected"] and word_count >= 1:
+                    asyncio.create_task(self._try_switch_language(content))
+                if (
+                    self.runtime_state["agent_state"] in ("speaking", "thinking")
+                    and word_count < self.max_short_interrupt_words
+                ):
+                    logger.debug(
+                        f"🛡️ [{self.job_id}] Interrupción corta ignorada "
+                        f"({word_count} palabras): '{anonymize_text(content)}'"
+                    )
+                    return
+                now = self.loop_obj.time()
+                if (
+                    self.runtime_state["agent_state"] in ("speaking", "thinking")
+                    and word_count >= self.max_short_interrupt_words
+                ):
+                    if (now - float(self.runtime_state["last_interrupt_ack_at"])) > 1.2:
+                        self.runtime_state["last_interrupt_ack_at"] = now
+                        async def _say_interrupt_ack():
+                            try:
+                                await self.session.say(
+                                    random.choice(self.INTERRUPTION_ACKS),
+                                    allow_interruptions=True,
+                                )
+                            except Exception as ack_err:
+                                logger.debug(
+                                    f"[{self.job_id}] Ack de interrupción no enviado: {ack_err}"
+                                )
+                        asyncio.create_task(_say_interrupt_ack())
+                self._append_transcript_event("user", content)
+                self.reprompt_state["last_user_at"] = now
+                self.reprompt_state["waiting_user"] = False
+                self.reprompt_state["reprompt_count"] = 0
+            except Exception as ev_err:
+                logger.debug(f"[{self.job_id}] Error evento user_input_transcribed: {ev_err}")
+
+        @self.session.on("conversation_item_added")
+        def _on_conversation_item_added(ev):
+            try:
+                item = getattr(ev, "item", None)
+                role = getattr(item, "role", "")
+                content = _normalize_message_text(getattr(item, "content", None))
+                if role not in ("user", "assistant") or not content:
+                    return
+                now = self.loop_obj.time()
+                lower = content.strip().lower()
+                if role == "assistant":
+                    if lower in self.reprompt_phrases_lc:
+                        return
+                    self._append_transcript_event("assistant", content)
+                    self.reprompt_state["last_assistant_at"] = now
+                    self.reprompt_state["waiting_user"] = True
+                    self.reprompt_state["reprompt_count"] = 0
+                else:
+                    self._append_transcript_event("user", content)
+                    self.reprompt_state["last_user_at"] = now
+                    self.reprompt_state["waiting_user"] = False
+                    self.reprompt_state["reprompt_count"] = 0
+            except Exception as ev_err:
+                logger.debug(f"[{self.job_id}] Error evento conversation_item_added: {ev_err}")
+
+        @self.session.on("agent_state_changed")
+        def _on_agent_state_changed(ev):
+            try:
+                new_state = str(getattr(ev, "new_state", "")).lower()
+                old_state = str(getattr(ev, "old_state", "")).lower()
+                now = self.loop_obj.time()
+                self.runtime_state["agent_state"] = new_state
+                if new_state == "listening" and old_state in ("speaking", "thinking"):
+                    self.reprompt_state["last_assistant_at"] = now
+                    self.reprompt_state["waiting_user"] = True
+                if new_state == "thinking":
+                    if (now - float(self.runtime_state["last_filler_at"])) > 1.0:
+                        self.runtime_state["last_filler_at"] = now
+                        async def _say_latency_filler():
+                            try:
+                                await self.session.say(
+                                    random.choice(self.LATENCY_FILLERS), allow_interruptions=True
+                                )
+                            except Exception as fill_err:
+                                logger.debug(
+                                    f"[{self.job_id}] Filler de latencia no enviado: {fill_err}"
+                                )
+                        asyncio.create_task(_say_latency_filler())
+                    try:
+                        if self.bg_player is not None:
+                            dyn_volume, bursts = _estimate_thinking_complexity(
+                                str(self.runtime_state.get("last_user_text", ""))
+                            )
+                            for _ in range(bursts):
+                                self.bg_player.play(
+                                    AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=dyn_volume),
+                                    loop=False,
+                                )
+                    except Exception as k_err:
+                        logger.debug(f"[{self.job_id}] No se pudo aplicar teclado dinámico: {k_err}")
+            except Exception as ev_err:
+                logger.debug(f"[{self.job_id}] Error evento agent_state_changed: {ev_err}")
+
+        @self.ctx.room.on("disconnected")
+        def _on_disconnect():
+            logger.info(f"🔌 [{self.job_id}] Desconectado.")
+            self.finished.set()
+
+        @self.ctx.room.on("participant_disconnected")
+        def _on_participant_disconnected(participant: rtc.RemoteParticipant):
+            if not participant.identity.startswith("agent-"):
+                logger.info(
+                    f"[{self.job_id}] Cliente se desconectó. Guardando transcripción y terminando sala."
+                )
+                async def disconnect_tasks():
+                    await self._save_transcript_snapshot("client-hangup")
+                    try:
+                        await enqueue_colgar_sala(self.room_name)
+                    except Exception as e:
+                        logger.error(
+                            f"Error encolando colgar desde participant_disconnected: {e}"
+                        )
+                asyncio.create_task(disconnect_tasks())
+
+    # ── Ciclo de vida ──────────────────────────────────────────────────────────
+
+    async def start(self) -> None:
+        """Arranca el audio de fondo, crea todas las tareas y espera al fin de la llamada."""
+        if os.getenv("AGENT_OFFICE_NOISE", "true").lower() not in ("false", "0", "no"):
+            try:
+                self.bg_player = BackgroundAudioPlayer(
+                    ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.85),
+                    thinking_sound=AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.45),
+                )
+                await self.bg_player.start(room=self.ctx.room, agent_session=self.session)
+                logger.info(f"🎙️ [{self.job_id}] Ruido de fondo de oficina activado.")
+            except Exception as bg_err:
+                logger.warning(f"⚠️ [{self.job_id}] No se pudo iniciar ruido de fondo: {bg_err}")
+
+        self._tasks = [
+            asyncio.create_task(self.run_amd()),
+            asyncio.create_task(self.run_ghost_kicker()),
+            asyncio.create_task(self.run_backchannel()),
+            asyncio.create_task(self.run_autosave()),
+            asyncio.create_task(self.run_silence_watchdog()),
+        ]
+        try:
+            await asyncio.wait_for(
+                self.finished.wait(), timeout=self.CALL_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"🚨 [{self.job_id}] KILL SWITCH: Timeout de seguridad "
+                f"({self.CALL_TIMEOUT_SECONDS}s) alcanzado. "
+                f"Forzando desconexión del worker para sala '{self.room_name}'."
+            )
+            try:
+                await self.ctx.room.disconnect()
+            except Exception as disc_err:
+                logger.warning(f"[{self.job_id}] Error al forzar desconexión: {disc_err}")
+            self.finished.set()
+
+    def stop(self) -> None:
+        """Señaliza el fin y cancela todas las tareas en curso."""
+        self.stop_guard.set()
+        for t in self._tasks:
+            t.cancel()
+
+    async def finalize(self) -> None:
+        """
+        Post-procesamiento tras el fin de la llamada: extrae transcripción,
+        clasifica disposición con LLM y encola la persistencia de resultados.
+        """
+        try:
+            raw_messages: list[dict] = []
+            transcript = ""
+            try:
+                raw_messages, transcript = _extract_transcript_from_session(self.session)
+                logger.info(
+                    f"📝 [{self.job_id}] Transcripción extraída en finally: {len(transcript)} chars"
+                )
+                if not transcript:
+                    raw_messages, transcript = self._build_transcript_from_event_buffer()
+                    if transcript:
+                        logger.info(
+                            f"📝 [{self.job_id}] Usando buffer de eventos: {len(transcript)} chars"
+                        )
+                if not transcript and self.transcript_snapshot.get("transcript"):
+                    transcript = self.transcript_snapshot["transcript"]
+                    raw_messages = self.transcript_snapshot.get("raw", [])
+                    logger.info(
+                        f"📝 [{self.job_id}] Usando snapshot de transcripción: {len(transcript)} chars"
+                    )
+            except Exception as ex:
+                logger.error(f"Error procesando historia para transcripción local: {ex}")
+                if not transcript:
+                    raw_messages, transcript = self._build_transcript_from_event_buffer()
+                if not transcript and self.transcript_snapshot.get("transcript"):
+                    transcript = self.transcript_snapshot["transcript"]
+                    raw_messages = self.transcript_snapshot.get("raw", [])
+
+            seconds_used = 0
+            if self.call_start_time is not None:
+                seconds_used = max(0, int(time.time() - self.call_start_time))
+
+            agent_type = self.agent_config.get("agent_type", "ENCUESTA_NUMERICA")
+            data_saved = getattr(self.agent_instance, "data_saved", False)
+            datos_extra = None
+            call_disposition = None
+
+            if transcript:
+                logger.info(
+                    f"🧠 Clasificando disposición de llamada y extrayendo datos "
+                    f"para encuesta {self.survey_id} (Tipo: {agent_type})"
+                )
+                call_disposition, datos_extra = await analyze_call_disposition(
+                    transcript,
+                    agent_type,
+                    data_saved,
+                    self.lang_state.get("active_lang", self.language),
+                )
+            else:
+                call_disposition = "no_contesta"
+                datos_extra = {
+                    "sentimiento_cliente": "Neutral",
+                    "idioma": self.lang_state.get("active_lang", self.language),
+                }
+                logger.info(
+                    f"📵 Sin transcripción para encuesta {self.survey_id} → "
+                    f"disposición: no_contesta"
+                )
+
+            if not call_disposition:
+                call_disposition = "completada" if data_saved else "parcial"
+
+            enc_id = int(self.survey_id) if str(self.survey_id).isdigit() else 0
+
+            if data_saved:
+                logger.info(
+                    f"📝 Guardando transcripción/disposición/datos_extra para encuesta "
+                    f"{self.survey_id} (datos numéricos ya guardados por tool)"
+                )
+                try:
+                    _enc_job = await enqueue_guardar_encuesta({
+                        "id_encuesta": enc_id,
+                        "transcription": transcript,
+                        "datos_extra": datos_extra,
+                        "seconds_used": seconds_used,
+                    })
+                    logger.info(f"📬 Extras post-llamada encolados (job={_enc_job})")
+                except Exception as save_err:
+                    logger.error(f"Error encolando extras: {save_err}")
+            else:
+                logger.warning(
+                    f"⚠️ La sesión terminó sin guardar datos explícitos por tool "
+                    f"(Survey ID: {self.survey_id}) → Disposición: {call_disposition}"
+                )
+                try:
+                    _enc_job = await enqueue_guardar_encuesta({
+                        "id_encuesta": enc_id,
+                        "transcription": transcript,
+                        "status": call_disposition,
+                        "comentarios": (
+                            "Llamada finalizada sin interacción"
+                            if call_disposition == "no_contesta"
+                            else f"Llamada {call_disposition} via post-call"
+                        ),
+                        "datos_extra": datos_extra,
+                        "seconds_used": seconds_used,
+                    })
+                    logger.info(
+                        f"📬 Fallback post-llamada encolado "
+                        f"(disposición: {call_disposition}, job={_enc_job})"
+                    )
+                except Exception as save_err:
+                    logger.error(f"Error encolando fallback: {save_err}")
+        except Exception as fatal_post:
+            logger.error(
+                f"🚨 [{self.job_id}] EXCEPCIÓN FATAL NO CAPTURADA en finalize: {fatal_post}"
+            )
+
+
+# ============================================================================
 # FUNCIÓN PARA OBTENER LA CONFIGURACIÓN DEL AGENTE DESDE LA API
 # ============================================================================
 async def fetch_agent_config(survey_id: str, expected_empresa_id: str = "0") -> dict:
@@ -1025,6 +1740,7 @@ async def entrypoint(ctx: JobContext):
     # --- PASO 2: Conectar a la sala ---
     call_start_time = time.time()
     is_duplicate = False
+    cs: "CallSession | None" = None
     try:
         logger.info(f"⏱️ [{job_id}] Intentando conectar a sala {room_name}...")
         await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
@@ -1153,663 +1869,49 @@ async def entrypoint(ctx: JobContext):
             f"turn_detection={turn_mode}"
         )
 
-        await session.start(
-            room=ctx.room,
-            agent=agent_instance,
+        await session.start(room=ctx.room, agent=agent_instance)
+
+        # --- Iniciar CallSession: agrupa todos los bucles y post-procesamiento ---
+        cs = CallSession(
+            ctx=ctx,
+            job_id=job_id,
+            room_name=room_name,
+            survey_id=survey_id,
+            agent_config=agent_config,
+            session=session,
+            agent_instance=agent_instance,
+            language=language,
+            voice_id=voice_id,
+            speaking_speed=float(speaking_speed or 1.0),
+            tts_model=tts_model,
+            call_start_time=call_start_time,
         )
+        cs.setup_events()
+        await cs.start()
 
-        # --- DETECCIÓN DE BUZÓN DE VOZ (AMD) ---
-        # Monitoriza las primeras transcripciones para detectar contestadores automáticos.
-        # Se auto-cancela tras AMD_WINDOW_SECONDS de actividad humana real.
-        AMD_WINDOW_SECONDS = float(os.getenv("AGENT_AMD_WINDOW_SECONDS", "15.0"))
-        VOICEMAIL_PATTERNS = (
-            "buzón de voz", "buzon de voz", "contestador", "contestadora",
-            "fuera de cobertura", "apagado o fuera", "deje su mensaje",
-            "grabe su mensaje", "después de la señal", "despues de la señal",
-            "no está disponible", "no esta disponible", "no se encuentra",
-            "número no disponible", "numero no disponible",
-            "terminado el tiempo", "el usuario no contesta",
-            "mailbox", "voicemail", "leave a message", "not available",
-            "el número marcado", "el numero marcado",
-        )
-        amd_state = {"detected": False, "human_confirmed": False, "check_count": 0}
-
-        async def amd_monitor():
-            """Monitoriza transcripciones tempranas para detectar contestador automático."""
-            start_time = asyncio.get_running_loop().time()
-            while not stop_guard.is_set():
-                await asyncio.sleep(0.5)
-                elapsed = asyncio.get_running_loop().time() - start_time
-
-                # Pasado el umbral temporal, asumimos interlocutor humano
-                if elapsed > AMD_WINDOW_SECONDS or amd_state["human_confirmed"]:
-                    logger.info(f"✅ [{job_id}] AMD: Interlocutor humano confirmado (elapsed={elapsed:.1f}s)")
-                    return
-
-                # Revisar transcripciones en el buffer de eventos
-                if not transcript_event_buffer:
-                    continue
-
-                for item in transcript_event_buffer:
-                    if item.get("role") != "user":
-                        continue
-                    text = item.get("content", "").lower()
-                    amd_state["check_count"] += 1
-
-                    for pattern in VOICEMAIL_PATTERNS:
-                        if pattern in text:
-                            amd_state["detected"] = True
-                            logger.warning(f"📵 [{job_id}] AMD: BUZÓN DETECTADO — patrón '{pattern}' en '{anonymize_text(text)}'")
-
-                            # Guardar como no_contesta y colgar (vía cola, sin bloquear el loop)
-                            try:
-                                enc_id = int(survey_id) if str(survey_id).isdigit() else 0
-                                await enqueue_guardar_encuesta({
-                                    "id_encuesta": enc_id,
-                                    "status": "failed",
-                                    "comentarios": f"Buzón de voz detectado automáticamente (AMD): {pattern}",
-                                })
-                                await enqueue_colgar_sala(room_name)
-                                logger.info(f"📵 [{job_id}] AMD: encuesta {survey_id} failed + colgar encolados.")
-                            except Exception as amd_err:
-                                logger.error(f"❌ [{job_id}] AMD: Error al encolar cierre por buzón: {amd_err}")
-                            return
-
-                    user_msgs = [i for i in transcript_event_buffer if i.get("role") == "user"]
-                    total_user_words = sum(_count_words(i.get("content", "")) for i in user_msgs)
-                    if len(user_msgs) >= 2 or total_user_words > 8:
-                        amd_state["human_confirmed"] = True
-                        return
-
-        amd_task = asyncio.create_task(amd_monitor())
-
-
-        # Hace que el agente suene como si estuviera en una oficina real.
-        # Se puede desactivar con AGENT_OFFICE_NOISE=false en el entorno.
-        if os.getenv("AGENT_OFFICE_NOISE", "true").lower() not in ("false", "0", "no"):
-            try:
-                # Ruido de oficina continuo; teclado base suave + ráfagas dinámicas en thinking
-                bg_player = BackgroundAudioPlayer(
-                    ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.85),
-                    thinking_sound=AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.45),
-                )
-                await bg_player.start(room=ctx.room, agent_session=session)
-                logger.info(f"🎙️ [{job_id}] Ruido de fondo de oficina activado.")
-            except Exception as bg_err:
-                logger.warning(f"⚠️ [{job_id}] No se pudo iniciar ruido de fondo: {bg_err}")
-        
-        # NOTA: on_enter() del DynamicAgent se encarga del saludo.
-        # NO llamamos a say_greeting() por separado para evitar doble saludo.
-        
-        # --- EVENTOS ---
-        finished = asyncio.Event()
-        stop_guard = asyncio.Event()
-
-        async def ghost_kicker_loop():
-            """
-            Vigila participantes remotos y expulsa cualquier "agente fantasma" o intruso.
-            Permitidos: participante SIP/cliente (user_/sip_).
-            """
-            allowed_prefixes = ("user_", "sip_")
-            while not stop_guard.is_set():
-                try:
-                    for p in list(ctx.room.remote_participants.values()):
-                        identity = getattr(p, "identity", "") or ""
-                        if identity.startswith(allowed_prefixes):
-                            continue
-
-                        # Cualquier otro participante remoto se considera intruso.
-                        logger.warning(f"👻 [{job_id}] Intruso detectado en sala {room_name}: '{identity}'. Expulsando...")
-                        try:
-                            from livekit import api
-                            lkapi = api.LiveKitAPI()
-                            await lkapi.room.remove_participant(
-                                api.RoomParticipantIdentity(room=room_name, identity=identity)
-                            )
-                            await lkapi.aclose()
-                            logger.info(f"✅ [{job_id}] Intruso '{identity}' expulsado de {room_name}")
-                        except Exception as kick_err:
-                            logger.error(f"❌ [{job_id}] Error expulsando intruso '{identity}': {kick_err}")
-                except Exception as guard_err:
-                    logger.error(f"⚠️ [{job_id}] Error en ghost kicker: {guard_err}")
-
-                await asyncio.sleep(2)
-
-        ghost_guard_task = asyncio.create_task(ghost_kicker_loop())
-
-        async def backchanneling_loop():
-            """
-            Backchanneling humano:
-            - Si el usuario habla largo (>5s sin respuesta del agente), inserta una
-              señal breve de escucha activa para sonar más natural.
-            - Cooldown generoso para no interrumpir en exceso.
-            """
-            pending_user_idx = None
-            pending_since = None
-            last_backchannel_at = 0.0
-            cooldown_seconds = 14.0
-            trigger_seconds = 5.0
-            loop = asyncio.get_running_loop()
-            # Fillers variados — mezcla de señales de escucha activa y microconfirmaciones
-            fillers = [
-                "Entiendo...",
-                "Sí, claro.",
-                "Ya veo...",
-                "Ajá, sí.",
-                "Mhm, le escucho.",
-                "Sí, sigo con usted.",
-                "Perfecto, adelante.",
-                "Claro, dígame.",
-            ]
-
-            while not stop_guard.is_set():
-                try:
-                    chat_ctx = getattr(session, "chat_ctx", getattr(session, "chat_context", None))
-                    if not chat_ctx or not getattr(chat_ctx, "messages", None):
-                        await asyncio.sleep(0.7)
-                        continue
-
-                    normalized_msgs = []
-                    for m in chat_ctx.messages:
-                        role = getattr(m, "role", "")
-                        content = _normalize_message_text(getattr(m, "content", None))
-                        if role in ("user", "assistant") and content:
-                            normalized_msgs.append((role, content))
-
-                    if not normalized_msgs:
-                        await asyncio.sleep(0.7)
-                        continue
-
-                    last_idx = len(normalized_msgs) - 1
-                    last_role, last_content = normalized_msgs[last_idx]
-                    now = loop.time()
-
-                    if last_role == "user" and len(last_content) >= 25:
-                        if pending_user_idx != last_idx:
-                            pending_user_idx = last_idx
-                            pending_since = now
-
-                        if (
-                            pending_since is not None
-                            and (float(now) - float(pending_since)) >= trigger_seconds
-                            and (float(now) - float(last_backchannel_at)) >= cooldown_seconds
-                        ):
-                            try:
-                                await session.say(random.choice(fillers), allow_interruptions=True)
-                                last_backchannel_at = now
-                            except Exception as be:
-                                logger.debug(f"[{job_id}] Backchannel no enviado: {be}")
-                            finally:
-                                pending_since = None
-                    else:
-                        pending_user_idx = None
-                        pending_since = None
-                except Exception as e:
-                    logger.debug(f"[{job_id}] Error en backchannel loop: {e}")
-
-                await asyncio.sleep(0.7)
-
-        backchannel_task = asyncio.create_task(backchanneling_loop())
-
-        # ---------- SNAPSHOT DE TRANSCRIPCIÓN ----------
-        # Guardamos el snapshot en cuanto el cliente cuelga para no depender
-        # del chat_ctx que LiveKit puede limpiar antes del bloque finally.
-        transcript_snapshot: dict = {"transcript": "", "raw": []}
-        transcript_event_buffer: list[dict] = []
-
-        def _append_transcript_event(role: str, content: str):
-            text = _normalize_message_text(content)
-            if role not in ("user", "assistant") or not text:
-                return
-            if transcript_event_buffer:
-                last = transcript_event_buffer[-1]
-                if last.get("role") == role and _normalize_message_text(last.get("content")) == text:
-                    return
-            transcript_event_buffer.append({"role": role, "content": text})
-
-        def _build_transcript_from_event_buffer() -> tuple[list[dict], str]:
-            if not transcript_event_buffer:
-                return [], ""
-            lines = []
-            raw = []
-            for item in transcript_event_buffer:
-                role = item.get("role")
-                content = _normalize_message_text(item.get("content"))
-                if role not in ("user", "assistant") or not content:
-                    continue
-                raw.append({"role": role, "content": content})
-                lines.append(f"{'Cliente' if role == 'user' else 'Agente'}: {content}")
-            return raw, ("\n".join(lines).strip() + ("\n" if lines else ""))
-
-        async def _save_transcript_snapshot(reason: str = "auto"):
-            """
-            Extrae y persiste la transcripción actual.
-            Orden de prioridad:
-              1. event_buffer (en memoria, siempre disponible, más fiable en desconexiones bruscas)
-              2. chat_ctx de LiveKit (puede estar limpio al colgar)
-            """
-            try:
-                # 1. Fuente primaria: buffer de eventos acumulado en tiempo real
-                raw, t = _build_transcript_from_event_buffer()
-                # 2. Fallback: chat_ctx de LiveKit (solo si el buffer está vacío)
-                if not t:
-                    raw, t = _extract_transcript_from_session(session)
-                logger.info(f"📝 [{job_id}] Snapshot transcripción ({reason}): {len(t)} chars, {len(raw)} mensajes")
-                if t:
-                    transcript_snapshot["transcript"] = t
-                    transcript_snapshot["raw"] = raw
-                    snap_job = await enqueue_guardar_encuesta({
-                        "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
-                        "transcription": t,
-                    })
-                    logger.info(
-                        f"📬 [{job_id}] Transcripción snapshot encolada ({reason}, job={snap_job})"
-                    )
-            except Exception as _e:
-                logger.warning(f"⚠️ [{job_id}] Error guardando snapshot transcripción ({reason}): {_e}")
-
-        async def transcript_autosave_loop():
-            """Guarda la transcripción parcial cada 40s durante la llamada."""
-            await asyncio.sleep(30)
-            while not stop_guard.is_set():
-                await _save_transcript_snapshot("autosave-30s")
-                await asyncio.sleep(40)
-
-        transcript_autosave_task = asyncio.create_task(transcript_autosave_loop())
-
-        # ---------- LOOP DE SILENCIO / REPROMPT ----------
-        # Híbrido: eventos de conversación + watchdog por tiempo.
-        SILENCE_REPROMPT_DELAY = float(os.getenv("AGENT_SILENCE_REPROMPT_SECONDS", "7.0"))
-        reprompt_phrases = [
-            "¿Sigue ahí?",
-            "Perdone, ¿me escucha?",
-            "Disculpe, ¿puede responderme?",
-            "¿Está usted disponible?",
-            "Si le parece, seguimos con la siguiente pregunta.",
-        ]
-        reprompt_phrases_lc = {p.lower() for p in reprompt_phrases}
-        reprompt_state = {
-            "last_assistant_at": 0.0,
-            "last_user_at": 0.0,
-            "waiting_user": False,
-            "reprompt_count": 0,
-        }
-        runtime_state = {
-            "agent_state": "listening",
-            "last_user_text": "",
-            "last_filler_at": 0.0,
-            "last_interrupt_ack_at": 0.0,
-        }
-        loop_obj = asyncio.get_running_loop()
-        latency_fillers = ["Mmm...", "A ver...", "Vale..."]
-        interruption_acks = ["Uy, perdona, dime.", "Sí, dime."]
-        max_short_interrupt_words = int(os.getenv("AGENT_INTERRUPT_MIN_WORDS", "3"))
-
-        # ── Language auto-detection state ──────────────────────────────────────
-        lang_state = {
-            "detected": False,      # True once we've run the detector (regardless of outcome)
-            "switched": False,      # True if we actually changed the language
-            "original_lang": language,
-            "active_lang": language,
-        }
-
-        async def _try_switch_language(user_text: str) -> None:
-            """
-            Detecta el idioma del primer mensaje real del usuario.
-            Si difiere del configurado, inyecta un override de sistema en el
-            chat context del LLM y actualiza el plugin TTS.
-            Solo actúa UNA VEZ por llamada (primera intervención humana real).
-            """
-            if lang_state["detected"]:
-                return
-            lang_state["detected"] = True
-
-            detected = _detect_language(user_text)
-            if not detected or detected == lang_state["original_lang"]:
-                return
-
-            lang_state["switched"] = True
-            lang_state["active_lang"] = detected
-            logger.info(
-                f"🌐 [{job_id}] Idioma detectado: '{detected}' "
-                f"(configurado: '{lang_state['original_lang']}'). Cambiando idioma."
-            )
-
-            override_msg = _LANG_OVERRIDE_MSGS.get(detected)
-            if not override_msg:
-                return
-
-            # 1. Inyectar instrucción en el chat context del LLM
-            try:
-                chat_ctx = getattr(session, "chat_ctx", getattr(session, "chat_context", None))
-                if chat_ctx is not None:
-                    # API moderna: add_message directamente
-                    if hasattr(chat_ctx, "add_message"):
-                        chat_ctx.add_message(role="system", content=override_msg)
-                    # API alternativa: shallow_copy + update_chat_ctx
-                    elif hasattr(session, "update_chat_ctx"):
-                        from livekit.agents.llm import ChatMessage
-                        new_ctx = chat_ctx.copy() if hasattr(chat_ctx, "copy") else chat_ctx
-                        new_ctx.messages.append(ChatMessage.create(text=override_msg, role="system"))
-                        await session.update_chat_ctx(new_ctx)
-                    logger.info(f"🌐 [{job_id}] Instrucción de idioma '{detected}' inyectada en chat context.")
-            except Exception as ctx_err:
-                logger.warning(f"⚠️ [{job_id}] No se pudo inyectar override de idioma: {ctx_err}")
-
-            # 2. Actualizar plugin TTS al idioma detectado (sonic-multilingual soporta múltiples idiomas)
-            try:
-                new_tts = _build_tts_plugin(
-                    voice_id=voice_id,
-                    language=detected,
-                    speaking_speed=speaking_speed,
-                    tts_model=tts_model,
-                )
-                await session.update_options(tts=new_tts)
-                logger.info(f"🎙️ [{job_id}] TTS actualizado a idioma '{detected}'.")
-            except Exception as tts_err:
-                logger.warning(f"⚠️ [{job_id}] No se pudo actualizar TTS al idioma '{detected}': {tts_err}")
-        # ── fin language detection ──────────────────────────────────────────────
-
-        @session.on("user_input_transcribed")
-        def _on_user_input_transcribed(ev):
-            try:
-                content = _normalize_message_text(getattr(ev, "transcript", ""))
-                is_final = bool(getattr(ev, "is_final", True))
-                if not content or not is_final:
-                    return
-
-                # Filtro anti-basura por ruido o falsas detecciones del STT
-                if _is_likely_noise_transcript(content):
-                    logger.debug(f"🔇 [{job_id}] Transcripción descartada como ruido: '{anonymize_text(content)}'")
-
-                    return
-
-                word_count = _count_words(content)
-                runtime_state["last_user_text"] = content
-
-                # Detección de idioma en la primera intervención real del usuario
-                if not lang_state["detected"] and word_count >= 1:
-                    asyncio.create_task(_try_switch_language(content))
-
-                # Anti-falsas interrupciones: no considerar interrupción real si son muy pocas palabras.
-                if runtime_state["agent_state"] in ("speaking", "thinking") and word_count < max_short_interrupt_words:
-                    logger.debug(f"🛡️ [{job_id}] Interrupción corta ignorada ({word_count} palabras): '{anonymize_text(content)}'")
-
-                    return
-
-                # Interrupción real: acknowledge instantáneo para sonar humano.
-                now = loop_obj.time()
-                if runtime_state["agent_state"] in ("speaking", "thinking") and word_count >= max_short_interrupt_words:
-                    if (now - float(runtime_state["last_interrupt_ack_at"])) > 1.2:
-                        runtime_state["last_interrupt_ack_at"] = now
-                        async def _say_interrupt_ack():
-                            try:
-                                await session.say(random.choice(interruption_acks), allow_interruptions=True)
-                            except Exception as ack_err:
-                                logger.debug(f"[{job_id}] Ack de interrupción no enviado: {ack_err}")
-                        asyncio.create_task(_say_interrupt_ack())
-
-                _append_transcript_event("user", content)
-                reprompt_state["last_user_at"] = now
-                reprompt_state["waiting_user"] = False
-                reprompt_state["reprompt_count"] = 0
-            except Exception as ev_err:
-                logger.debug(f"[{job_id}] Error evento user_input_transcribed: {ev_err}")
-
-        @session.on("conversation_item_added")
-        def _on_conversation_item_added(ev):
-            try:
-                item = getattr(ev, "item", None)
-                role = getattr(item, "role", "")
-                content = _normalize_message_text(getattr(item, "content", None))
-                if role not in ("user", "assistant") or not content:
-                    return
-
-                now = loop_obj.time()
-                lower = content.strip().lower()
-
-                if role == "assistant":
-                    # Evitar que nuestros reprompts reinicien el ciclo indefinidamente
-                    if lower in reprompt_phrases_lc:
-                        return
-                    _append_transcript_event("assistant", content)
-                    reprompt_state["last_assistant_at"] = now
-                    reprompt_state["waiting_user"] = True
-                    reprompt_state["reprompt_count"] = 0
-                else:
-                    _append_transcript_event("user", content)
-                    reprompt_state["last_user_at"] = now
-                    reprompt_state["waiting_user"] = False
-                    reprompt_state["reprompt_count"] = 0
-            except Exception as ev_err:
-                logger.debug(f"[{job_id}] Error evento conversation_item_added: {ev_err}")
-
-        @session.on("agent_state_changed")
-        def _on_agent_state_changed(ev):
-            try:
-                new_state = str(getattr(ev, "new_state", "")).lower()
-                old_state = str(getattr(ev, "old_state", "")).lower()
-                now = loop_obj.time()
-                runtime_state["agent_state"] = new_state
-                # Cuando termina de hablar/pensar y vuelve a escuchar, esperamos respuesta humana.
-                if new_state == "listening" and old_state in ("speaking", "thinking"):
-                    reprompt_state["last_assistant_at"] = now
-                    reprompt_state["waiting_user"] = True
-
-                if new_state == "thinking":
-                    # 1) Latency hiding: filler inmediato antes de respuesta del LLM
-                    if (now - float(runtime_state["last_filler_at"])) > 1.0:
-                        runtime_state["last_filler_at"] = now
-                        async def _say_latency_filler():
-                            try:
-                                await session.say(random.choice(latency_fillers), allow_interruptions=True)
-                            except Exception as fill_err:
-                                logger.debug(f"[{job_id}] Filler de latencia no enviado: {fill_err}")
-                        asyncio.create_task(_say_latency_filler())
-
-                    # 2) Teclado dinámico: ráfagas extra según complejidad de la intervención previa
-                    try:
-                        if 'bg_player' in locals():
-                            dyn_volume, bursts = _estimate_thinking_complexity(str(runtime_state.get("last_user_text", "")))
-                            for _ in range(bursts):
-                                bg_player.play(AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=dyn_volume), loop=False)
-                    except Exception as k_err:
-                        logger.debug(f"[{job_id}] No se pudo aplicar teclado dinámico: {k_err}")
-            except Exception as ev_err:
-                logger.debug(f"[{job_id}] Error evento agent_state_changed: {ev_err}")
-
-        async def silence_reprompt_loop():
-            # Bootstrap: después del saludo inicial, si no hay respuesta humana, reconducir.
-            reprompt_state["last_assistant_at"] = loop_obj.time()
-            reprompt_state["waiting_user"] = True
-
-            while not stop_guard.is_set():
-                await asyncio.sleep(0.25)
-                try:
-                    now = loop_obj.time()
-                    if not reprompt_state["waiting_user"]:
-                        continue
-
-                    assistant_silent_for = now - float(reprompt_state["last_assistant_at"])
-                    user_silent_for = now - float(reprompt_state["last_user_at"])
-                    can_reprompt = reprompt_state["reprompt_count"] < 3
-
-                    if (
-                        assistant_silent_for >= SILENCE_REPROMPT_DELAY
-                        and user_silent_for >= SILENCE_REPROMPT_DELAY
-                        and can_reprompt
-                    ):
-                        reprompt_state["reprompt_count"] += 1
-                        reprompt_state["last_assistant_at"] = now
-                        try:
-                            await session.say(random.choice(reprompt_phrases), allow_interruptions=True)
-                            logger.info(f"🔁 [{job_id}] Reprompt por silencio enviado (#{reprompt_state['reprompt_count']})")
-                        except Exception as _re:
-                            logger.debug(f"[{job_id}] Reprompt no enviado: {_re}")
-                except Exception as _e:
-                    logger.debug(f"[{job_id}] Error en silence_reprompt_loop: {_e}")
-
-        silence_reprompt_task = asyncio.create_task(silence_reprompt_loop())
-
-        @ctx.room.on("disconnected")
-        def on_disconnect():
-            logger.info(f"🔌 [{job_id}] Desconectado.")
-            finished.set()
-
-        @ctx.room.on("participant_disconnected")
-        def on_participant_disconnected(participant: rtc.RemoteParticipant):
-            if not participant.identity.startswith("agent-"):
-                logger.info(f"[{job_id}] Cliente se desconectó. Guardando transcripción y terminando sala.")
-                async def disconnect_tasks():
-                    # 1. Guardar transcripción ANTES de que LiveKit limpie la sesión
-                    await _save_transcript_snapshot("client-hangup")
-                    # 2. Colgar la sala (cola ARQ, no bloquea)
-                    try:
-                        await enqueue_colgar_sala(room_name)
-                    except Exception as e:
-                        logger.error(f"Error encolando colgar desde participant_disconnected: {e}")
-                asyncio.create_task(disconnect_tasks())
-
-        # Kill switch: si la sala no se cierra en 10 minutos, forzamos la desconexión
-        # para evitar workers zombi que consumen recursos indefinidamente.
-        CALL_TIMEOUT_SECONDS = int(os.getenv("AGENT_CALL_TIMEOUT_SECONDS", "600"))
-        try:
-            await asyncio.wait_for(finished.wait(), timeout=CALL_TIMEOUT_SECONDS)
-        except asyncio.TimeoutError:
-            logger.error(
-                f"🚨 [{job_id}] KILL SWITCH: Timeout de seguridad ({CALL_TIMEOUT_SECONDS}s) alcanzado. "
-                f"Forzando desconexión del worker para sala '{room_name}'."
-            )
-            try:
-                await ctx.room.disconnect()
-            except Exception as disc_err:
-                logger.warning(f"[{job_id}] Error al forzar desconexión: {disc_err}")
-            # finished.set() asegura que el bloque finally no quede bloqueado
-            finished.set()
-
-    
     except Exception as e:
         handle_error(e)
-    
+
     finally:
-        try:
-            if 'stop_guard' in locals():
-                stop_guard.set()
-            if 'ghost_guard_task' in locals():
-                ghost_guard_task.cancel()
-            if 'backchannel_task' in locals():
-                backchannel_task.cancel()
-            if 'transcript_autosave_task' in locals():
-                transcript_autosave_task.cancel()
-            if 'silence_reprompt_task' in locals():
-                silence_reprompt_task.cancel()
-            if 'amd_task' in locals():
-                amd_task.cancel()
-        except Exception:
-            pass
+        if cs is not None:
+            cs.stop()
 
         if not is_duplicate:
-            logger.info(f"--- 🏁 FIN DE SESIÓN AGENTE (Job: {job_id}, Room: {room_name}, Survey: {survey_id}) ---")
-            agent_instance_exists = 'agent_instance' in locals()
-            data_saved = getattr(agent_instance, 'data_saved', False) if agent_instance_exists else False
-            
-            try:
-                raw_messages = []
-                transcript = ""
+            logger.info(
+                f"--- 🏁 FIN DE SESIÓN AGENTE "
+                f"(Job: {job_id}, Room: {room_name}, Survey: {survey_id}) ---"
+            )
+            if cs is not None:
                 try:
-                    # Intentar extraer transcripción fresca; si session ya está limpia,
-                    # usar el snapshot guardado en on_participant_disconnected.
-                    if 'session' in locals():
-                        raw_messages, transcript = _extract_transcript_from_session(session)
-                        logger.info(f"📝 [{job_id}] Transcripción extraída en finally: {len(transcript)} chars")
-
-                    # Fallback 1: buffer de eventos en tiempo real (más fiable en desconexiones bruscas)
-                    if not transcript and 'transcript_event_buffer' in locals():
-                        raw_messages, transcript = _build_transcript_from_event_buffer()
-                        if transcript:
-                            logger.info(f"📝 [{job_id}] Usando buffer de eventos: {len(transcript)} chars")
-
-                    # Fallback 2: snapshot previo en memoria
-                    if not transcript and 'transcript_snapshot' in locals() and transcript_snapshot.get("transcript"):
-                        transcript = transcript_snapshot["transcript"]
-                        raw_messages = transcript_snapshot.get("raw", [])
-                        logger.info(f"📝 [{job_id}] Usando snapshot de transcripción: {len(transcript)} chars")
-                except Exception as ex:
-                    logger.error(f"Error procesando historia para transcripción local: {ex}")
-                    if not transcript and 'transcript_event_buffer' in locals():
-                        raw_messages, transcript = _build_transcript_from_event_buffer()
-                    if not transcript and 'transcript_snapshot' in locals() and transcript_snapshot.get("transcript"):
-                        transcript = transcript_snapshot["transcript"]
-                        raw_messages = transcript_snapshot.get("raw", [])
-                
-                seconds_used = 0
-                if "call_start_time" in locals() and call_start_time is not None:
-                    seconds_used = max(0, int(time.time() - call_start_time))
-            
-                # Analytics post-llamada: Clasificar disposición + extraer datos
-                agent_type = agent_config.get("agent_type", "ENCUESTA_NUMERICA")
-                datos_extra = None
-                call_disposition = None  # El LLM determinará: completada, parcial, rechazada, no_contesta
-            
-                if transcript:
-                    logger.info(f"🧠 Clasificando disposición de llamada y extrayendo datos para encuesta {survey_id} (Tipo: {agent_type})")
-                    call_disposition, datos_extra = await analyze_call_disposition(
-                        transcript,
-                        agent_type,
-                        data_saved,
-                        lang_state.get("active_lang", language),
+                    await cs.finalize()
+                except Exception as fatal_post:
+                    logger.error(
+                        f"🚨 [{job_id}] EXCEPCIÓN FATAL NO CAPTURADA en finalize: {fatal_post}"
                     )
-                else:
-                    # Sin transcripción = no hubo interacción (buzón, timeout, SIP error)
-                    call_disposition = "no_contesta"
-                    datos_extra = {"sentimiento_cliente": "Neutral", "idioma": lang_state.get("active_lang", language)}
-                    logger.info(f"📵 Sin transcripción para encuesta {survey_id} → disposición: no_contesta")
-
-                # Determinar status final
-                if not call_disposition:
-                    call_disposition = "completada" if data_saved else "parcial"
-            
-                try:
-                    if data_saved:
-                        # El LLM ya guardó notas numéricas, pero guardamos transcripción + disposición + datos_extra
-                        logger.info(f"📝 Guardando transcripción/disposición/datos_extra para encuesta {survey_id} (datos numéricos ya guardados por tool)")
-                        # No sobrescribimos status cuando la tool ya guardó estado/notas.
-                        # Aquí solo persistimos transcripción y extras.
-                        transcript_payload = {
-                            "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
-                            "transcription": transcript,
-                            "datos_extra": datos_extra,
-                            "seconds_used": seconds_used,
-                        }
-                        try:
-                            job_id = await enqueue_guardar_encuesta(transcript_payload)
-                            logger.info(f"📬 Extras post-llamada encolados (job={job_id})")
-                        except Exception as save_err:
-                            logger.error(f"Error encolando extras: {save_err}")
-                    else:
-                        # No se guardaron datos numéricos → fallback completo con disposición del LLM
-                        logger.warning(f"⚠️ La sesión terminó sin guardar datos explícitos por tool (Survey ID: {survey_id}) → Disposición: {call_disposition}")
-                        fallback_payload = {
-                            "id_encuesta": int(survey_id) if str(survey_id).isdigit() else 0,
-                            "transcription": transcript,
-                            "status": call_disposition,
-                            "comentarios": "Llamada finalizada sin interacción" if call_disposition == "no_contesta" else f"Llamada {call_disposition} via post-call",
-                            "datos_extra": datos_extra,
-                            "seconds_used": seconds_used,
-                        }
-                        try:
-                            job_id = await enqueue_guardar_encuesta(fallback_payload)
-                            logger.info(
-                                f"📬 Fallback post-llamada encolado (disposición: {call_disposition}, job={job_id})"
-                            )
-                        except Exception as save_err:
-                            logger.error(f"Error encolando fallback: {save_err}")
-                except Exception as ex:
-                     logger.error(f"❌ Error salvando datos finales: {ex}")
-            except Exception as fatal_post:
-                logger.error(f"🚨 [{job_id}] EXCEPCIÓN FATAL NO CAPTURADA en post-procesamiento (finally): {fatal_post}")
         else:
-            logger.info(f"--- 🏁 FIN DE SESIÓN DUPLICADA (Job: {job_id}) - Saliendo sin reportar datos ---")
+            logger.info(
+                f"--- 🏁 FIN DE SESIÓN DUPLICADA (Job: {job_id}) - Saliendo sin reportar datos ---"
+            )
 
 if __name__ == "__main__":
     logger.info(

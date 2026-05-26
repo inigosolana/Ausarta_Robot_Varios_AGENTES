@@ -31,6 +31,7 @@ from services.livekit_service import (
     create_isolated_room,
     create_outbound_call,
     dispatch_agent_explicit,
+    wait_for_agent_ready,
 )
 from services.yeastar_service import YeastarPSeriesClient
 from services.auth import get_current_user, CurrentUser, require_admin, require_outbound_auth
@@ -50,6 +51,13 @@ _LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "")
 _LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
 
 logger = logging.getLogger("api-backend")
+
+# FIX 6 — comprobación de arranque: aviso temprano si falta la variable canónica del trunk
+if not os.getenv("SIP_OUTBOUND_TRUNK_ID"):
+    logger.critical(
+        "SIP_OUTBOUND_TRUNK_ID no configurado — las llamadas salientes fallarán. "
+        "Defínelo en .env o en las variables de entorno del contenedor."
+    )
 
 router = APIRouter(tags=["telephony"])
 
@@ -873,11 +881,12 @@ async def test_outbound_call(payload: TestOutboundCallRequest):
     Endpoint de prueba: dispara una llamada saliente LiveKit SIP al número indicado.
     Crea sala, despacha agente y luego inicia el participante SIP.
     """
-    trunk_id = (os.getenv("LIVEKIT_OUTBOUND_TRUNK_ID") or "").strip()
+    # FIX 6: variable canónica SIP_OUTBOUND_TRUNK_ID (LIVEKIT_OUTBOUND_TRUNK_ID deprecado)
+    trunk_id = (os.getenv("SIP_OUTBOUND_TRUNK_ID") or "").strip()
     if not trunk_id:
         raise HTTPException(
             status_code=500,
-            detail="LIVEKIT_OUTBOUND_TRUNK_ID no está configurado. Configure el trunk de salida en LiveKit.",
+            detail="SIP_OUTBOUND_TRUNK_ID no está configurado. Define el trunk de salida en .env.",
         )
 
     phone = payload.phone_number.strip()
@@ -906,7 +915,15 @@ async def test_outbound_call(payload: TestOutboundCallRequest):
                 agent_name=agent_name_dispatch,
                 metadata=room_metadata,
             )
-            await asyncio.sleep(float(os.getenv("DRIP_AGENT_JOIN_DELAY_SECONDS", "3")))
+            # FIX 1: polling real en vez de sleep fijo — aborta si el agente no arranca
+            agent_ready = await wait_for_agent_ready(room_name)
+            if not agent_ready:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Agente no disponible (timeout de arranque). La llamada fue abortada para evitar audio mudo.",
+                )
+        except HTTPException:
+            raise
         except Exception as dispatch_err:
             logger.warning(f"⚠️ [test-outbound] Dispatch fallido: {dispatch_err}")
 
@@ -1061,7 +1078,28 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
                 metadata=room_metadata,
             )
             logger.info(f"✅ Agente {agent_name_dispatch} despachado a sala {room_name}")
-            await asyncio.sleep(float(os.getenv("DRIP_AGENT_JOIN_DELAY_SECONDS", "3")))
+            # FIX 1: polling real en vez de sleep fijo para evitar llamada muda
+            agent_ready = await wait_for_agent_ready(room_name)
+            if not agent_ready:
+                logger.error(
+                    f"⚠️ [outbound] Agente no listo en sala {room_name} tras timeout. "
+                    "Marcando encuesta como failed y abortando SIP."
+                )
+                if supabase and encuesta_id:
+                    try:
+                        await sb_query(
+                            lambda: supabase.table("encuestas")
+                            .update({"status": "failed"})
+                            .eq("id", encuesta_id)
+                            .execute()
+                        )
+                    except Exception:
+                        pass
+                await _release_room_lock(room_name)
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": "Agente no disponible — llamada abortada para evitar audio mudo"},
+                )
         except Exception as dispatch_err:
             logger.warning(f"⚠️ Dispatch explícito fallido (auto-dispatch como fallback): {dispatch_err}")
 

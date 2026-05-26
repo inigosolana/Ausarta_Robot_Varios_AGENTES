@@ -11,6 +11,51 @@ import logging
 import os
 
 logger = logging.getLogger("api-backend")
+
+
+async def _invalidate_agent_cache(agent_id: str) -> int:
+    """
+    FIX 5 — Cache de agent_config sin invalidación.
+
+    Problema: con un TTL de 1 h, los cambios de prompt/voz no se reflejaban
+    en las llamadas siguientes hasta que la caché expirara.
+
+    Solución: al actualizar un agente se borran las claves Redis de todas las
+    encuestas activas de ese agente para forzar recarga inmediata.
+    """
+    import redis.asyncio as _aioredis
+
+    _REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+    deleted = 0
+    try:
+        if not supabase:
+            return 0
+        enc_res = supabase.table("encuestas").select("id").eq(
+            "agent_id", int(agent_id)
+        ).in_(
+            "status", ["initiated", "calling", "in_progress"]
+        ).execute()
+        enc_ids = [row["id"] for row in (enc_res.data or [])]
+        if not enc_ids:
+            return 0
+        redis_client = _aioredis.from_url(_REDIS_URL, decode_responses=True)
+        try:
+            for enc_id in enc_ids:
+                deleted += await redis_client.delete(
+                    f"ausarta:agent_config:survey_{enc_id}"
+                )
+        finally:
+            await redis_client.close()
+        if deleted:
+            logger.info(
+                f"🧹 [agents] Caché Redis invalidada para agente {agent_id}: "
+                f"{deleted} clave(s) borrada(s)"
+            )
+    except Exception as cache_err:
+        logger.warning(
+            f"⚠️ [agents] No se pudo invalidar caché Redis agente {agent_id}: {cache_err}"
+        )
+    return deleted
 DEFAULT_AUSARTA_VOICE_ID = "b5aa8098-49ef-475d-89b0-c9262ecf33fd"  # Chica castellano Cartesia
 DEFAULT_STT_MODEL = "nova-3"
 
@@ -179,7 +224,10 @@ async def update_agent(agent_id: str, config: dict, current_user: CurrentUser = 
         
         if "instructions" in config:
             await _enqueue_classify_agent_webhook(str(agent_id), config["instructions"])
-        
+
+        # FIX 5: invalidar caché Redis para que las llamadas futuras usen la config actualizada
+        await _invalidate_agent_cache(str(agent_id))
+
         await clear_ui_cache("agents_list")
         await log_audit_event(
             user_id=current_user.user_id,
@@ -250,6 +298,24 @@ async def create_agent(config: dict, current_user: CurrentUser = Depends(require
     except Exception as e:
         logger.error(f"Error creating agent: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.get("/admin/cache/invalidate")
+async def invalidate_cache_for_agent(
+    agent_id: int,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """
+    FIX 5: Fuerza la invalidación manual de la caché Redis de un agente.
+    Útil para aplicar cambios de prompt/voz sin esperar el TTL de 5 minutos.
+    """
+    deleted = await _invalidate_agent_cache(str(agent_id))
+    return {
+        "status": "ok",
+        "agent_id": agent_id,
+        "keys_deleted": deleted,
+        "message": f"{deleted} clave(s) de caché borrada(s) para agente {agent_id}",
+    }
+
 
 @router.delete("/agents/{agent_id}")
 async def delete_agent(agent_id: str, current_user: CurrentUser = Depends(require_admin)):
