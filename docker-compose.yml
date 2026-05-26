@@ -10,9 +10,10 @@ services:
     ports:
       - "8003:8001"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en .env}@redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Define REDIS_PASSWORD en el stack de Portainer o en .env}@redis:6379/0
       - IMPERSONATION_SECRET=${IMPERSONATION_SECRET:-${SUPABASE_SERVICE_ROLE_KEY}}
       - BRIDGE_SERVER_URL=${BRIDGE_SERVER_URL:-http://localhost:8001}
     extra_hosts:
@@ -36,7 +37,8 @@ services:
     command: ["/agent_start.sh"]
     working_dir: /app
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - PYTHONUNBUFFERED=1
       - BRIDGE_SERVER_URL=http://backend:8001
@@ -59,9 +61,10 @@ services:
     command: ["arq", "worker.WorkerSettings"]
     working_dir: /app
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en .env}@redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Define REDIS_PASSWORD en el stack de Portainer o en .env}@redis:6379/0
       - PYTHONUNBUFFERED=1
       - BRIDGE_SERVER_URL=http://backend:8001
       - BRIDGE_SERVER_URL_INTERNAL=http://backend:8001
@@ -85,7 +88,7 @@ services:
     command: >
       redis-server
       --appendonly yes
-      --requirepass ${REDIS_PASSWORD?REDIS_PASSWORD obligatoria - defínela en .env}
+      --requirepass ${REDIS_PASSWORD:?Define REDIS_PASSWORD en el stack de Portainer o en .env}
       --save 60 1
       --maxmemory-policy noeviction
     volumes:
