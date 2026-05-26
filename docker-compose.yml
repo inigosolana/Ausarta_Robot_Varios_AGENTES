@@ -1,5 +1,33 @@
 version: '3.8'
 
+# Variables del panel de Portainer → se inyectan en los contenedores vía ${VAR}
+# No uses .env en disco: Portainer no lo crea en /data/compose/XX/
+x-app-environment: &app-environment
+  SUPABASE_URL: ${SUPABASE_URL}
+  SUPABASE_KEY: ${SUPABASE_KEY}
+  SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+  SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+  LIVEKIT_URL: ${LIVEKIT_URL}
+  LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+  LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+  SIP_OUTBOUND_TRUNK_ID: ${SIP_OUTBOUND_TRUNK_ID}
+  DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
+  CARTESIA_API_KEY: ${CARTESIA_API_KEY}
+  GROQ_API_KEY: ${GROQ_API_KEY}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+  N8N_WEBHOOK_BASE_URL: ${N8N_WEBHOOK_BASE_URL:-}
+  N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
+  N8N_PROXY_SECRET: ${N8N_PROXY_SECRET:-}
+  AGENT_NAME_DISPATCH: ${AGENT_NAME_DISPATCH:-default_agent}
+  ENABLE_RECORDING: ${ENABLE_RECORDING:-false}
+  AGENTS_API_KEY: ${AGENTS_API_KEY:-}
+  VOICE_ID_AUSARTA: ${VOICE_ID_AUSARTA:-}
+  VOICE_ID_ESPANOL_F: ${VOICE_ID_ESPANOL_F:-}
+  VOICE_ID_INES: ${VOICE_ID_INES:-}
+  VOICE_ID_ALBA: ${VOICE_ID_ALBA:-}
+  YEASTAR_HUMAN_TRANSFER_EXTENSION: ${YEASTAR_HUMAN_TRANSFER_EXTENSION:-1000}
+
 services:
   backend:
     build:
@@ -9,17 +37,17 @@ services:
     restart: unless-stopped
     ports:
       - "8003:8001"
-    env_file:
-      - path: .env
-        required: false
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:?Define REDIS_PASSWORD en el stack de Portainer o en .env}@redis:6379/0
-      - IMPERSONATION_SECRET=${IMPERSONATION_SECRET:-${SUPABASE_SERVICE_ROLE_KEY}}
-      - BRIDGE_SERVER_URL=${BRIDGE_SERVER_URL:-http://localhost:8001}
+      <<: *app-environment
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      IMPERSONATION_SECRET: ${IMPERSONATION_SECRET:-${SUPABASE_SERVICE_ROLE_KEY}}
+      BRIDGE_SERVER_URL: ${BRIDGE_SERVER_URL:-http://localhost:8001}
+      BRIDGE_SERVER_URL_INTERNAL: http://backend:8001
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     networks:
       - ausarta-network
     healthcheck:
@@ -36,17 +64,15 @@ services:
     restart: unless-stopped
     command: ["/agent_start.sh"]
     working_dir: /app
-    env_file:
-      - path: .env
-        required: false
     environment:
-      - PYTHONUNBUFFERED=1
-      - BRIDGE_SERVER_URL=http://backend:8001
-      - BRIDGE_SERVER_URL_INTERNAL=http://backend:8001
+      <<: *app-environment
+      PYTHONUNBUFFERED: "1"
+      BRIDGE_SERVER_URL: http://backend:8001
+      BRIDGE_SERVER_URL_INTERNAL: http://backend:8001
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
     depends_on:
       backend:
         condition: service_healthy
-      # FIX 7: esperar a que Redis esté realmente disponible (no sólo iniciado)
       redis:
         condition: service_healthy
     networks:
@@ -60,19 +86,16 @@ services:
     restart: unless-stopped
     command: ["arq", "worker.WorkerSettings"]
     working_dir: /app
-    env_file:
-      - path: .env
-        required: false
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:?Define REDIS_PASSWORD en el stack de Portainer o en .env}@redis:6379/0
-      - PYTHONUNBUFFERED=1
-      - BRIDGE_SERVER_URL=http://backend:8001
-      - BRIDGE_SERVER_URL_INTERNAL=http://backend:8001
-      - IMPERSONATION_SECRET=${IMPERSONATION_SECRET:-${SUPABASE_SERVICE_ROLE_KEY}}
+      <<: *app-environment
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      PYTHONUNBUFFERED: "1"
+      BRIDGE_SERVER_URL: http://backend:8001
+      BRIDGE_SERVER_URL_INTERNAL: http://backend:8001
+      IMPERSONATION_SECRET: ${IMPERSONATION_SECRET:-${SUPABASE_SERVICE_ROLE_KEY}}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      # FIX 7: esperar a que Redis esté realmente disponible antes de conectar el worker ARQ
       redis:
         condition: service_healthy
     networks:
@@ -84,16 +107,14 @@ services:
     restart: unless-stopped
     networks:
       - ausarta-network
-    # FIX 7: AOF activo + snapshot cada 60 s si hay ≥1 cambio + noeviction para preservar colas ARQ
     command: >
       redis-server
       --appendonly yes
-      --requirepass ${REDIS_PASSWORD:?Define REDIS_PASSWORD en el stack de Portainer o en .env}
+      --requirepass ${REDIS_PASSWORD}
       --save 60 1
       --maxmemory-policy noeviction
     volumes:
       - redis-data:/data
-    # FIX 7: healthcheck para que los servicios dependientes esperen a Redis real
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
@@ -121,7 +142,7 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost/ || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
 
 networks:
   ausarta-network:

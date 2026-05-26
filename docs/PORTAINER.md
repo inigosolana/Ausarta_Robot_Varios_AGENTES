@@ -2,14 +2,15 @@
 
 ## Error: `env file /data/compose/XX/.env not found`
 
-Portainer despliega el stack en `/data/compose/<id>/` y **no crea** un archivo `.env` automáticamente. Ese archivo no va en Git (contiene secretos).
+**Importante:** la tabla **Environment variables** de Portainer **no es** un archivo `.env` en disco. Son variables en memoria que Compose usa para sustituir `${NOMBRE}` en el `docker-compose.yml`.
 
-### Solución (recomendada)
+El compose **ya no usa** `env_file: .env`. Las variables del panel se pasan a los contenedores con bloques `environment: ${VAR}`.
 
-1. En Portainer: **Stacks** → tu stack → **Editor** (o **Update the stack**).
-2. Baja hasta **Environment variables** (o **Env**).
-3. Pega las variables desde `.env.example` del repo (valores reales, no los placeholders).
-4. Variables **obligatorias** mínimas:
+### Qué hacer
+
+1. **Stacks** → tu stack → **Pull and redeploy** (último `main` de GitHub).
+2. Deja tus variables en **Environment variables** (como en tu captura: `REDIS_PASSWORD`, `SUPABASE_URL`, etc.).
+3. Comprueba que existan al menos:
 
 ```env
 REDIS_PASSWORD=una_clave_segura_larga
