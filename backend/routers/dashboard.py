@@ -426,6 +426,23 @@ async def get_alerts(empresa_id: Optional[int] = None):
         logger.error(f"Error get_alerts: {e}")
         return []
 
+
+@router.post("/alerts/{alert_id}/resolve")
+async def resolve_alert(alert_id: str):
+    """
+    Marca una alerta como vista en el panel.
+    Las alertas se generan desde encuestas fallidas; el frontend también las oculta en cliente.
+    """
+    encuesta_id: Optional[int] = None
+    if alert_id.startswith("alert_"):
+        try:
+            encuesta_id = int(alert_id.replace("alert_", "", 1))
+        except ValueError:
+            pass
+    logger.info("Alerta resuelta en UI: %s (encuesta=%s)", alert_id, encuesta_id)
+    return {"status": "ok", "alert_id": alert_id, "encuesta_id": encuesta_id}
+
+
 @router.get("/dashboard/integrations")
 async def get_integrations():
     integrations = [

@@ -24,7 +24,8 @@ arq==0.26.0
 # Utilidades
 python-dotenv==1.0.1
 requests==2.32.3
-aiohttp==3.10.11
+# livekit-agents 1.4.x usa ClientSession(proxy=...); requiere aiohttp >=3.11 (no está en 3.10.x)
+aiohttp==3.11.13
 
 # Base de datos
 mysql-connector-python==8.4.0

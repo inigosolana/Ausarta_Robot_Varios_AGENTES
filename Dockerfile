@@ -27,6 +27,9 @@ RUN npm run build
 # Stage de producción con nginx
 FROM nginx:alpine
 
+# curl para healthcheck de Docker (nginx:alpine no trae wget/curl por defecto)
+RUN apk add --no-cache curl
+
 # Copiar archivos build
 COPY --from=builder /app/dist /usr/share/nginx/html
 
