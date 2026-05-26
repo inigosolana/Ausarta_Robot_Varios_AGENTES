@@ -30,6 +30,7 @@ import {
 import { DateRangePicker, getDatesFromRange, DateRange } from './DateRangePicker';
 import { LiveMonitoring } from './LiveMonitoring';
 import { ApiStatusWidget } from './ApiStatusWidget';
+import { ApiCreditsWidget } from './ApiCreditsWidget';
 
 const API_URL = (import.meta as any).env.VITE_API_URL || '';
 
@@ -503,6 +504,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="xl:col-span-4 space-y-4 lg:space-y-6 min-w-0">
                     <LiveMonitoring />
                     {!hideIntegrations && <ApiStatusWidget />}
+                    {!hideIntegrations && (profile?.role === 'admin' || profile?.role === 'superadmin') && (
+                        <ApiCreditsWidget />
+                    )}
                 </div>
 
                 <div className="xl:col-span-8 min-w-0">
