@@ -39,6 +39,49 @@ export interface Empresa {
   updated_at?: string;
 }
 
+// ── Workflow types ──────────────────────────────────────────────────────────
+
+export type AgentMode = 'prompt' | 'workflow' | 'mixed';
+
+export type WorkflowNodeType =
+  | 'message'
+  | 'question'
+  | 'condition'
+  | 'llm_free'
+  | 'transfer'
+  | 'end';
+
+export interface WorkflowNodePosition {
+  x: number;
+  y: number;
+}
+
+export interface WorkflowNode {
+  id: string;
+  type: WorkflowNodeType;
+  label: string;
+  content?: string;
+  prompt?: string;       // sub-prompt para nodo llm_free en modo mixed
+  variable?: string;     // nombre de variable donde guardar respuesta
+  options?: string[];    // opciones de respuesta (tipo question)
+  position?: WorkflowNodePosition;
+}
+
+export interface WorkflowEdge {
+  id: string;
+  source: string;
+  target: string;
+  condition?: string | null;  // null / undefined → default
+}
+
+export interface WorkflowDefinition {
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+  start_node: string;
+}
+
+// ── AgentConfig ─────────────────────────────────────────────────────────────
+
 export interface AgentConfig {
   id?: number;
   empresa_id?: number | null;
@@ -55,6 +98,10 @@ export interface AgentConfig {
   speaking_speed?: number;
   created_at?: string;
   updated_at?: string;
+  // Workflow fields
+  agent_mode?: AgentMode;
+  workflow_definition?: WorkflowDefinition | null;
+  workflow_variables?: Record<string, string | null>;
 }
 
 export interface AIConfig {

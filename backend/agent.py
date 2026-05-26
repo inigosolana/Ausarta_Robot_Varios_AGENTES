@@ -156,6 +156,8 @@ def _build_guardar_encuesta_raw_schema(extraction_schema: list) -> dict[str, Any
 from prompts import _LANG_OVERRIDE_MSGS
 from utils.call_analyzer import analyze_call_disposition
 from utils.prompt_builder import build_agent_prompt
+from utils.workflow_compiler import compile_workflow_to_prompt
+from utils.workflow_state import WorkflowStateMachine
 from services.queue_service import (
     enqueue_colgar_sala,
     enqueue_guardar_encuesta,
@@ -532,11 +534,53 @@ class DynamicAgent(Agent):
         except Exception:
             speaking_speed_f = 1.0
 
-        full_instructions = build_agent_prompt(
+        # ── Modo de agente: prompt (existente) | workflow | mixed ──────────
+        self._agent_mode: str = (agent_config.get("agent_mode") or "prompt").strip().lower()
+        self._workflow_sm: "WorkflowStateMachine | None" = None
+
+        base_instructions = build_agent_prompt(
             agent_config,
             self.enthusiasm_level,
             speaking_speed_f,
         )
+
+        if self._agent_mode in ("workflow", "mixed"):
+            wf_def = agent_config.get("workflow_definition") or {}
+            wf_vars = agent_config.get("workflow_variables") or {}
+            if wf_def:
+                try:
+                    compiled_prompt, steps = compile_workflow_to_prompt(
+                        wf_def,
+                        self._agent_mode,
+                        base_instructions,
+                    )
+                    if steps:
+                        self._workflow_sm = WorkflowStateMachine(steps, wf_vars)
+                        full_instructions = compiled_prompt
+                        logger.info(
+                            f"[{room_name}] Modo '{self._agent_mode}': workflow compilado "
+                            f"({len(steps)} pasos)"
+                        )
+                    else:
+                        logger.warning(
+                            f"[{room_name}] workflow_definition sin pasos válidos, "
+                            "usando modo prompt como fallback"
+                        )
+                        full_instructions = base_instructions
+                except Exception as wf_err:
+                    logger.error(
+                        f"[{room_name}] Error compilando workflow: {wf_err} — "
+                        "fallback a modo prompt"
+                    )
+                    full_instructions = base_instructions
+            else:
+                logger.warning(
+                    f"[{room_name}] agent_mode='{self._agent_mode}' pero "
+                    "workflow_definition vacío — usando modo prompt como fallback"
+                )
+                full_instructions = base_instructions
+        else:
+            full_instructions = base_instructions
 
         agent_name = agent_config.get("name", "Bot")
         extraction_schema = self._extraction_schema
@@ -658,14 +702,32 @@ class DynamicAgent(Agent):
             "comentarios": comentarios,
             "status": status,
         }
+
+        # Normalizar datos_extra del LLM
+        llm_datos: dict = {}
         if datos_extra is not None:
             if isinstance(datos_extra, dict):
-                payload["datos_extra"] = datos_extra
+                llm_datos = datos_extra
             elif isinstance(datos_extra, str) and datos_extra.strip():
                 try:
-                    payload["datos_extra"] = json.loads(datos_extra)
+                    llm_datos = json.loads(datos_extra)
                 except Exception:
-                    payload["datos_extra"] = {"raw": datos_extra}
+                    llm_datos = {"raw": datos_extra}
+
+        # PARTE 4: fusionar variables del workflow si hay máquina de estados activa
+        if self._workflow_sm is not None:
+            wf_vars = self._workflow_sm.get_variables()
+            if wf_vars:
+                merged = {**wf_vars, **llm_datos}  # LLM tiene prioridad
+                logger.info(
+                    f"[{self.room_name}] guardar_encuesta: fusionando "
+                    f"{len(wf_vars)} variable(s) de workflow en datos_extra"
+                )
+                payload["datos_extra"] = merged
+            elif llm_datos:
+                payload["datos_extra"] = llm_datos
+        elif llm_datos:
+            payload["datos_extra"] = llm_datos
 
         job_id = await enqueue_guardar_encuesta(payload)
         if job_id:
@@ -1007,6 +1069,130 @@ class CallSession:
                 f"⚠️ [{self.job_id}] Error guardando snapshot transcripción ({reason}): {_e}"
             )
 
+    # ── Workflow: avance de máquina de estados ─────────────────────────────────
+
+    def _extract_variable_value(self, user_text: str, variable: str | None) -> str:
+        """
+        PARTE 4: extrae el valor relevante de la respuesta del usuario para
+        guardarlo en una variable del workflow. Estrategia simple: devuelve
+        el texto normalizado (minúsculas, sin espacios extra).
+        El compilador de workflow puede refinar esto en futuras versiones.
+        """
+        if not user_text:
+            return ""
+        return user_text.strip().lower()
+
+    async def _handle_workflow_turn(
+        self,
+        user_response: str,
+        wf_sm: "WorkflowStateMachine",
+    ) -> None:
+        """
+        PARTE 4: Procesa un turno de conversación cuando el workflow está activo.
+        1. Guarda la variable del nodo actual si corresponde.
+        2. Avanza la máquina de estados.
+        3. Actúa según el tipo del siguiente nodo.
+        """
+        try:
+            current = wf_sm.current_step()
+            if not current:
+                return
+
+            # Guardar variable si el nodo la requiere
+            var_name = current.get("variable")
+            if var_name and user_response:
+                value = self._extract_variable_value(user_response, var_name)
+                wf_sm.set_variable(var_name, value)
+
+            # Avanzar al siguiente nodo
+            next_step = wf_sm.advance(user_response)
+
+            if next_step is None:
+                logger.info(f"[{self.job_id}] Workflow finalizado (sin siguiente nodo)")
+                return
+
+            ntype = next_step.get("type", "message")
+            logger.info(
+                f"[{self.job_id}] Workflow → nodo '{next_step.get('id')}' "
+                f"(type={ntype}, label='{next_step.get('label')}')"
+            )
+
+            if ntype in ("message", "question"):
+                content = (next_step.get("content") or "").strip()
+                if content:
+                    try:
+                        await self.session.say(content, allow_interruptions=True)
+                    except Exception as say_err:
+                        logger.warning(
+                            f"[{self.job_id}] Workflow say() error: {say_err}"
+                        )
+
+            elif ntype == "condition":
+                # Nodo de routing puro: no habla, avanzar inmediatamente
+                logger.info(
+                    f"[{self.job_id}] Nodo condition '{next_step.get('id')}' — avanzando sin hablar"
+                )
+                await self._handle_workflow_turn("", wf_sm)
+
+            elif ntype == "llm_free":
+                # Nodo libre: inyectar el sub-prompt como mensaje de sistema
+                # y dejar que el LLM responda libremente en el siguiente turno
+                sub_prompt = (next_step.get("prompt") or next_step.get("content") or "").strip()
+                if sub_prompt:
+                    try:
+                        chat_ctx = getattr(
+                            self.session,
+                            "chat_ctx",
+                            getattr(self.session, "chat_context", None),
+                        )
+                        if chat_ctx is not None and hasattr(chat_ctx, "add_message"):
+                            chat_ctx.add_message(
+                                role="system",
+                                content=(
+                                    f"[Nodo libre activo] Responde ahora usando este sub-prompt: "
+                                    f"{sub_prompt}"
+                                ),
+                            )
+                            logger.info(
+                                f"[{self.job_id}] Sub-prompt de nodo llm_free inyectado"
+                            )
+                    except Exception as ctx_err:
+                        logger.warning(
+                            f"[{self.job_id}] No se pudo inyectar sub-prompt de nodo llm_free: {ctx_err}"
+                        )
+
+            elif ntype == "transfer":
+                try:
+                    transfer_payload = {
+                        "room_name": self.room_name,
+                        "empresa_id": int(self.agent_config.get("empresa_id") or 0),
+                        "call_id": self.room_name,
+                        "extension": os.getenv("YEASTAR_HUMAN_TRANSFER_EXTENSION", "1000"),
+                        "survey_id": int(self.survey_id) if str(self.survey_id).isdigit() else 0,
+                        "motivo": "Transferencia por guion de workflow",
+                    }
+                    await enqueue_transfer_to_human({
+                        "guardar_payload": {
+                            "id_encuesta": int(self.survey_id) if str(self.survey_id).isdigit() else 0,
+                            "status": "transferred",
+                            "comentarios": "Transferido por workflow",
+                        },
+                        "transfer_payload": transfer_payload,
+                    })
+                    logger.info(f"[{self.job_id}] Workflow: transferencia encolada")
+                except Exception as tr_err:
+                    logger.error(f"[{self.job_id}] Workflow: error encolando transferencia: {tr_err}")
+
+            elif ntype == "end":
+                logger.info(f"[{self.job_id}] Workflow: nodo 'end' alcanzado — encolando colgar sala")
+                try:
+                    await enqueue_colgar_sala(self.room_name)
+                except Exception as end_err:
+                    logger.warning(f"[{self.job_id}] Workflow end: error encolando colgar: {end_err}")
+
+        except Exception as wf_err:
+            logger.error(f"[{self.job_id}] Error en _handle_workflow_turn: {wf_err}")
+
     # ── Detección de idioma ────────────────────────────────────────────────────
 
     async def _try_switch_language(self, user_text: str) -> None:
@@ -1308,6 +1494,13 @@ class CallSession:
                 self.reprompt_state["last_user_at"] = now
                 self.reprompt_state["waiting_user"] = False
                 self.reprompt_state["reprompt_count"] = 0
+
+                # PARTE 4 — Integración workflow: avanzar máquina de estados
+                wf_sm = getattr(self.agent_instance, "_workflow_sm", None)
+                if wf_sm is not None and not wf_sm.is_finished():
+                    asyncio.create_task(
+                        self._handle_workflow_turn(content, wf_sm)
+                    )
             except Exception as ev_err:
                 logger.debug(f"[{self.job_id}] Error evento user_input_transcribed: {ev_err}")
 

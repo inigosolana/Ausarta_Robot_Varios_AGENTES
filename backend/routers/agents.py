@@ -1,10 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
 from typing import Optional
 from services.supabase_service import supabase, get_ui_cache, clear_ui_cache
 from services.audit import log_audit_event
 from services.auth import CurrentUser, require_admin
 from services.queue_service import get_arq_pool
+from models.schemas import WorkflowValidateRequest, WorkflowValidateResponse
 from fastapi import Depends
 from datetime import datetime
 import logging
@@ -222,6 +223,14 @@ async def update_agent(agent_id: str, config: dict, current_user: CurrentUser = 
             else:
                 supabase.table("ai_config").insert(ai_config).execute()
         
+        # PARTE 5: guardar campos de modo de workflow si vienen en el payload
+        if "agent_mode" in config:
+            db_config["agent_mode"] = config["agent_mode"]
+        if "workflow_definition" in config:
+            db_config["workflow_definition"] = config["workflow_definition"]
+        if "workflow_variables" in config:
+            db_config["workflow_variables"] = config["workflow_variables"]
+
         if "instructions" in config:
             await _enqueue_classify_agent_webhook(str(agent_id), config["instructions"])
 
@@ -264,6 +273,10 @@ async def create_agent(config: dict, current_user: CurrentUser = Depends(require
             "tipo_resultados": effective_type,
             "agent_type": effective_type,
             "survey_type": _to_legacy_survey_type(effective_type),
+            # PARTE 5: modo de workflow
+            "agent_mode": config.get("agent_mode", "prompt"),
+            "workflow_definition": config.get("workflow_definition"),
+            "workflow_variables": config.get("workflow_variables", {}),
         }
         
         res = supabase.table("agent_config").insert(db_config).execute()
@@ -315,6 +328,72 @@ async def invalidate_cache_for_agent(
         "keys_deleted": deleted,
         "message": f"{deleted} clave(s) de caché borrada(s) para agente {agent_id}",
     }
+
+
+@router.post("/agents/{agent_id}/workflow/validate", response_model=WorkflowValidateResponse)
+async def validate_workflow(
+    agent_id: str,
+    body: WorkflowValidateRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """
+    PARTE 5: Valida y previsualiza el prompt compilado de un workflow.
+    Útil para que el frontend muestre el guion exacto antes de guardar.
+    No persiste nada; solo compila y devuelve.
+    """
+    from utils.workflow_compiler import compile_workflow_to_prompt
+
+    warnings: list[str] = []
+    wf_def = body.workflow_definition
+
+    nodes = wf_def.get("nodes") or []
+    edges = wf_def.get("edges") or []
+
+    if not nodes:
+        warnings.append("El workflow no tiene nodos.")
+
+    end_nodes = [n for n in nodes if isinstance(n, dict) and n.get("type") == "end"]
+    if not end_nodes:
+        warnings.append("El workflow no tiene ningún nodo de tipo 'end'.")
+
+    start_node = wf_def.get("start_node")
+    node_ids = {n.get("id") for n in nodes if isinstance(n, dict)}
+    if not start_node or start_node not in node_ids:
+        warnings.append(
+            "El campo 'start_node' no está definido o no corresponde a ningún nodo."
+        )
+
+    non_end_without_edges = []
+    edge_sources = {e.get("source") for e in edges if isinstance(e, dict)}
+    for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        if n.get("type") not in ("end", "transfer") and n.get("id") not in edge_sources:
+            non_end_without_edges.append(n.get("label") or n.get("id"))
+    if non_end_without_edges:
+        warnings.append(
+            f"Nodos sin edge de salida: {', '.join(non_end_without_edges)}"
+        )
+
+    try:
+        compiled_prompt, steps = compile_workflow_to_prompt(
+            wf_def,
+            body.agent_mode,
+            body.base_instructions,
+        )
+    except Exception as compile_err:
+        return JSONResponse(
+            status_code=422,
+            content={"error": f"Error compilando workflow: {compile_err}"},
+        )
+
+    return WorkflowValidateResponse(
+        compiled_prompt=compiled_prompt,
+        steps=steps,
+        node_count=len(nodes),
+        step_count=len(steps),
+        warnings=warnings,
+    )
 
 
 @router.delete("/agents/{agent_id}")

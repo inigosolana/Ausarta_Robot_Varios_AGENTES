@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Save, ArrowLeft, Loader2, Bot, Mic, Speaker, Brain, Sparkles, X, FlaskConical } from 'lucide-react';
+import { Save, ArrowLeft, Loader2, Bot, Mic, Speaker, Brain, Sparkles, X, FlaskConical, GitBranch, Eye } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import type { AgentConfig, AIConfig, Empresa } from '../types';
+import type { AgentConfig, AIConfig, Empresa, AgentMode, WorkflowDefinition } from '../types';
 import DashboardView from './DashboardView';
 import ResultsView from './ResultsView';
 import { TestCallModal } from '../components/TestCallModal';
+import WorkflowEditor from '../components/WorkflowEditor';
 
 const AUSARTA_FEMALE_VOICE_ID = 'b5aa8098-49ef-475d-89b0-c9262ecf33fd';  // Chica castellano Cartesia
 
@@ -67,6 +68,19 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
     // Test Call (Simulator) State
     const [showTestCallModal, setShowTestCallModal] = useState(false);
+
+    // Workflow mode state
+    const [agentMode, setAgentMode] = useState<AgentMode>(agent?.agent_mode || 'prompt');
+    const [workflowDefinition, setWorkflowDefinition] = useState<WorkflowDefinition | null>(
+        agent?.workflow_definition || null
+    );
+    const [showWorkflowPreview, setShowWorkflowPreview] = useState(false);
+    const [workflowPreviewData, setWorkflowPreviewData] = useState<{
+        compiled_prompt: string;
+        steps: any[];
+        warnings: string[];
+    } | null>(null);
+    const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
 
     useEffect(() => {
@@ -181,10 +195,20 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                 body: JSON.stringify({
                     ...formData,
                     ...aiConfig,
-                    use_case: formData.use_case, // ensuring correct mapping
+                    use_case: formData.use_case,
                     voice_id: formData.voice_id || aiConfig.tts_voice,
                     speaking_speed: formData.speaking_speed ?? 1.0,
                     tts_voice: formData.voice_id || aiConfig.tts_voice,
+                    // Workflow fields
+                    agent_mode: agentMode,
+                    workflow_definition: agentMode !== 'prompt' ? workflowDefinition : null,
+                    workflow_variables: agentMode !== 'prompt' && workflowDefinition
+                        ? Object.fromEntries(
+                            (workflowDefinition.nodes || [])
+                                .filter(n => n.variable)
+                                .map(n => [n.variable!, null])
+                          )
+                        : {},
                 })
             });
 
@@ -207,6 +231,31 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
             alert(`${t('Error saving', 'Error al guardar')}: ${err.message}`);
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const handlePreviewWorkflow = async () => {
+        if (!workflowDefinition || !agent?.id) return;
+        setIsPreviewLoading(true);
+        try {
+            const API_URL = (import.meta as any).env.VITE_API_URL || '';
+            const resp = await fetch(`${API_URL}/api/agents/${agent.id}/workflow/validate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    workflow_definition: workflowDefinition,
+                    agent_mode: agentMode,
+                    base_instructions: formData.instructions || '',
+                }),
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            setWorkflowPreviewData(data);
+            setShowWorkflowPreview(true);
+        } catch (err: any) {
+            alert(`Error al previsualizar el workflow: ${err.message}`);
+        } finally {
+            setIsPreviewLoading(false);
         }
     };
 
@@ -564,59 +613,201 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                         </section>
                     </div>
 
-                    {/* Column 3: System Prompt (Full Height) */}
+                    {/* Column 3: Agent Mode + System Prompt / Workflow Editor */}
                     <div className="space-y-6">
-                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4 h-full flex flex-col">
-                            <div className="flex justify-between items-center mb-2">
-                                <div className="flex items-center gap-2">
-                                    <Sparkles size={20} className="text-amber-500" />
-                                    <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('System Prompt', 'Prompt del Sistema')}</h2>
-                                </div>
-                                <button
-                                    onClick={() => setShowAiPromptModal(true)}
-                                    className="text-xs bg-amber-50 text-amber-600 px-2 py-1 rounded-md font-bold hover:bg-amber-100 transition-colors"
-                                >
-                                    ✨ {t('AI Wizard', 'Mago IA')}
-                                </button>
+                        {/* Mode selector */}
+                        <section className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                            <div className="flex items-center gap-2 mb-3">
+                                <GitBranch size={18} className="text-violet-500" />
+                                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('Agent Mode', 'Modo de Agente')}</h2>
                             </div>
-
-                            <div className="flex-1 relative bg-gray-50 border border-gray-200 rounded-xl overflow-hidden flex flex-col shadow-inner">
-                                <div className="flex items-center justify-between px-4 py-2 bg-gray-100 border-b border-gray-200">
-                                    <div className="flex gap-1.5">
-                                        <div className="w-2.5 h-2.5 rounded-full bg-red-400/80"></div>
-                                        <div className="w-2.5 h-2.5 rounded-full bg-amber-400/80"></div>
-                                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-400/80"></div>
-                                    </div>
-                                    <span className="text-[10px] font-mono text-gray-500">instructions.prompt</span>
-                                </div>
-                                <textarea
-                                    value={formData.instructions}
-                                    onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
-                                    placeholder={t('Define the agent\'s personality, mission, and rules here...', 'Define aquí la personalidad, misión y reglas del agente...')}
-                                    className="flex-1 w-full p-4 bg-transparent text-gray-800 font-mono text-xs focus:ring-0 border-0 resize-none leading-relaxed outline-none"
-                                    spellCheck={false}
-                                />
-                            </div>
-
-                            {/* Templates Dropdown */}
-                            <div className="mt-2 flex gap-2">
-                                <select
-                                    className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50"
-                                    onChange={(e) => {
-                                        const template = templates.find(t => t.id === Number(e.target.value));
-                                        if (template && confirm(t('Replace instructions?', '¿Reemplazar instrucciones?'))) {
-                                            setFormData({ ...formData, instructions: template.content });
-                                        }
-                                    }}
-                                    value=""
-                                >
-                                    <option value="" disabled>📂 {t('Load Template...', 'Cargar Plantilla...')}</option>
-                                    {templates.map(t => (
-                                        <option key={t.id} value={t.id}>{t.name}</option>
-                                    ))}
-                                </select>
+                            <div className="grid grid-cols-3 gap-2">
+                                {([
+                                    {
+                                        id: 'prompt' as AgentMode,
+                                        label: t('Prompt', 'Prompt'),
+                                        desc: t('Free text instructions', 'Instrucciones en texto libre'),
+                                        color: 'border-blue-300 bg-blue-50 text-blue-700',
+                                        inactive: 'border-gray-200 bg-gray-50 text-gray-500 hover:bg-gray-100',
+                                    },
+                                    {
+                                        id: 'workflow' as AgentMode,
+                                        label: t('Workflow', 'Workflow'),
+                                        desc: t('Structured script', 'Guion estructurado'),
+                                        color: 'border-violet-300 bg-violet-50 text-violet-700',
+                                        inactive: 'border-gray-200 bg-gray-50 text-gray-500 hover:bg-gray-100',
+                                    },
+                                    {
+                                        id: 'mixed' as AgentMode,
+                                        label: t('Mixed', 'Mixto'),
+                                        desc: t('Script + free nodes', 'Guion + nodos libres'),
+                                        color: 'border-emerald-300 bg-emerald-50 text-emerald-700',
+                                        inactive: 'border-gray-200 bg-gray-50 text-gray-500 hover:bg-gray-100',
+                                    },
+                                ] as const).map(m => (
+                                    <button
+                                        key={m.id}
+                                        type="button"
+                                        onClick={() => setAgentMode(m.id)}
+                                        className={`p-3 rounded-lg border-2 text-left transition-all ${agentMode === m.id ? m.color : m.inactive}`}
+                                    >
+                                        <div className="font-bold text-xs">{m.label}</div>
+                                        <div className="text-[10px] mt-0.5 opacity-70">{m.desc}</div>
+                                    </button>
+                                ))}
                             </div>
                         </section>
+
+                        {/* Prompt editor (modo prompt) */}
+                        {agentMode === 'prompt' && (
+                            <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4 flex flex-col">
+                                <div className="flex justify-between items-center mb-2">
+                                    <div className="flex items-center gap-2">
+                                        <Sparkles size={20} className="text-amber-500" />
+                                        <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('System Prompt', 'Prompt del Sistema')}</h2>
+                                    </div>
+                                    <button
+                                        onClick={() => setShowAiPromptModal(true)}
+                                        className="text-xs bg-amber-50 text-amber-600 px-2 py-1 rounded-md font-bold hover:bg-amber-100 transition-colors"
+                                    >
+                                        ✨ {t('AI Wizard', 'Mago IA')}
+                                    </button>
+                                </div>
+                                <div className="flex-1 relative bg-gray-50 border border-gray-200 rounded-xl overflow-hidden flex flex-col shadow-inner" style={{ minHeight: 320 }}>
+                                    <div className="flex items-center justify-between px-4 py-2 bg-gray-100 border-b border-gray-200">
+                                        <div className="flex gap-1.5">
+                                            <div className="w-2.5 h-2.5 rounded-full bg-red-400/80"></div>
+                                            <div className="w-2.5 h-2.5 rounded-full bg-amber-400/80"></div>
+                                            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400/80"></div>
+                                        </div>
+                                        <span className="text-[10px] font-mono text-gray-500">instructions.prompt</span>
+                                    </div>
+                                    <textarea
+                                        value={formData.instructions}
+                                        onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
+                                        placeholder={t('Define the agent\'s personality, mission, and rules here...', 'Define aquí la personalidad, misión y reglas del agente...')}
+                                        className="flex-1 w-full p-4 bg-transparent text-gray-800 font-mono text-xs focus:ring-0 border-0 resize-none leading-relaxed outline-none"
+                                        style={{ minHeight: 280 }}
+                                        spellCheck={false}
+                                    />
+                                </div>
+                                <div className="mt-2 flex gap-2">
+                                    <select
+                                        className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50"
+                                        onChange={(e) => {
+                                            const template = templates.find(t => t.id === Number(e.target.value));
+                                            if (template && confirm(t('Replace instructions?', '¿Reemplazar instrucciones?'))) {
+                                                setFormData({ ...formData, instructions: template.content });
+                                            }
+                                        }}
+                                        value=""
+                                    >
+                                        <option value="" disabled>📂 {t('Load Template...', 'Cargar Plantilla...')}</option>
+                                        {templates.map(tmpl => (
+                                            <option key={tmpl.id} value={tmpl.id}>{tmpl.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </section>
+                        )}
+
+                        {/* Workflow editor (modos workflow y mixed) */}
+                        {(agentMode === 'workflow' || agentMode === 'mixed') && (
+                            <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                                <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+                                    <div className="flex items-center gap-2">
+                                        <GitBranch size={18} className="text-violet-500" />
+                                        <h2 className="text-sm font-bold text-gray-700">{t('Workflow Editor', 'Editor de Workflow')}</h2>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        {agent?.id && (
+                                            <button
+                                                type="button"
+                                                onClick={handlePreviewWorkflow}
+                                                disabled={!workflowDefinition || isPreviewLoading}
+                                                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-violet-50 text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-100 disabled:opacity-50 transition-colors"
+                                            >
+                                                {isPreviewLoading ? <Loader2 size={13} className="animate-spin" /> : <Eye size={13} />}
+                                                {t('Preview Script', 'Previsualizar guion')}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Prompt global (contexto adicional para el LLM) */}
+                                <div className="px-5 pt-3 pb-2">
+                                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                                        {t('Global context (optional)', 'Contexto global (opcional)')}
+                                        <span className="ml-1 text-gray-400 font-normal">
+                                            — {t('Added as context before the compiled script', 'Se añade como contexto antes del guion compilado')}
+                                        </span>
+                                    </label>
+                                    <textarea
+                                        rows={3}
+                                        value={formData.instructions}
+                                        onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
+                                        placeholder={t('Personality, tone, company context...', 'Personalidad, tono, contexto de empresa...')}
+                                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-violet-500/20 outline-none resize-none"
+                                    />
+                                </div>
+
+                                <div style={{ height: 480 }}>
+                                    <WorkflowEditor
+                                        value={workflowDefinition}
+                                        onChange={setWorkflowDefinition}
+                                        mode={agentMode as 'workflow' | 'mixed'}
+                                    />
+                                </div>
+                            </section>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Workflow Preview Modal */}
+            {showWorkflowPreview && workflowPreviewData && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl border border-violet-100 overflow-hidden flex flex-col max-h-[85vh]">
+                        <div className="bg-gradient-to-r from-violet-600 to-purple-600 px-6 py-4 flex justify-between items-center flex-shrink-0">
+                            <h2 className="text-white font-bold text-lg flex items-center gap-2">
+                                <Eye size={20} /> {t('Compiled Script Preview', 'Previsualización del guion compilado')}
+                            </h2>
+                            <button onClick={() => setShowWorkflowPreview(false)} className="text-white/80 hover:text-white">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="overflow-y-auto flex-1 p-6 space-y-4">
+                            {workflowPreviewData.warnings.length > 0 && (
+                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+                                    <p className="text-xs font-bold text-amber-700">⚠️ {t('Warnings', 'Advertencias')}</p>
+                                    {workflowPreviewData.warnings.map((w, i) => (
+                                        <p key={i} className="text-xs text-amber-600">• {w}</p>
+                                    ))}
+                                </div>
+                            )}
+                            <div className="flex gap-4 text-xs text-gray-500">
+                                <span className="bg-gray-100 rounded px-2 py-1">
+                                    {workflowPreviewData.node_count} {t('nodes', 'nodos')}
+                                </span>
+                                <span className="bg-gray-100 rounded px-2 py-1">
+                                    {workflowPreviewData.step_count} {t('compiled steps', 'pasos compilados')}
+                                </span>
+                            </div>
+                            <div>
+                                <p className="text-xs font-bold text-gray-600 mb-2">{t('Compiled prompt (sent to LLM):', 'Prompt compilado (enviado al LLM):')}</p>
+                                <pre className="bg-gray-900 text-green-300 text-xs p-4 rounded-xl overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed">
+                                    {workflowPreviewData.compiled_prompt}
+                                </pre>
+                            </div>
+                        </div>
+                        <div className="px-6 py-4 border-t border-gray-100 flex justify-end flex-shrink-0">
+                            <button
+                                onClick={() => setShowWorkflowPreview(false)}
+                                className="px-5 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-lg transition-colors"
+                            >
+                                {t('Close', 'Cerrar')}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

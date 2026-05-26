@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional, List
+from pydantic import BaseModel, field_validator
+from typing import Optional, List, Literal, Any
 from datetime import datetime
 
 class VoiceAgentCreate(BaseModel):
@@ -150,4 +150,61 @@ class TelephonyTransferRequest(BaseModel):
     motivo: Optional[str] = None
     target_extension: Optional[str] = None
     yeastar_call_id: Optional[str] = None
+
+
+# ── Workflow: tipos de nodo/edge y definición completa ───────────────────────
+
+class WorkflowNodePosition(BaseModel):
+    x: float = 0.0
+    y: float = 0.0
+
+
+class WorkflowNode(BaseModel):
+    id: str
+    type: Literal["message", "question", "condition", "llm_free", "transfer", "end"]
+    label: str = ""
+    content: Optional[str] = None
+    prompt: Optional[str] = None          # sub-prompt libre (llm_free / mixed)
+    variable: Optional[str] = None        # nombre de variable donde guardar respuesta
+    options: Optional[List[str]] = None   # opciones de respuesta para tipo question
+    position: Optional[WorkflowNodePosition] = None
+
+
+class WorkflowEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    condition: Optional[str] = None       # None → default; expr → evaluación condicional
+
+
+class WorkflowDefinition(BaseModel):
+    nodes: List[WorkflowNode] = []
+    edges: List[WorkflowEdge] = []
+    start_node: str = ""
+
+
+class AgentModeConfig(BaseModel):
+    """
+    PARTE 5: campos de workflow que se añaden a los endpoints de agente.
+    Usado tanto en creación como en actualización.
+    """
+    agent_mode: Literal["prompt", "workflow", "mixed"] = "prompt"
+    workflow_definition: Optional[dict] = None   # Se acepta como dict bruto para flexibilidad
+    workflow_variables: dict = {}
+
+
+class WorkflowValidateRequest(BaseModel):
+    """Body del endpoint POST /api/agents/{id}/workflow/validate."""
+    workflow_definition: dict
+    agent_mode: Literal["workflow", "mixed"] = "workflow"
+    base_instructions: str = ""
+
+
+class WorkflowValidateResponse(BaseModel):
+    """Respuesta del endpoint de validación/previsualización del workflow."""
+    compiled_prompt: str
+    steps: List[dict]
+    node_count: int
+    step_count: int
+    warnings: List[str] = []
 

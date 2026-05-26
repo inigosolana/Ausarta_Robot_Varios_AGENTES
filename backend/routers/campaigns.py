@@ -447,6 +447,10 @@ async def get_agent_config_by_survey(survey_id: int):
             "tipo_resultados": agent_data.get("tipo_resultados") or resolved_agent_type,
             "empresa_id": empresa_id or agent_empresa_id,
             "config_updated_at": agent_data.get("updated_at") or ai_data.get("updated_at"),
+            # PARTE 5: campos de workflow (necesarios para que agent.py compile el workflow)
+            "agent_mode": agent_data.get("agent_mode") or "prompt",
+            "workflow_definition": agent_data.get("workflow_definition"),
+            "workflow_variables": agent_data.get("workflow_variables") or {},
         }
         # Evita cualquier cache intermedio: tras editar, la siguiente llamada debe leer esto sí o sí.
         return JSONResponse(
