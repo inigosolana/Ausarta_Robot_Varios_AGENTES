@@ -156,13 +156,13 @@ const AppShell: React.FC = () => {
         position="bottom-right"
         toastOptions={{ className: 'dark:bg-gray-800 dark:text-white border dark:border-gray-700' }}
       />
-      <div className="flex min-h-screen w-full bg-[#fcfcfc] dark:bg-slate-950 dark:bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] dark:from-slate-900 dark:via-slate-950 dark:to-black overflow-hidden text-gray-900 dark:text-gray-100 transition-colors duration-200 flex-col md:flex-row relative">
+      <div className="flex min-h-screen w-full min-w-0 bg-[#fcfcfc] dark:bg-slate-950 dark:bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] dark:from-slate-900 dark:via-slate-950 dark:to-black overflow-hidden text-gray-900 dark:text-gray-100 transition-colors duration-200 flex-col md:flex-row relative">
         {/* Cyber-Ops decorative glow */}
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-cyan-500/10 dark:bg-cyan-500/5 blur-[120px] pointer-events-none" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-violet-500/10 dark:bg-violet-500/5 blur-[120px] pointer-events-none" />
 
         {/* ── Sidebar ── */}
-        <aside className={`${isSidebarOpen ? 'md:w-64' : 'md:w-20'} w-full border-b md:border-b-0 md:border-r border-gray-100 dark:border-cyan-900/30 bg-white/80 dark:bg-slate-900/40 backdrop-blur-xl flex flex-col transition-all duration-300 ease-in-out relative z-10`}>
+        <aside className={`${isSidebarOpen ? 'md:w-64' : 'md:w-20'} w-full shrink-0 border-b md:border-b-0 md:border-r border-gray-100 dark:border-cyan-900/30 bg-white/80 dark:bg-slate-900/40 backdrop-blur-xl flex flex-col transition-all duration-300 ease-in-out relative z-10`}>
           <div className="p-4 flex items-center justify-between border-b border-gray-50 dark:border-cyan-900/30">
             <div className={`flex items-center gap-3 font-bold text-gray-800 dark:text-cyan-50 overflow-hidden ${!isSidebarOpen && 'hidden'}`}>
               <img src="/ausarta.png" alt="Ausarta Logo" className="h-8 w-auto object-contain dark:invert" />
@@ -330,8 +330,8 @@ const AppShell: React.FC = () => {
         </aside>
 
         {/* ── Main Content — renders the matched child route ── */}
-        <main className={`flex-1 overflow-y-auto p-4 md:p-8 relative transition-all duration-300 ${isChatOpen ? 'mr-0 sm:mr-[400px]' : 'mr-0'}`}>
-          <div className="w-full max-w-6xl mx-auto">
+        <main className={`flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 md:p-6 lg:p-8 relative transition-all duration-300 ${isChatOpen ? 'mr-0 sm:mr-[400px]' : 'mr-0'}`}>
+          <div className="w-full min-w-0 max-w-[100%]">
             {alerts.filter((a: any) => !hiddenAlerts.has(a.id)).length > 0 && (
               <div className="mb-6 space-y-2">
                 {alerts

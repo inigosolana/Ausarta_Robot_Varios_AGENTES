@@ -416,7 +416,7 @@ export const LiveMonitoring: React.FC = () => {
     const activeCallsCount = liveCallsMetrics?.total ?? sessions.length;
 
     return (
-        <div className="flex flex-col gap-4 h-full">
+        <div className="flex flex-col gap-4 h-full w-full min-w-0">
             {/* Métricas en tiempo real */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <MetricCard

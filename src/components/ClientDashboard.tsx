@@ -184,7 +184,7 @@ const ClientDashboard: React.FC<Props> = ({ empresaId }) => {
     const connectionRate = stats?.total_calls ? Math.round((stats.completed_calls / stats.total_calls) * 100) : 0;
 
     return (
-        <div className="space-y-8 animate-fade-in pb-10">
+        <div className="w-full min-w-0 space-y-6 lg:space-y-8 animate-fade-in pb-10">
             {/* Header / Filter */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
@@ -192,7 +192,7 @@ const ClientDashboard: React.FC<Props> = ({ empresaId }) => {
                         <TrendingUp size={24} />
                     </div>
                     <div>
-                        <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+                        <h2 className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-gray-900 dark:text-white tracking-tight">
                             {t('Welcome back', 'Bienvenido de nuevo')}, <span className="text-blue-600">{profile?.full_name?.split(' ')[0]}</span>
                         </h2>
                         <p className="text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-2 text-sm">

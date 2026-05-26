@@ -300,20 +300,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (isLoading && !stats) return <div className="p-8 text-center text-gray-500">{t('Cargando dashboard...')}</div>;
 
     return (
-        <div className="space-y-6 animate-fade-in">
+        <div className="w-full min-w-0 space-y-6 animate-fade-in">
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 {!title ? (
-                    <div className="flex items-center gap-3">
-                        <img src="/ausarta.png" alt="Logo" className="h-10 w-auto object-contain" />
-                        <div>
-                            <h2 className="text-3xl font-bold text-gray-900 dark:text-cyan-50 drop-shadow-[0_0_10px_rgba(0,240,255,0.3)]">{t('Panel de Administración')}</h2>
+                    <div className="flex items-center gap-3 min-w-0">
+                        <img src="/ausarta.png" alt="Logo" className="h-10 w-auto object-contain shrink-0" />
+                        <div className="min-w-0">
+                            <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-cyan-50 truncate">{t('Panel de Administración')}</h2>
                             <p className="text-gray-500 dark:text-cyan-400/70 text-sm">{t('Salud del sistema y estadísticas globales')}</p>
                         </div>
                     </div>
                 ) : (
-                    <div>
-                        <h2 className="text-2xl font-bold text-gray-900 dark:text-cyan-50 drop-shadow-[0_0_10px_rgba(0,240,255,0.3)]">{title}</h2>
+                    <div className="min-w-0">
+                        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-cyan-50">{title}</h2>
                         <p className="text-gray-500 dark:text-cyan-400/70 mt-1 text-sm">{t('Resumen de actividad')}</p>
                     </div>
                 )}
@@ -333,7 +333,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             {/* KPI Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 <StatCard title={t('Llamadas Globales')} value={stats?.total_calls || 0} icon={Phone} color="blue" />
                 <StatCard title={t('Completadas')} value={stats?.completed_calls || 0} icon={CheckCircle} color="green" />
                 <StatCard title={t('Tasa Completadas')} value={`${completionRate}%`} icon={BarChart2} color="purple" />
@@ -422,7 +422,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             )}
 
             {/* Donut + Top Performers */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
                 {/* Donut Chart */}
                 {donutData.length > 0 && (
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
@@ -498,18 +498,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
             </div>
 
-            {/* Main Content Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Supervision & Integrations */}
-                <div className="lg:col-span-1 space-y-6">
+            {/* Supervisión + actividad: ancho completo en pantallas grandes */}
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 lg:gap-6 w-full">
+                <div className="xl:col-span-4 space-y-4 lg:space-y-6 min-w-0">
                     <LiveMonitoring />
-                    {!hideIntegrations && (
-                        <ApiStatusWidget />
-                    )}
+                    {!hideIntegrations && <ApiStatusWidget />}
                 </div>
 
-                {/* Recent Activity - ENRICHED */}
-                <div className="lg:col-span-2">
+                <div className="xl:col-span-8 min-w-0">
                     <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl p-6 rounded-2xl border border-gray-100 dark:border-cyan-900/30 shadow-[0_0_15px_rgba(0,240,255,0.03)] overflow-hidden">
                         <div className="flex justify-between items-center mb-5">
                             <h3 className="text-lg font-bold text-gray-800 dark:text-cyan-50">{t('Última Actividad Global')}</h3>
@@ -541,7 +537,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                     <td className="py-3">
                                                         <div className="flex items-center gap-1.5">
                                                             <Building2 size={12} className="text-gray-400" />
-                                                            <span className="text-xs text-gray-600 font-medium truncate max-w-[100px]">{call.empresa_name}</span>
+                                                            <span className="text-xs text-gray-600 font-medium truncate max-w-[140px] xl:max-w-none">{call.empresa_name}</span>
                                                         </div>
                                                     </td>
                                                 )}
@@ -553,7 +549,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                                     <FlaskConical size={9} /> PRUEBA
                                                                 </span>
                                                             ) : (
-                                                                <span className="text-xs text-gray-700 font-medium truncate max-w-[120px]">{call.campaign || '—'}</span>
+                                                                <span className="text-xs text-gray-700 font-medium truncate max-w-[160px] xl:max-w-[220px]">{call.campaign || '—'}</span>
                                                             )}
                                                         </div>
                                                         <span className={`inline-flex self-start items-center px-1.5 py-0.5 rounded text-[9px] font-bold border ${tipoInfo.cls}`}>
