@@ -27,6 +27,7 @@ x-app-environment: &app-environment
   VOICE_ID_INES: ${VOICE_ID_INES:-}
   VOICE_ID_ALBA: ${VOICE_ID_ALBA:-}
   YEASTAR_HUMAN_TRANSFER_EXTENSION: ${YEASTAR_HUMAN_TRANSFER_EXTENSION:-1000}
+  AUSARTA_PUBLIC_IP: ${AUSARTA_PUBLIC_IP:-}
 
 services:
   backend:
@@ -129,6 +130,7 @@ services:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-${SUPABASE_URL}}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-${SUPABASE_KEY}}
         VITE_API_URL: ${VITE_API_URL:-}
+        VITE_AUSARTA_PUBLIC_IP: ${VITE_AUSARTA_PUBLIC_IP:-${AUSARTA_PUBLIC_IP:-}}
     container_name: ausarta-v2-frontend
     restart: unless-stopped
     ports:

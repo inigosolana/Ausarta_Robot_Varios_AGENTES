@@ -62,6 +62,30 @@ if not os.getenv("SIP_OUTBOUND_TRUNK_ID"):
 router = APIRouter(tags=["telephony"])
 
 
+def _resolve_ausarta_public_ip() -> str:
+    """
+    IP pública del servidor Ausarta para whitelist en Yeastar.
+    Se lee en runtime del backend (no requiere rebuild del frontend).
+    """
+    for key in ("AUSARTA_PUBLIC_IP", "VITE_AUSARTA_PUBLIC_IP"):
+        val = (os.getenv(key) or "").strip()
+        if val and val.lower() not in {"tu.ip.publica.aqui", "changeme"}:
+            return val
+    return ""
+
+
+@router.get("/api/telephony/platform-info")
+async def get_telephony_platform_info(
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """
+    Metadatos de plataforma para la pantalla de telefonía (IP whitelist Yeastar).
+    La variable debe estar en el .env del backend, p. ej. AUSARTA_PUBLIC_IP=1.2.3.4
+    """
+    _ = current_user
+    return {"ausarta_public_ip": _resolve_ausarta_public_ip()}
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Yeastar PBX — configuración multi-tenant (P-Series)
 # ──────────────────────────────────────────────────────────────────────────────

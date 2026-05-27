@@ -25,10 +25,6 @@ const EMPTY_FORM: YeastarConfig = {
   yeastar_client_secret: '',
 };
 
-/** IP pública de Ausarta para whitelist en Yeastar (definir en .env.local como VITE_AUSARTA_PUBLIC_IP) */
-const AUSARTA_PUBLIC_IP =
-  (import.meta.env.VITE_AUSARTA_PUBLIC_IP as string | undefined)?.trim() || '';
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const TelephonyView: React.FC = () => {
@@ -48,6 +44,23 @@ const TelephonyView: React.FC = () => {
   // ── Multi-tenant state ─────────────────────────────────────────────────────
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | null>(null);
+  /** IP desde backend (.env AUSARTA_PUBLIC_IP) — no depende del build Vite */
+  const [ausartaPublicIp, setAusartaPublicIp] = useState(
+    () => (import.meta.env.VITE_AUSARTA_PUBLIC_IP as string | undefined)?.trim() || '',
+  );
+
+  useEffect(() => {
+    apiFetch('/api/telephony/platform-info')
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = await res.json();
+        const ip = String(data?.ausarta_public_ip || '').trim();
+        if (ip) setAusartaPublicIp(ip);
+      })
+      .catch(() => {
+        /* silencioso: se usa fallback VITE_ o placeholder */
+      });
+  }, []);
 
   useEffect(() => {
     if (isPlatformOwner) {
@@ -273,9 +286,9 @@ const TelephonyView: React.FC = () => {
               </li>
               <li>
                 <strong>IP Permitida:</strong>{' '}
-                {AUSARTA_PUBLIC_IP ? (
+                {ausartaPublicIp ? (
                   <code className="bg-blue-100 px-2 py-0.5 rounded font-mono text-blue-950 font-semibold">
-                    {AUSARTA_PUBLIC_IP}
+                    {ausartaPublicIp}
                   </code>
                 ) : (
                   <code className="bg-amber-100 border border-amber-200 px-2 py-0.5 rounded font-mono text-amber-900 font-semibold">
@@ -283,10 +296,11 @@ const TelephonyView: React.FC = () => {
                   </code>
                 )}{' '}
                 <em className="text-blue-700/80">(La IP pública de este servidor)</em>
-                {!AUSARTA_PUBLIC_IP && (
+                {!ausartaPublicIp && (
                   <span className="block mt-1.5 text-xs text-amber-800/90">
-                    Configura <code className="bg-amber-50 px-1 rounded">VITE_AUSARTA_PUBLIC_IP</code> en
-                    el despliegue para mostrar la IP automáticamente.
+                    Añade <code className="bg-amber-50 px-1 rounded">AUSARTA_PUBLIC_IP=15.218.15.30</code>{' '}
+                    en el <strong>.env del backend</strong> (contenedor <code>backend</code> en Portainer) y
+                    reinicia solo el backend. No hace falta rebuild del frontend.
                   </span>
                 )}
               </li>
