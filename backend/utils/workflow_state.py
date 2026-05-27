@@ -96,6 +96,11 @@ def _safe_eval_condition(expr: str, variables: dict[str, Any]) -> bool:
         logger.debug(f"[workflow_state] No se pudo resolver valores de '{expr}': {exc}")
         return False
 
+    # FIX E — comparaciones string case-insensitive.
+    if isinstance(left, str) and isinstance(right, str):
+        left = left.strip().lower()
+        right = right.strip().lower()
+
     try:
         result = _SAFE_OPS[op_type](left, right)
         return bool(result)
@@ -187,7 +192,11 @@ class WorkflowStateMachine:
 
         # Contexto para evaluación de condiciones:
         # incluye las variables acumuladas + _response con la última respuesta
-        eval_ctx: dict[str, Any] = dict(self._variables)
+        # FIX E — normalizar variables string para evaluación robusta.
+        eval_ctx: dict[str, Any] = {
+            k: (v.strip().lower() if isinstance(v, str) else v)
+            for k, v in self._variables.items()
+        }
         if user_response:
             eval_ctx["_response"] = user_response.strip().lower()
             # También intentamos mapear el valor a la variable activa del nodo

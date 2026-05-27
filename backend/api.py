@@ -27,6 +27,7 @@ from routers.campaigns import router as campaigns_router
 from routers.n8n_proxy import router as n8n_proxy_router
 from routers.assistant import router as assistant_router
 from routers.api_credits import router as api_credits_router
+from routers.monitoring import router as monitoring_router
 
 # --- CONFIGURACIÓN DE LOGS ---
 # Configurado antes de load_dotenv para capturar cualquier problema de arranque
@@ -133,6 +134,7 @@ app.include_router(campaigns_router)
 app.include_router(n8n_proxy_router)
 app.include_router(assistant_router)
 app.include_router(api_credits_router)
+app.include_router(monitoring_router)
 
 
 # --- ENDPOINTS BASE ---

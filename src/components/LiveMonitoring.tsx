@@ -25,9 +25,9 @@ import {
     Zap,
     Plug
 } from 'lucide-react';
-import { fetchLiveCallsMetrics, fetchRedisMetrics } from '../lib/adminMetrics';
 import type { LiveCallsMetricsResponse, RedisMetricsResponse } from '../types';
 import { useTranslation } from 'react-i18next';
+import { supabase } from '../lib/supabase';
 import {
     Room,
     RoomEvent,
@@ -114,39 +114,94 @@ export const LiveMonitoring: React.FC = () => {
     const transcriptsContainerRef = useRef<HTMLDivElement>(null);
     const audioElementsRef = useRef<HTMLAudioElement[]>([]);
     const entryIdCounter = useRef(0);
+    // FIX H — referencia al EventSource activo para cerrar en cleanup.
+    const sseRef = useRef<EventSource | null>(null);
 
-    const loadMetrics = useCallback(async () => {
-        try {
-            setMetricsError(null);
-            const [live, redis] = await Promise.all([
-                fetchLiveCallsMetrics(),
-                fetchRedisMetrics(),
-            ]);
-            setLiveCallsMetrics(live);
-            setRedisMetrics(redis);
-            setSessions(
-                live.rooms.map((r) => ({
-                    sid: r.sid,
-                    name: r.name,
-                    num_participants: r.num_participants,
-                    created_at: r.created_at,
-                }))
-            );
-        } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : 'Error cargando métricas';
-            setMetricsError(msg);
-            console.error('Metrics polling error:', err);
-        } finally {
-            setMetricsLoading(false);
+    // FIX H — Sustituye el setInterval de polling por SSE.
+    // EventSource nativo no admite Authorization header, así que pasamos el JWT
+    // como query param ?token=<jwt> (único método estándar para SSE autenticado).
+    const connectSSE = useCallback(async () => {
+        // Cerrar conexión anterior si existe
+        if (sseRef.current) {
+            sseRef.current.close();
+            sseRef.current = null;
         }
+
+        let token: string | null = null;
+        try {
+            const { data } = await supabase.auth.getSession();
+            token = data.session?.access_token ?? null;
+        } catch {
+            /* ignore — reintentará en el siguiente ciclo */
+        }
+
+        if (!token) {
+            // Sin token disponible aún, reintenta en 3s
+            setTimeout(connectSSE, 3000);
+            return;
+        }
+
+        const API_URL = (import.meta as any).env.VITE_API_URL || '';
+        const url = `${API_URL}/api/monitoring/stream?token=${encodeURIComponent(token)}`;
+
+        const es = new EventSource(url);
+        sseRef.current = es;
+
+        es.onmessage = (evt) => {
+            try {
+                const payload = JSON.parse(evt.data);
+                if (payload.error) {
+                    console.warn('[SSE] Error del servidor:', payload.error);
+                    return;
+                }
+                const live: LiveCallsMetricsResponse | undefined = payload.live_calls;
+                const redis: RedisMetricsResponse | undefined = payload.redis;
+
+                if (live) {
+                    setLiveCallsMetrics(live);
+                    setSessions(
+                        live.rooms.map((r) => ({
+                            sid: r.sid,
+                            name: r.name,
+                            num_participants: r.num_participants,
+                            created_at: r.created_at,
+                        }))
+                    );
+                }
+                if (redis && Object.keys(redis).length > 0) {
+                    setRedisMetrics(redis as RedisMetricsResponse);
+                }
+                setMetricsError(null);
+                setMetricsLoading(false);
+            } catch (parseErr) {
+                console.warn('[SSE] Parse error:', parseErr);
+            }
+        };
+
+        es.onerror = () => {
+            // EventSource reconecta automáticamente; sólo actualizamos el estado visual.
+            setMetricsError('Reconectando métricas SSE…');
+            // Si el token expiró (error 401/403), cerramos y reconectamos con token fresco.
+            es.close();
+            sseRef.current = null;
+            setTimeout(connectSSE, 5000);
+        };
     }, []);
 
-    // Polling métricas admin (LiveKit + Redis) cada 8s
+    const loadMetrics = useCallback(() => {
+        // Mantenemos loadMetrics como función vacía para no romper las llamadas
+        // en el botón de actualizar manual — el SSE actualiza estado en tiempo real.
+    }, []);
+
+    // Conectar SSE al montar el componente
     useEffect(() => {
-        loadMetrics();
-        const metricsInterval = setInterval(loadMetrics, 8000);
-        return () => clearInterval(metricsInterval);
-    }, [loadMetrics]);
+        connectSSE();
+        return () => {
+            // Desconectar SSE al desmontar
+            sseRef.current?.close();
+            sseRef.current = null;
+        };
+    }, [connectSSE]);
 
     // Fallback: sesiones vía dashboard solo si fallan las métricas admin
     useEffect(() => {
@@ -500,7 +555,7 @@ export const LiveMonitoring: React.FC = () => {
                         </div>
                     )}
                     <button
-                        onClick={() => { loadSessions(); loadMetrics(); }}
+                        onClick={() => { loadSessions(); connectSSE(); }}
                         disabled={isLoading || metricsLoading}
                         className="p-1.5 hover:bg-white dark:hover:bg-gray-600 rounded-lg transition-colors disabled:opacity-50"
                         title={t('Refresh', 'Actualizar')}

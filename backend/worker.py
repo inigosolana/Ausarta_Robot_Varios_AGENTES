@@ -28,6 +28,7 @@ import asyncio
 
 from arq import cron
 from arq.connections import ArqRedis, RedisSettings
+from utils.call_schedule import is_call_allowed
 
 logger = logging.getLogger("arq-worker")
 
@@ -315,7 +316,10 @@ async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
     try:
         camp_res = await sb_query(
             lambda: supabase.table("campaigns")
-            .select("id, empresa_id, name, agent_id")
+            .select(
+                "id, empresa_id, name, agent_id, call_start_hour, call_end_hour, "
+                "call_timezone, forbidden_weekdays"
+            )
             .eq("status", "active")
             .execute()
         )
@@ -366,7 +370,57 @@ async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
         logger.info("[Orchestrator] Sin leads pendientes. Fin de ciclo.")
         return
 
-    logger.info(f"[Orchestrator] Total leads a despachar: {len(leads_to_dispatch)}")
+    # FIX A — claim atómico: convertimos la carrera en operación idempotente.
+    # Si otro proceso ya cambió el lead, el UPDATE no devuelve filas y lo saltamos.
+    claimed_leads: list[dict] = []
+    for lead in leads_to_dispatch:
+        lead_id = lead["id"]
+        now_utc = datetime.now(timezone.utc)
+        allowed_hours = (
+            int(lead.get("call_start_hour") or 9),
+            int(lead.get("call_end_hour") or 21),
+        )
+        tz_name = lead.get("call_timezone") or "Europe/Madrid"
+        forbidden_days = set(lead.get("forbidden_weekdays") or {6})
+        can_call, reason = is_call_allowed(
+            now=now_utc,
+            timezone_str=tz_name,
+            allowed_hours=allowed_hours,
+            forbidden_weekdays=forbidden_days,
+        )
+        if not can_call:
+            logger.info(
+                f"[Orchestrator] Lead {lead_id} saltado por horario: {reason}"
+            )
+            continue
+
+        try:
+            claim_res = await sb_query(
+                lambda: supabase.table("campaign_leads")
+                .update(
+                    {
+                        "status": "calling",
+                        "last_call_at": now_utc.isoformat(),
+                    }
+                )
+                .eq("id", lead_id)
+                .eq("status", "pending")
+                .execute()
+            )
+            if not (claim_res.data or []):
+                logger.info(
+                    f"[Orchestrator] Lead {lead_id} ya reclamado por otro proceso. Skipping."
+                )
+                continue
+            claimed_leads.append(lead)
+        except Exception as claim_err:
+            logger.error(f"[Orchestrator] Error en claim atómico lead {lead_id}: {claim_err}")
+
+    if not claimed_leads:
+        logger.info("[Orchestrator] Sin leads reclamados en este ciclo.")
+        return
+
+    logger.info(f"[Orchestrator] Total leads a despachar (claimed): {len(claimed_leads)}")
 
     # ── Paso 4: Dispatch con concurrencia limitada ────────────────────────────
     semaphore = asyncio.Semaphore(max_parallel)
@@ -386,20 +440,7 @@ async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
 
         async with semaphore:
             try:
-                # 1. Marcar el lead como 'calling' antes del dispatch para evitar
-                #    que el siguiente tick del cron lo vuelva a coger.
-                await sb_query(
-                    lambda: supabase.table("campaign_leads")
-                    .update({
-                        "status": "calling",
-                        "last_call_at": datetime.now(timezone.utc).isoformat(),
-                    })
-                    .eq("id", lead_id)
-                    .execute()
-                )
-                logger.info(f"[Orchestrator] Lead {lead_id} marcado como 'calling'.")
-
-                # 2. Crear encuesta
+                # 1. Crear encuesta
                 enc_res = await sb_query(
                     lambda: supabase.table("encuestas").insert({
                         "telefono": phone,
@@ -414,7 +455,7 @@ async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
                 )
                 encuesta_id = enc_res.data[0]["id"]
 
-                # 3. Vincular encuesta al lead
+                # 2. Vincular encuesta al lead
                 await sb_query(
                     lambda: supabase.table("campaign_leads")
                     .update({"call_id": encuesta_id})
@@ -422,7 +463,7 @@ async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
                     .execute()
                 )
 
-                # 4. Construir nombre de sala y metadata
+                # 3. Construir nombre de sala y metadata
                 room_name = (
                     f"llamada_ausarta_empresa_{empresa_id}"
                     f"_campana_{camp_id}"
@@ -439,10 +480,10 @@ async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
                     "survey_id": int(encuesta_id),
                 }
 
-                # 5. Crear sala LiveKit
+                # 4. Crear sala LiveKit
                 await create_isolated_room(room_name, metadata=room_metadata)
 
-                # 6. Despachar agente antes del SIP (para que esté listo cuando conteste)
+                # 5. Despachar agente antes del SIP (para que esté listo cuando conteste)
                 agent_name = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
                 await dispatch_agent_explicit(
                     room_name=room_name,
@@ -467,7 +508,7 @@ async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
                     )
                     return
 
-                # 7. Crear participante SIP
+                # 6. Crear participante SIP
                 sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
                 await lkapi.sip.create_sip_participant(
                     lk_api.CreateSIPParticipantRequest(
@@ -496,7 +537,7 @@ async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
                     logger.error(f"[Orchestrator] Error revirtiendo lead {lead_id}: {revert_err}")
 
     # Lanzar todos los dispatches con control de concurrencia
-    await asyncio.gather(*[_dispatch_one(lead) for lead in leads_to_dispatch])
+    await asyncio.gather(*[_dispatch_one(lead) for lead in claimed_leads])
     logger.info("[Orchestrator] ◀ Ciclo completado.")
 
 
@@ -552,6 +593,16 @@ async def campaign_scheduler_task(ctx: dict[str, Any]) -> None:
     for camp in campaigns:
         campaign_id = camp["id"]
         empresa_id = camp.get("empresa_id") or 0
+        campaign_type = (camp.get("type") or "").strip().lower()
+        use_orchestrator = bool(camp.get("use_orchestrator"))
+
+        # FIX A — evitar doble despacho con orquestador.
+        if campaign_type == "orchestrated" or use_orchestrator:
+            logger.debug(
+                f"[ARQ] Scheduler salta campaña {campaign_id} "
+                f"(type={campaign_type}, use_orchestrator={use_orchestrator})"
+            )
+            continue
 
         cancel_key = f"ausarta:campaign:cancel:{campaign_id}"
         try:
@@ -561,6 +612,26 @@ async def campaign_scheduler_task(ctx: dict[str, Any]) -> None:
             pass
 
         if await _is_empresa_locked(empresa_id):
+            continue
+
+        # FIX G — cumplimiento horario por campaña.
+        now_utc = datetime.now(timezone.utc)
+        allowed_hours = (
+            int(camp.get("call_start_hour") or 9),
+            int(camp.get("call_end_hour") or 21),
+        )
+        tz_name = camp.get("call_timezone") or "Europe/Madrid"
+        forbidden_days = set(camp.get("forbidden_weekdays") or {6})
+        can_call, reason = is_call_allowed(
+            now=now_utc,
+            timezone_str=tz_name,
+            allowed_hours=allowed_hours,
+            forbidden_weekdays=forbidden_days,
+        )
+        if not can_call:
+            logger.info(
+                f"[ARQ] Scheduler salta campaña {campaign_id} por horario: {reason}"
+            )
             continue
 
         # Per-empresa concurrent call rate limit

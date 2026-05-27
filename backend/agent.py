@@ -1019,6 +1019,11 @@ class CallSession:
 
         # Referencias a las tareas en background
         self._tasks: list[asyncio.Task] = []
+        # FIX B — serializa los turns de workflow para evitar advance() en paralelo.
+        self._workflow_lock = asyncio.Lock()
+        # FIX F — control de fillers de latencia.
+        self._filler_task: asyncio.Task | None = None
+        self._llm_responding = False
 
     # ── Helpers de transcripción ───────────────────────────────────────────────
 
@@ -1071,16 +1076,45 @@ class CallSession:
 
     # ── Workflow: avance de máquina de estados ─────────────────────────────────
 
-    def _extract_variable_value(self, user_text: str, variable: str | None) -> str:
+    def _extract_variable_value(
+        self,
+        user_text: str,
+        variable: str | None,
+        wf_sm: "WorkflowStateMachine | None" = None,
+    ) -> str:
         """
         PARTE 4: extrae el valor relevante de la respuesta del usuario para
-        guardarlo en una variable del workflow. Estrategia simple: devuelve
-        el texto normalizado (minúsculas, sin espacios extra).
-        El compilador de workflow puede refinar esto en futuras versiones.
+        guardarlo en una variable del workflow.
+
+        FIX D:
+          1) Si el nodo actual tiene options (<=10), intenta mapear por substring.
+          2) Si no hay match, devuelve las primeras 3 palabras normalizadas.
+          3) Fallback: texto completo normalizado.
         """
         if not user_text:
             return ""
-        return user_text.strip().lower()
+        normalized = " ".join(user_text.strip().lower().split())
+        if not normalized:
+            return ""
+
+        current = wf_sm.current_step() if wf_sm is not None else None
+        options = (current.get("options") or []) if current else []
+        if isinstance(options, list) and 0 < len(options) <= 10:
+            normalized_options = [
+                (opt, " ".join(str(opt).strip().lower().split()))
+                for opt in options
+                if str(opt).strip()
+            ]
+            normalized_options.sort(key=lambda item: len(item[1]), reverse=True)
+            for original_opt, norm_opt in normalized_options:
+                if norm_opt and norm_opt in normalized:
+                    return str(original_opt)
+
+        words = normalized.split()
+        if words:
+            return " ".join(words[:3])
+
+        return normalized
 
     async def _handle_workflow_turn(
         self,
@@ -1093,105 +1127,113 @@ class CallSession:
         2. Avanza la máquina de estados.
         3. Actúa según el tipo del siguiente nodo.
         """
-        try:
-            current = wf_sm.current_step()
-            if not current:
-                return
+        async with self._workflow_lock:
+            try:
+                # while-loop para resolver nodos "condition" consecutivos sin recursión.
+                loop_user_response = user_response
+                while True:
+                    current = wf_sm.current_step()
+                    if not current:
+                        return
 
-            # Guardar variable si el nodo la requiere
-            var_name = current.get("variable")
-            if var_name and user_response:
-                value = self._extract_variable_value(user_response, var_name)
-                wf_sm.set_variable(var_name, value)
+                    # Guardar variable si el nodo la requiere
+                    var_name = current.get("variable")
+                    if var_name and loop_user_response:
+                        value = self._extract_variable_value(loop_user_response, var_name, wf_sm)
+                        wf_sm.set_variable(var_name, value)
 
-            # Avanzar al siguiente nodo
-            next_step = wf_sm.advance(user_response)
+                    # Avanzar al siguiente nodo
+                    next_step = wf_sm.advance(loop_user_response)
 
-            if next_step is None:
-                logger.info(f"[{self.job_id}] Workflow finalizado (sin siguiente nodo)")
-                return
+                    if next_step is None:
+                        logger.info(f"[{self.job_id}] Workflow finalizado (sin siguiente nodo)")
+                        return
 
-            ntype = next_step.get("type", "message")
-            logger.info(
-                f"[{self.job_id}] Workflow → nodo '{next_step.get('id')}' "
-                f"(type={ntype}, label='{next_step.get('label')}')"
-            )
+                    ntype = next_step.get("type", "message")
+                    logger.info(
+                        f"[{self.job_id}] Workflow → nodo '{next_step.get('id')}' "
+                        f"(type={ntype}, label='{next_step.get('label')}')"
+                    )
 
-            if ntype in ("message", "question"):
-                content = (next_step.get("content") or "").strip()
-                if content:
-                    try:
-                        await self.session.say(content, allow_interruptions=True)
-                    except Exception as say_err:
-                        logger.warning(
-                            f"[{self.job_id}] Workflow say() error: {say_err}"
+                    if ntype in ("message", "question"):
+                        content = (next_step.get("content") or "").strip()
+                        if content:
+                            try:
+                                await self.session.say(content, allow_interruptions=True)
+                            except Exception as say_err:
+                                logger.warning(
+                                    f"[{self.job_id}] Workflow say() error: {say_err}"
+                                )
+                        return
+
+                    if ntype == "condition":
+                        # Nodo de routing puro: no habla, avanza inmediatamente
+                        logger.info(
+                            f"[{self.job_id}] Nodo condition '{next_step.get('id')}' — avanzando sin hablar"
                         )
+                        loop_user_response = ""
+                        continue
 
-            elif ntype == "condition":
-                # Nodo de routing puro: no habla, avanzar inmediatamente
-                logger.info(
-                    f"[{self.job_id}] Nodo condition '{next_step.get('id')}' — avanzando sin hablar"
-                )
-                await self._handle_workflow_turn("", wf_sm)
+                    if ntype == "llm_free":
+                        # Nodo libre: inyectar el sub-prompt como mensaje de sistema
+                        # y dejar que el LLM responda libremente en el siguiente turno
+                        sub_prompt = (next_step.get("prompt") or next_step.get("content") or "").strip()
+                        if sub_prompt:
+                            try:
+                                chat_ctx = getattr(
+                                    self.session,
+                                    "chat_ctx",
+                                    getattr(self.session, "chat_context", None),
+                                )
+                                if chat_ctx is not None and hasattr(chat_ctx, "add_message"):
+                                    chat_ctx.add_message(
+                                        role="system",
+                                        content=(
+                                            f"[Nodo libre activo] Responde ahora usando este sub-prompt: "
+                                            f"{sub_prompt}"
+                                        ),
+                                    )
+                                    logger.info(
+                                        f"[{self.job_id}] Sub-prompt de nodo llm_free inyectado"
+                                    )
+                            except Exception as ctx_err:
+                                logger.warning(
+                                    f"[{self.job_id}] No se pudo inyectar sub-prompt de nodo llm_free: {ctx_err}"
+                                )
+                        return
 
-            elif ntype == "llm_free":
-                # Nodo libre: inyectar el sub-prompt como mensaje de sistema
-                # y dejar que el LLM responda libremente en el siguiente turno
-                sub_prompt = (next_step.get("prompt") or next_step.get("content") or "").strip()
-                if sub_prompt:
-                    try:
-                        chat_ctx = getattr(
-                            self.session,
-                            "chat_ctx",
-                            getattr(self.session, "chat_context", None),
-                        )
-                        if chat_ctx is not None and hasattr(chat_ctx, "add_message"):
-                            chat_ctx.add_message(
-                                role="system",
-                                content=(
-                                    f"[Nodo libre activo] Responde ahora usando este sub-prompt: "
-                                    f"{sub_prompt}"
-                                ),
-                            )
-                            logger.info(
-                                f"[{self.job_id}] Sub-prompt de nodo llm_free inyectado"
-                            )
-                    except Exception as ctx_err:
-                        logger.warning(
-                            f"[{self.job_id}] No se pudo inyectar sub-prompt de nodo llm_free: {ctx_err}"
-                        )
+                    if ntype == "transfer":
+                        try:
+                            transfer_payload = {
+                                "room_name": self.room_name,
+                                "empresa_id": int(self.agent_config.get("empresa_id") or 0),
+                                "call_id": self.room_name,
+                                "extension": os.getenv("YEASTAR_HUMAN_TRANSFER_EXTENSION", "1000"),
+                                "survey_id": int(self.survey_id) if str(self.survey_id).isdigit() else 0,
+                                "motivo": "Transferencia por guion de workflow",
+                            }
+                            await enqueue_transfer_to_human({
+                                "guardar_payload": {
+                                    "id_encuesta": int(self.survey_id) if str(self.survey_id).isdigit() else 0,
+                                    "status": "transferred",
+                                    "comentarios": "Transferido por workflow",
+                                },
+                                "transfer_payload": transfer_payload,
+                            })
+                            logger.info(f"[{self.job_id}] Workflow: transferencia encolada")
+                        except Exception as tr_err:
+                            logger.error(f"[{self.job_id}] Workflow: error encolando transferencia: {tr_err}")
+                        return
 
-            elif ntype == "transfer":
-                try:
-                    transfer_payload = {
-                        "room_name": self.room_name,
-                        "empresa_id": int(self.agent_config.get("empresa_id") or 0),
-                        "call_id": self.room_name,
-                        "extension": os.getenv("YEASTAR_HUMAN_TRANSFER_EXTENSION", "1000"),
-                        "survey_id": int(self.survey_id) if str(self.survey_id).isdigit() else 0,
-                        "motivo": "Transferencia por guion de workflow",
-                    }
-                    await enqueue_transfer_to_human({
-                        "guardar_payload": {
-                            "id_encuesta": int(self.survey_id) if str(self.survey_id).isdigit() else 0,
-                            "status": "transferred",
-                            "comentarios": "Transferido por workflow",
-                        },
-                        "transfer_payload": transfer_payload,
-                    })
-                    logger.info(f"[{self.job_id}] Workflow: transferencia encolada")
-                except Exception as tr_err:
-                    logger.error(f"[{self.job_id}] Workflow: error encolando transferencia: {tr_err}")
-
-            elif ntype == "end":
-                logger.info(f"[{self.job_id}] Workflow: nodo 'end' alcanzado — encolando colgar sala")
-                try:
-                    await enqueue_colgar_sala(self.room_name)
-                except Exception as end_err:
-                    logger.warning(f"[{self.job_id}] Workflow end: error encolando colgar: {end_err}")
-
-        except Exception as wf_err:
-            logger.error(f"[{self.job_id}] Error en _handle_workflow_turn: {wf_err}")
+                    if ntype == "end":
+                        logger.info(f"[{self.job_id}] Workflow: nodo 'end' alcanzado — encolando colgar sala")
+                        try:
+                            await enqueue_colgar_sala(self.room_name)
+                        except Exception as end_err:
+                            logger.warning(f"[{self.job_id}] Workflow end: error encolando colgar: {end_err}")
+                        return
+            except Exception as wf_err:
+                logger.error(f"[{self.job_id}] Error en _handle_workflow_turn: {wf_err}")
 
     # ── Detección de idioma ────────────────────────────────────────────────────
 
@@ -1416,6 +1458,14 @@ class CallSession:
         while not self.stop_guard.is_set():
             await asyncio.sleep(0.25)
             try:
+                # FIX C — no repromptear si el workflow no espera respuesta.
+                wf_sm = getattr(self.agent_instance, "_workflow_sm", None)
+                if wf_sm is not None and not wf_sm.is_finished():
+                    current = wf_sm.current_step()
+                    if current and current.get("type") in ("message", "condition", "transfer", "end"):
+                        await asyncio.sleep(0.25)
+                        continue
+
                 now = self.loop_obj.time()
                 if not self.reprompt_state["waiting_user"]:
                     continue
@@ -1448,7 +1498,7 @@ class CallSession:
         """Registra todos los handlers de session y ctx.room."""
 
         @self.session.on("user_input_transcribed")
-        def _on_user_input_transcribed(ev):
+        async def _on_user_input_transcribed(ev):
             try:
                 content = _normalize_message_text(getattr(ev, "transcript", ""))
                 is_final = bool(getattr(ev, "is_final", True))
@@ -1498,9 +1548,7 @@ class CallSession:
                 # PARTE 4 — Integración workflow: avanzar máquina de estados
                 wf_sm = getattr(self.agent_instance, "_workflow_sm", None)
                 if wf_sm is not None and not wf_sm.is_finished():
-                    asyncio.create_task(
-                        self._handle_workflow_turn(content, wf_sm)
-                    )
+                    await self._handle_workflow_turn(content, wf_sm)
             except Exception as ev_err:
                 logger.debug(f"[{self.job_id}] Error evento user_input_transcribed: {ev_err}")
 
@@ -1539,11 +1587,17 @@ class CallSession:
                 if new_state == "listening" and old_state in ("speaking", "thinking"):
                     self.reprompt_state["last_assistant_at"] = now
                     self.reprompt_state["waiting_user"] = True
+                    self._llm_responding = False
                 if new_state == "thinking":
+                    # FIX F — cancela fillers anteriores para evitar solapamientos.
+                    if self._filler_task and not self._filler_task.done():
+                        self._filler_task.cancel()
                     if (now - float(self.runtime_state["last_filler_at"])) > 1.0:
                         self.runtime_state["last_filler_at"] = now
                         async def _say_latency_filler():
                             try:
+                                if self._llm_responding:
+                                    return
                                 await self.session.say(
                                     random.choice(self.LATENCY_FILLERS), allow_interruptions=True
                                 )
@@ -1551,7 +1605,7 @@ class CallSession:
                                 logger.debug(
                                     f"[{self.job_id}] Filler de latencia no enviado: {fill_err}"
                                 )
-                        asyncio.create_task(_say_latency_filler())
+                        self._filler_task = asyncio.create_task(_say_latency_filler())
                     try:
                         if self.bg_player is not None:
                             dyn_volume, bursts = _estimate_thinking_complexity(
@@ -1564,6 +1618,11 @@ class CallSession:
                                 )
                     except Exception as k_err:
                         logger.debug(f"[{self.job_id}] No se pudo aplicar teclado dinámico: {k_err}")
+                if new_state == "speaking":
+                    # FIX F — el LLM ya está respondiendo: suprimir fillers pendientes.
+                    self._llm_responding = True
+                    if self._filler_task and not self._filler_task.done():
+                        self._filler_task.cancel()
             except Exception as ev_err:
                 logger.debug(f"[{self.job_id}] Error evento agent_state_changed: {ev_err}")
 
