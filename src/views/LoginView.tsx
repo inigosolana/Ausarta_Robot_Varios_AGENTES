@@ -7,6 +7,9 @@ import './login.css';
 
 type ViewMode = 'login' | 'forgot' | 'forgot-sent' | 'update-password';
 
+/** Logo grande, fondo transparente, colores claros para UI oscura */
+const LOGO_SRC = '/ausarta-logo-light.png';
+
 const LoginView: React.FC = () => {
     const { signIn, user, profile, loading: authLoading } = useAuth();
     const navigate = useNavigate();
@@ -202,26 +205,34 @@ const LoginView: React.FC = () => {
                     <div className="login-hero-wave" />
                     <div className="login-hero-brand">
                         <img
-                            src="/ausarta.png"
-                            alt=""
-                            className="h-14 w-14 object-contain"
+                            src={LOGO_SRC}
+                            alt="Ausarta"
+                            className="login-logo"
+                            onError={(e) => {
+                                (e.target as HTMLImageElement).src = '/ausarta.png';
+                            }}
                         />
-                        <h1>Ausarta</h1>
                         <p>Enterprise Voice Intelligence Command Center</p>
                     </div>
                 </aside>
 
                 {/* Panel formulario — única columna de inputs */}
                 <section className="login-form-panel">
-                    <div className="w-full max-w-[360px] mx-auto">
+                    <div className="login-form-inner">
                         {/* Marca móvil */}
-                        <div className="flex items-center justify-center gap-2 mb-8 lg:hidden">
-                            <img src="/ausarta.png" alt="Ausarta" className="h-10 w-10 object-contain" />
-                            <span className="text-xl font-bold text-[#4edea3]">Ausarta</span>
+                        <div className="flex justify-center mb-10 lg:hidden">
+                            <img
+                                src={LOGO_SRC}
+                                alt="Ausarta"
+                                className="login-logo login-logo-mobile"
+                                onError={(e) => {
+                                    (e.target as HTMLImageElement).src = '/ausarta.png';
+                                }}
+                            />
                         </div>
 
                         <header className="mb-8 text-center lg:text-left">
-                            <h2 className="text-2xl font-semibold text-[#dae2fd] m-0">{title}</h2>
+                            <h2 className="font-semibold text-[#dae2fd] m-0">{title}</h2>
                             <p className="text-[#bbcabf] text-[0.9375rem] mt-2 mb-0">{subtitle}</p>
                         </header>
 
