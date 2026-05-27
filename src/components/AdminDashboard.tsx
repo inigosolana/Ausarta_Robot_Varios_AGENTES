@@ -499,17 +499,25 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
             </div>
 
-            {/* Supervisión + actividad: ancho completo en pantallas grandes */}
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 lg:gap-6 w-full">
-                <div className="xl:col-span-4 space-y-4 lg:space-y-6 min-w-0">
-                    <LiveMonitoring />
-                    {!hideIntegrations && <ApiStatusWidget />}
+            {/* Supervisión + integraciones + actividad */}
+            <div className="space-y-4 lg:space-y-6 w-full">
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 lg:gap-6 min-w-0">
+                    <div className="min-w-0">
+                        <LiveMonitoring />
+                    </div>
+                    {!hideIntegrations && (
+                        <div className="min-w-0">
+                            <ApiStatusWidget />
+                        </div>
+                    )}
                     {!hideIntegrations && (profile?.role === 'admin' || profile?.role === 'superadmin') && (
-                        <ApiCreditsWidget />
+                        <div className="min-w-0">
+                            <ApiCreditsWidget />
+                        </div>
                     )}
                 </div>
 
-                <div className="xl:col-span-8 min-w-0">
+                <div className="min-w-0">
                     <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl p-6 rounded-2xl border border-gray-100 dark:border-cyan-900/30 shadow-[0_0_15px_rgba(0,240,255,0.03)] overflow-hidden">
                         <div className="flex justify-between items-center mb-5">
                             <h3 className="text-lg font-bold text-gray-800 dark:text-cyan-50">{t('Última Actividad Global')}</h3>
