@@ -248,11 +248,18 @@ async def update_empresa_trunks(
         "sip_inbound_trunk_id": _norm_trunk(payload.get("sip_inbound_trunk_id")),
     }
 
-    res = await sb_query(
+    await sb_query(
         lambda: supabase.table("empresas")
         .update(update)
         .eq("id", empresa_id)
+        .execute()
+    )
+
+    res = await sb_query(
+        lambda: supabase.table("empresas")
         .select("id, nombre, sip_outbound_trunk_id, sip_inbound_trunk_id")
+        .eq("id", empresa_id)
+        .limit(1)
         .execute()
     )
     empresa_nombre = emp_check.data[0].get("nombre", str(empresa_id))
