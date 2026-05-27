@@ -11,7 +11,28 @@
     tailwind.config = {
       darkMode: 'class',
       theme: {
-        extend: {}
+        extend: {
+          colors: {
+            background: '#0b1326',
+            surface: '#0b1326',
+            'surface-container': '#171f33',
+            'surface-container-low': '#131b2e',
+            'surface-container-highest': '#2d3449',
+            'on-background': '#dae2fd',
+            'on-surface': '#dae2fd',
+            'on-surface-variant': '#bbcabf',
+            primary: '#4edea3',
+            'primary-fixed-dim': '#6ffbbe',
+            'on-primary': '#003824',
+            'outline-variant': '#3c4a42',
+            outline: '#86948a',
+            error: '#ffb4ab',
+            'on-error-container': '#ffdad6',
+          },
+          fontFamily: {
+            geist: ['Geist', 'Inter', 'sans-serif'],
+          },
+        }
       }
     }
     // Initialize dark mode from localStorage or system preference
@@ -22,6 +43,8 @@
     }
   </script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap" rel="stylesheet">
   <style>
     body {
       font-family: 'Inter', sans-serif;

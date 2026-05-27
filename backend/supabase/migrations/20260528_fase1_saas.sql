@@ -66,3 +66,13 @@ CREATE POLICY "yeastar_extensions: tenant solo ve los suyos" ON yeastar_extensio
 
 -- Añadir columna de resumen a encuestas para guardar el nuevo output del call_analyzer
 ALTER TABLE encuestas ADD COLUMN IF NOT EXISTS resumen_llamada TEXT;
+
+-- Función RPC para incrementar llamadas atómicamente y evitar condiciones de carrera (race conditions)
+CREATE OR REPLACE FUNCTION increment_llamadas_consumidas(p_empresa_id INTEGER)
+RETURNS void AS $$
+BEGIN
+    UPDATE empresas
+    SET llamadas_consumidas_mes = COALESCE(llamadas_consumidas_mes, 0) + 1
+    WHERE id = p_empresa_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
