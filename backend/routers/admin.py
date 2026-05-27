@@ -85,6 +85,157 @@ def _canonical_impersonation_role(raw_role: str | None) -> str:
     return role
 
 
+VALID_PLANS = {"basico", "profesional", "enterprise"}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Fase 1 SaaS — Gestión de planes y límites de empresa
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.get("/empresas")
+async def list_empresas_with_limits(
+    current_user: CurrentUser = Depends(require_superadmin),
+):
+    """
+    Lista todas las empresas con sus columnas de plan/límites.
+    Solo accesible para superadmin.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    _ = current_user
+    res = await sb_query(
+        lambda: supabase.table("empresas")
+        .select(
+            "id, nombre, responsable, plan, max_llamadas_mes, "
+            "max_agentes, llamadas_consumidas_mes, created_at"
+        )
+        .order("nombre")
+        .execute()
+    )
+    return res.data or []
+
+
+@router.put("/empresas/{empresa_id}/limits")
+async def update_empresa_limits(
+    empresa_id: int,
+    payload: dict,
+    current_user: CurrentUser = Depends(require_superadmin),
+):
+    """
+    Actualiza el plan y los límites de una empresa.
+    Solo accesible para superadmin.
+
+    Body (todos opcionales):
+      - plan: "basico" | "profesional" | "enterprise"
+      - max_llamadas_mes: int ≥ 0
+      - max_agentes: int ≥ 0
+      - reset_consumidas: bool — si true, pone llamadas_consumidas_mes = 0
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    # Validar que la empresa exista
+    emp_check = await sb_query(
+        lambda: supabase.table("empresas")
+        .select("id, nombre")
+        .eq("id", empresa_id)
+        .limit(1)
+        .execute()
+    )
+    if not emp_check.data:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+    update: dict = {}
+
+    plan = payload.get("plan")
+    if plan is not None:
+        if str(plan) not in VALID_PLANS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Plan inválido. Valores permitidos: {', '.join(sorted(VALID_PLANS))}",
+            )
+        update["plan"] = str(plan)
+
+    max_llamadas = payload.get("max_llamadas_mes")
+    if max_llamadas is not None:
+        try:
+            val = int(max_llamadas)
+            if val < 0:
+                raise ValueError
+            update["max_llamadas_mes"] = val
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="max_llamadas_mes debe ser un entero ≥ 0")
+
+    max_agentes = payload.get("max_agentes")
+    if max_agentes is not None:
+        try:
+            val = int(max_agentes)
+            if val < 0:
+                raise ValueError
+            update["max_agentes"] = val
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="max_agentes debe ser un entero ≥ 0")
+
+    if payload.get("reset_consumidas"):
+        update["llamadas_consumidas_mes"] = 0
+
+    if not update:
+        raise HTTPException(status_code=400, detail="No se proporcionaron campos a actualizar")
+
+    res = await sb_query(
+        lambda: supabase.table("empresas")
+        .update(update)
+        .eq("id", empresa_id)
+        .select("id, nombre, plan, max_llamadas_mes, max_agentes, llamadas_consumidas_mes")
+        .execute()
+    )
+
+    empresa_nombre = emp_check.data[0].get("nombre", str(empresa_id))
+    logger.info(
+        "📦 [admin] Límites actualizados empresa=%s (%s) por superadmin=%s → %s",
+        empresa_id,
+        empresa_nombre,
+        current_user.user_id,
+        update,
+    )
+    await log_audit_event(
+        user_id=current_user.user_id,
+        action="update_empresa_limits",
+        target_type="empresa",
+        target_id=str(empresa_id),
+        metadata={"changes": update, "empresa_nombre": empresa_nombre},
+    )
+
+    return {"status": "ok", "empresa": res.data[0] if res.data else {}}
+
+
+@router.post("/empresas/{empresa_id}/reset-consumidas")
+async def reset_llamadas_consumidas(
+    empresa_id: int,
+    current_user: CurrentUser = Depends(require_superadmin),
+):
+    """Reinicia el contador mensual de llamadas consumidas a 0. Solo superadmin."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    _ = current_user
+    await sb_query(
+        lambda: supabase.table("empresas")
+        .update({"llamadas_consumidas_mes": 0})
+        .eq("id", empresa_id)
+        .execute()
+    )
+    await log_audit_event(
+        user_id=current_user.user_id,
+        action="reset_llamadas_consumidas",
+        target_type="empresa",
+        target_id=str(empresa_id),
+        metadata={},
+    )
+    return {"status": "ok", "empresa_id": empresa_id, "llamadas_consumidas_mes": 0}
+
+
 @router.post("/impersonate")
 @limiter.limit("10/minute")
 async def impersonate_tenant(request: Request, payload: dict, current_user: CurrentUser = Depends(require_superadmin)):

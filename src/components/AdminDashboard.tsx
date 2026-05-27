@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     Phone,
     CheckCircle,
@@ -11,7 +11,12 @@ import {
     Bot,
     Building2,
     FlaskConical,
-    Clock
+    Clock,
+    Settings,
+    X,
+    Save,
+    RotateCcw,
+    ShieldCheck,
 } from 'lucide-react';
 import {
     PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend
@@ -116,6 +121,28 @@ export interface TenantUsage {
     avg_duration_seconds: number;
 }
 
+export interface EmpresaLimits {
+    id: number;
+    nombre: string;
+    responsable: string;
+    plan: string;
+    max_llamadas_mes: number;
+    max_agentes: number;
+    llamadas_consumidas_mes: number;
+}
+
+const PLAN_OPTIONS = [
+    { value: 'basico', label: 'Básico' },
+    { value: 'profesional', label: 'Profesional' },
+    { value: 'enterprise', label: 'Enterprise' },
+];
+
+const PLAN_BADGE: Record<string, string> = {
+    basico: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
+    profesional: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+    enterprise: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300',
+};
+
 interface StatCardProps {
     title: string;
     value: string | number;
@@ -159,6 +186,84 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const { profile, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
     const [dateRange, setDateRange] = useState<DateRange>('7d');
+
+    // ── Gestión de planes (superadmin) ───────────────────────────────────────
+    const [empresasLimits, setEmpresasLimits] = useState<EmpresaLimits[]>([]);
+    const [limitsLoading, setLimitsLoading] = useState(false);
+    const [selectedEmpresa, setSelectedEmpresa] = useState<EmpresaLimits | null>(null);
+    const [editForm, setEditForm] = useState({ plan: 'basico', max_llamadas_mes: 100, max_agentes: 1 });
+    const [savingLimits, setSavingLimits] = useState(false);
+    const [limitsToast, setLimitsToast] = useState<{ ok: boolean; msg: string } | null>(null);
+
+    const isSuperadmin = profile?.role === 'superadmin';
+
+    const loadEmpresasLimits = useCallback(async () => {
+        if (!isSuperadmin) return;
+        setLimitsLoading(true);
+        try {
+            const res = await apiFetch('/api/admin/empresas');
+            if (res.ok) {
+                const data: EmpresaLimits[] = await res.json();
+                setEmpresasLimits(data);
+            }
+        } catch {
+            // silencioso
+        } finally {
+            setLimitsLoading(false);
+        }
+    }, [isSuperadmin]);
+
+    useEffect(() => {
+        loadEmpresasLimits();
+    }, [loadEmpresasLimits]);
+
+    const openEditModal = (emp: EmpresaLimits) => {
+        setSelectedEmpresa(emp);
+        setEditForm({
+            plan: emp.plan || 'basico',
+            max_llamadas_mes: emp.max_llamadas_mes ?? 100,
+            max_agentes: emp.max_agentes ?? 1,
+        });
+        setLimitsToast(null);
+    };
+
+    const closeModal = () => {
+        setSelectedEmpresa(null);
+        setLimitsToast(null);
+    };
+
+    const saveLimits = async () => {
+        if (!selectedEmpresa) return;
+        setSavingLimits(true);
+        setLimitsToast(null);
+        try {
+            const res = await apiFetch(`/api/admin/empresas/${selectedEmpresa.id}/limits`, {
+                method: 'PUT',
+                body: JSON.stringify(editForm),
+            });
+            if (res.ok) {
+                const data = await res.json();
+                const updated: EmpresaLimits = data.empresa;
+                setEmpresasLimits(prev => prev.map(e => e.id === updated.id ? { ...e, ...updated } : e));
+                setLimitsToast({ ok: true, msg: '✓ Límites actualizados correctamente' });
+                setTimeout(closeModal, 1200);
+            } else {
+                const err = await res.json().catch(() => ({}));
+                setLimitsToast({ ok: false, msg: err.detail || 'Error al guardar los límites' });
+            }
+        } catch (e: any) {
+            setLimitsToast({ ok: false, msg: e.message || 'Error de conexión' });
+        } finally {
+            setSavingLimits(false);
+        }
+    };
+
+    const resetConsumed = async (empresaId: number) => {
+        try {
+            await apiFetch(`/api/admin/empresas/${empresaId}/reset-consumidas`, { method: 'POST' });
+            setEmpresasLimits(prev => prev.map(e => e.id === empresaId ? { ...e, llamadas_consumidas_mes: 0 } : e));
+        } catch { /* silencioso */ }
+    };
 
     const isGlobalView = isPlatformOwner && !empresaId;
 
@@ -418,6 +523,197 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 )}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Gestión de Planes (solo superadmin) ─────────────────────────── */}
+            {isSuperadmin && (
+                <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl rounded-2xl border border-gray-100 dark:border-violet-900/30 shadow-[0_0_15px_rgba(139,92,246,0.04)] overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-100 dark:border-violet-900/20 flex items-center justify-between gap-2">
+                        <h3 className="text-lg font-bold text-gray-800 dark:text-violet-50 flex items-center gap-2">
+                            <ShieldCheck size={20} className="text-violet-500 dark:text-violet-400" />
+                            {t('Gestión de Planes', 'Gestión de Planes')}
+                            <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-300 uppercase tracking-wide">Superadmin</span>
+                        </h3>
+                        <button
+                            onClick={loadEmpresasLimits}
+                            className="p-1.5 rounded-lg border border-gray-200 dark:border-violet-900/30 hover:bg-gray-50 dark:hover:bg-violet-950/20 transition-colors"
+                            title={t('Refrescar')}
+                        >
+                            <RefreshCw size={15} className={limitsLoading ? 'animate-spin text-violet-500' : 'text-gray-400'} />
+                        </button>
+                    </div>
+                    <div className="overflow-x-auto p-4">
+                        <table className="w-full text-left text-sm">
+                            <thead className="text-xs uppercase text-gray-400 dark:text-violet-500/80 border-b border-gray-100 dark:border-violet-900/20">
+                                <tr>
+                                    <th className="pb-3 pr-4 font-semibold">
+                                        <span className="inline-flex items-center gap-1.5"><Building2 size={13} /> {t('Empresa')}</span>
+                                    </th>
+                                    <th className="pb-3 pr-4 font-semibold text-center">{t('Plan')}</th>
+                                    <th className="pb-3 pr-4 font-semibold text-center">{t('Llamadas')}</th>
+                                    <th className="pb-3 pr-4 font-semibold text-center">{t('Agentes')}</th>
+                                    <th className="pb-3 font-semibold text-center">{t('Acciones')}</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50 dark:divide-violet-900/10">
+                                {limitsLoading && empresasLimits.length === 0 ? (
+                                    <tr><td colSpan={5} className="py-10 text-center text-gray-400 dark:text-violet-500/60 italic">{t('Cargando...')}</td></tr>
+                                ) : empresasLimits.length === 0 ? (
+                                    <tr><td colSpan={5} className="py-10 text-center text-gray-400 dark:text-violet-500/60 italic">{t('Sin empresas')}</td></tr>
+                                ) : empresasLimits.map(emp => {
+                                    const pct = emp.max_llamadas_mes > 0
+                                        ? Math.min(100, Math.round((emp.llamadas_consumidas_mes / emp.max_llamadas_mes) * 100))
+                                        : 0;
+                                    const barColor = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500';
+                                    return (
+                                        <tr key={emp.id} className="hover:bg-violet-50/40 dark:hover:bg-violet-950/10 transition-colors">
+                                            <td className="py-3 pr-4">
+                                                <div className="font-semibold text-gray-900 dark:text-violet-50">{emp.nombre}</div>
+                                                <div className="text-[10px] text-gray-400 dark:text-violet-500/50">ID {emp.id}</div>
+                                            </td>
+                                            <td className="py-3 pr-4 text-center">
+                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${PLAN_BADGE[emp.plan] || PLAN_BADGE.basico}`}>
+                                                    {emp.plan || 'básico'}
+                                                </span>
+                                            </td>
+                                            <td className="py-3 pr-4 text-center min-w-[140px]">
+                                                <div className="text-xs font-medium text-gray-700 dark:text-violet-100 tabular-nums mb-1">
+                                                    {emp.llamadas_consumidas_mes} / {emp.max_llamadas_mes}
+                                                    <span className="ml-1 text-gray-400">({pct}%)</span>
+                                                </div>
+                                                <div className="h-1.5 bg-gray-100 dark:bg-violet-950/40 rounded-full overflow-hidden">
+                                                    <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
+                                                </div>
+                                            </td>
+                                            <td className="py-3 pr-4 text-center tabular-nums text-gray-700 dark:text-violet-100 font-medium">
+                                                {emp.max_agentes}
+                                            </td>
+                                            <td className="py-3 text-center">
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <button
+                                                        onClick={() => openEditModal(emp)}
+                                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/50 transition-colors border border-violet-200 dark:border-violet-800/50"
+                                                    >
+                                                        <Settings size={11} /> {t('Editar')}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => resetConsumed(emp.id)}
+                                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-gray-100 dark:bg-gray-800/40 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors border border-gray-200 dark:border-gray-700/50"
+                                                        title={t('Reiniciar contador mensual')}
+                                                    >
+                                                        <RotateCcw size={11} />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de edición de límites */}
+            {selectedEmpresa && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={closeModal}>
+                    <div
+                        className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-violet-900/40 overflow-hidden"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {/* Header modal */}
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-violet-900/20">
+                            <div>
+                                <h4 className="text-base font-bold text-gray-900 dark:text-violet-50 flex items-center gap-2">
+                                    <ShieldCheck size={16} className="text-violet-500" />
+                                    {t('Editar Límites')}
+                                </h4>
+                                <p className="text-xs text-gray-400 dark:text-violet-400/60 mt-0.5">{selectedEmpresa.nombre}</p>
+                            </div>
+                            <button onClick={closeModal} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-violet-950/30 transition-colors text-gray-400">
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        {/* Body modal */}
+                        <div className="px-6 py-5 space-y-4">
+                            {/* Plan selector */}
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 dark:text-violet-400/80 uppercase tracking-wide mb-1.5">{t('Plan')}</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {PLAN_OPTIONS.map(opt => (
+                                        <button
+                                            key={opt.value}
+                                            onClick={() => setEditForm(f => ({ ...f, plan: opt.value }))}
+                                            className={`py-2 rounded-xl text-sm font-bold border transition-all ${
+                                                editForm.plan === opt.value
+                                                    ? 'bg-violet-600 text-white border-violet-600 shadow-md shadow-violet-200 dark:shadow-violet-900/30'
+                                                    : 'bg-gray-50 dark:bg-slate-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-violet-400'
+                                            }`}
+                                        >
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Max llamadas */}
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 dark:text-violet-400/80 uppercase tracking-wide mb-1.5">{t('Límite de llamadas / mes')}</label>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    step={10}
+                                    value={editForm.max_llamadas_mes}
+                                    onChange={e => setEditForm(f => ({ ...f, max_llamadas_mes: Math.max(0, parseInt(e.target.value) || 0) }))}
+                                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-400"
+                                />
+                                <p className="text-[11px] text-gray-400 dark:text-violet-500/60 mt-1">
+                                    {t('Actualmente consumidas')}: <span className="font-semibold">{selectedEmpresa.llamadas_consumidas_mes}</span>
+                                </p>
+                            </div>
+
+                            {/* Max agentes */}
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 dark:text-violet-400/80 uppercase tracking-wide mb-1.5">{t('Límite de agentes')}</label>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    step={1}
+                                    value={editForm.max_agentes}
+                                    onChange={e => setEditForm(f => ({ ...f, max_agentes: Math.max(0, parseInt(e.target.value) || 0) }))}
+                                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-400"
+                                />
+                            </div>
+
+                            {/* Toast */}
+                            {limitsToast && (
+                                <div className={`px-4 py-2.5 rounded-xl text-sm font-medium border ${
+                                    limitsToast.ok
+                                        ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                                        : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800'
+                                }`}>
+                                    {limitsToast.msg}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Footer modal */}
+                        <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100 dark:border-violet-900/20">
+                            <button onClick={closeModal} className="px-4 py-2 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+                                {t('Cancelar')}
+                            </button>
+                            <button
+                                onClick={saveLimits}
+                                disabled={savingLimits}
+                                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold bg-violet-600 hover:bg-violet-700 text-white shadow-md shadow-violet-200 dark:shadow-violet-900/30 transition-all disabled:opacity-60"
+                            >
+                                {savingLimits ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                                {t('Guardar Límites')}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

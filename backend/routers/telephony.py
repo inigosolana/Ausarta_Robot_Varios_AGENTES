@@ -681,6 +681,14 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
     if datos.llm_model is not None:       update_data["llm_model"] = datos.llm_model
     if datos.datos_extra is not None:     update_data["datos_extra"] = datos.datos_extra
 
+    # Fase 1 SaaS: si datos_extra contiene resumen_narrativo generado por call_analyzer,
+    # lo persiste también en la columna dedicada encuestas.resumen_llamada para consultas
+    # rápidas sin necesidad de deserializar el JSONB en cada listado.
+    if isinstance(datos.datos_extra, dict):
+        resumen = datos.datos_extra.get("resumen_narrativo")
+        if resumen and isinstance(resumen, str) and resumen.strip():
+            update_data["resumen_llamada"] = resumen.strip()[:2000]
+
     normalized_status = _STATUS_MAP.get((datos.status or "").strip().lower()) if datos.status else None
 
     if not update_data and not normalized_status:
@@ -981,6 +989,59 @@ async def _release_room_lock(room_name: str) -> None:
     _processing_rooms_fallback.discard(room_name)
 
 
+async def _check_and_increment_call_limit(empresa_id: int) -> None:
+    """
+    Fase 1 SaaS: verifica que la empresa no haya superado su cuota mensual
+    de llamadas y, si puede llamar, incrementa el contador de forma atómica
+    en Supabase usando SQL directo (RPC o UPDATE … RETURNING).
+
+    Lanza HTTPException 403 si el límite está alcanzado.
+    """
+    if not supabase:
+        return  # Sin BD no podemos comprobar — dejamos pasar
+
+    try:
+        emp_res = await sb_query(
+            lambda: supabase.table("empresas")
+            .select("plan, max_llamadas_mes, llamadas_consumidas_mes")
+            .eq("id", empresa_id)
+            .limit(1)
+            .execute()
+        )
+        if not emp_res.data:
+            return  # Empresa no encontrada — no bloqueamos
+
+        emp = emp_res.data[0]
+        max_calls: int = int(emp.get("max_llamadas_mes") or 100)
+        used_calls: int = int(emp.get("llamadas_consumidas_mes") or 0)
+
+        if used_calls >= max_calls:
+            plan = emp.get("plan", "basico")
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Límite de llamadas mensual alcanzado para tu plan ({plan}). "
+                    f"Consumidas: {used_calls}/{max_calls}. "
+                    "Contacta con Ausarta para ampliar tu plan."
+                ),
+            )
+
+        # Incremento atómico: evita condiciones de carrera en llamadas concurrentes.
+        await sb_query(
+            lambda: supabase.rpc(
+                "increment_llamadas_consumidas",
+                {"p_empresa_id": empresa_id},
+            ).execute()
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # No bloqueamos la llamada si el check falla por error transitorio de BD.
+        logger.warning(
+            "[limits] No se pudo verificar límite de empresa %s: %s", empresa_id, exc
+        )
+
+
 @router.post("/api/calls/outbound")
 async def make_outbound_call(request: dict, _auth: str = Depends(require_outbound_auth)):
     """Inicia una llamada SIP individual. Usado para pruebas desde el dashboard."""
@@ -1006,6 +1067,10 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
                         emp_id = agent_res.data[0].get("empresa_id")
                 except Exception as e:
                     logger.warning(f"⚠️ [telephony] No se pudo resolver empresa desde agente {agent_id}: {e}")
+
+            # Fase 1 SaaS: verificar cuota mensual antes de crear la encuesta/llamada.
+            if emp_id:
+                await _check_and_increment_call_limit(int(emp_id))
 
             campaign_name = request.get("campaignName")
             if campaign_id and not campaign_name:
