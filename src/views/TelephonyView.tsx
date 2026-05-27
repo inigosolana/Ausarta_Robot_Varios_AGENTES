@@ -25,6 +25,10 @@ const EMPTY_FORM: YeastarConfig = {
   yeastar_client_secret: '',
 };
 
+/** IP pública de Ausarta para whitelist en Yeastar (definir en .env.local como VITE_AUSARTA_PUBLIC_IP) */
+const AUSARTA_PUBLIC_IP =
+  (import.meta.env.VITE_AUSARTA_PUBLIC_IP as string | undefined)?.trim() || '';
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const TelephonyView: React.FC = () => {
@@ -241,20 +245,61 @@ const TelephonyView: React.FC = () => {
           )}
         </div>
 
-        {/* Setup Instructions Block */}
-        <div className="px-8 py-6 bg-blue-50/50 border-b border-blue-100">
+        {/* Instrucciones API Yeastar — permisos mínimos (Extension GET + Call Control POST) */}
+        <div className="px-8 py-6 bg-blue-50 border-b border-blue-100">
           <h3 className="flex items-center gap-2 text-sm font-bold text-blue-900 mb-3">
-            <Info size={16} className="text-blue-600" />
-            Instrucciones de Configuración en Yeastar
+            <Info size={16} className="text-blue-600 shrink-0" />
+            Instrucciones para el técnico de Yeastar
           </h3>
-          <ol className="list-decimal list-inside space-y-2 text-sm text-blue-800/80">
-            <li>Ve a <strong>Integraciones &gt; API</strong> en tu panel de administración de Yeastar P-Series.</li>
-            <li>Activa la API y copia el <strong>Cliente ID</strong> y el <strong>Secreto del Cliente</strong>.</li>
-            <li>Añade la IP de nuestro servidor (<code>{window.location.hostname}</code>) en <strong>Restricción de IP</strong> para permitir el acceso.</li>
-            <li>En la pestaña Webhooks, activa <strong>Webhook Event Push</strong>.</li>
-            <li>Pega esta URL en el campo destino: <code className="bg-blue-100 px-1.5 py-0.5 rounded text-blue-900 break-all">{window.location.origin}/webhooks/yeastar</code></li>
-            <li>Selecciona los eventos necesarios (ej: CallAnswered, CallHangup).</li>
-          </ol>
+          <div className="text-sm text-blue-900/90 space-y-3 leading-relaxed">
+            <p>
+              Entra al panel de administración de Yeastar P-Series y ve a{' '}
+              <strong>Integraciones → API</strong>. Crea una nueva conexión con esta configuración:
+            </p>
+            <ol className="list-decimal list-inside space-y-3 pl-0.5">
+              <li>
+                <strong>Privilegios (API Interfaces):</strong> Marca ÚNICAMENTE estas dos casillas (por
+                seguridad mínima):
+                <ul className="list-none mt-2 ml-4 space-y-1.5 text-blue-800/90">
+                  <li>
+                    • Fila <strong>Extension</strong>: Marca <strong>GET</strong>{' '}
+                    <em className="text-blue-700/80">(Para consultar si la extensión está libre).</em>
+                  </li>
+                  <li>
+                    • Fila <strong>Call Control</strong>: Marca <strong>POST</strong>{' '}
+                    <em className="text-blue-700/80">(Para ejecutar la transferencia de llamada).</em>
+                  </li>
+                </ul>
+              </li>
+              <li>
+                <strong>IP Permitida:</strong>{' '}
+                {AUSARTA_PUBLIC_IP ? (
+                  <code className="bg-blue-100 px-2 py-0.5 rounded font-mono text-blue-950 font-semibold">
+                    {AUSARTA_PUBLIC_IP}
+                  </code>
+                ) : (
+                  <code className="bg-amber-100 border border-amber-200 px-2 py-0.5 rounded font-mono text-amber-900 font-semibold">
+                    [PONER_AQUI_LA_IP_DE_AUSARTA]
+                  </code>
+                )}{' '}
+                <em className="text-blue-700/80">(La IP pública de este servidor)</em>
+                {!AUSARTA_PUBLIC_IP && (
+                  <span className="block mt-1.5 text-xs text-amber-800/90">
+                    Configura <code className="bg-amber-50 px-1 rounded">VITE_AUSARTA_PUBLIC_IP</code> en
+                    el despliegue para mostrar la IP automáticamente.
+                  </span>
+                )}
+              </li>
+              <li>
+                <strong>Máscara de subred:</strong>{' '}
+                <code className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">255.255.255.255</code>
+              </li>
+            </ol>
+            <p className="pt-1 border-t border-blue-200/60">
+              Una vez guardado, copia el <strong>Client ID</strong> y <strong>Client Secret</strong>{' '}
+              generados y pégalos aquí abajo.
+            </p>
+          </div>
         </div>
 
         {/* Form body */}
@@ -276,7 +321,7 @@ const TelephonyView: React.FC = () => {
                   required
                   value={form.yeastar_pbx_url}
                   onChange={e => handleChange('yeastar_pbx_url', e.target.value)}
-                  placeholder="https://pbx.miempresa.com:8088"
+                  placeholder="https://pbx.empresa.com:8088"
                   className="w-full h-10 px-4 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
                 />
                 <p className="text-[11px] text-gray-400 mt-1">
