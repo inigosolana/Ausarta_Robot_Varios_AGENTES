@@ -108,7 +108,8 @@ async def list_empresas_with_limits(
         lambda: supabase.table("empresas")
         .select(
             "id, nombre, responsable, plan, max_llamadas_mes, "
-            "max_agentes, llamadas_consumidas_mes, created_at"
+            "max_agentes, llamadas_consumidas_mes, sip_outbound_trunk_id, "
+            "sip_inbound_trunk_id, created_at"
         )
         .order("nombre")
         .execute()
@@ -207,6 +208,61 @@ async def update_empresa_limits(
         metadata={"changes": update, "empresa_nombre": empresa_nombre},
     )
 
+    return {"status": "ok", "empresa": res.data[0] if res.data else {}}
+
+
+@router.put("/empresas/{empresa_id}/trunks")
+async def update_empresa_trunks(
+    empresa_id: int,
+    payload: dict,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """
+    Actualiza los IDs de troncales SIP por empresa.
+    - Superadmin / admin global: puede editar cualquier empresa.
+    - Admin de cliente: solo su propia empresa.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    if not has_global_access(current_user):
+        if not current_user.empresa_id or int(current_user.empresa_id) != int(empresa_id):
+            raise HTTPException(status_code=403, detail="No tienes permisos para editar esta empresa")
+
+    emp_check = await sb_query(
+        lambda: supabase.table("empresas")
+        .select("id, nombre")
+        .eq("id", empresa_id)
+        .limit(1)
+        .execute()
+    )
+    if not emp_check.data:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+    def _norm_trunk(raw: object) -> str | None:
+        s = str(raw or "").strip()
+        return s if s else None
+
+    update = {
+        "sip_outbound_trunk_id": _norm_trunk(payload.get("sip_outbound_trunk_id")),
+        "sip_inbound_trunk_id": _norm_trunk(payload.get("sip_inbound_trunk_id")),
+    }
+
+    res = await sb_query(
+        lambda: supabase.table("empresas")
+        .update(update)
+        .eq("id", empresa_id)
+        .select("id, nombre, sip_outbound_trunk_id, sip_inbound_trunk_id")
+        .execute()
+    )
+    empresa_nombre = emp_check.data[0].get("nombre", str(empresa_id))
+    await log_audit_event(
+        user_id=current_user.user_id,
+        action="update_empresa_trunks",
+        target_type="empresa",
+        target_id=str(empresa_id),
+        metadata={"empresa_nombre": empresa_nombre, "changes": update},
+    )
     return {"status": "ok", "empresa": res.data[0] if res.data else {}}
 
 

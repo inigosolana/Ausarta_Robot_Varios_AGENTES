@@ -18,6 +18,7 @@ from services.supabase_service import supabase
 from services.audit import log_audit_event
 from services.auth import CurrentUser, require_admin
 from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
+from services.trunk_service import resolve_outbound_trunk_id
 from livekit import api as lk_api
 from pydantic import BaseModel
 from models.schemas import CampaignModel, CampaignLeadModel
@@ -581,7 +582,7 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
     empresa_id = campaign.get("empresa_id") or 0
     campaign_id = campaign["id"]
     agent_name_dispatch = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip() or "default_agent"
-    sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
+    sip_trunk_id = await resolve_outbound_trunk_id(int(empresa_id) if empresa_id else None)
 
     # El lock ( _empresas_en_llamada.add(empresa_id) ) ya ha sido adquirido síncronamente
     # en el campaign_scheduler_loop antes de llamar a esta función para evitar race conditions.

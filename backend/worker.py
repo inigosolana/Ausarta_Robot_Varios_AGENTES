@@ -29,6 +29,7 @@ import asyncio
 from arq import cron
 from arq.connections import ArqRedis, RedisSettings
 from utils.call_schedule import is_call_allowed
+from services.trunk_service import resolve_outbound_trunk_id
 
 logger = logging.getLogger("arq-worker")
 
@@ -509,7 +510,7 @@ async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
                     return
 
                 # 6. Crear participante SIP
-                sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
+                sip_trunk_id = await resolve_outbound_trunk_id(int(empresa_id) if empresa_id else None)
                 await lkapi.sip.create_sip_participant(
                     lk_api.CreateSIPParticipantRequest(
                         sip_trunk_id=sip_trunk_id,

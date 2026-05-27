@@ -34,6 +34,7 @@ from services.livekit_service import (
     wait_for_agent_ready,
 )
 from services.yeastar_service import YeastarPSeriesClient
+from services.trunk_service import resolve_outbound_trunk_id
 from services.auth import get_current_user, CurrentUser, require_admin, require_outbound_auth
 from services.crypto_service import encrypt_data, decrypt_data
 from services.rate_limiter import limiter
@@ -1100,7 +1101,7 @@ async def test_outbound_call(payload: TestOutboundCallRequest):
     Crea sala, despacha agente y luego inicia el participante SIP.
     """
     # FIX 6: variable canónica SIP_OUTBOUND_TRUNK_ID (LIVEKIT_OUTBOUND_TRUNK_ID deprecado)
-    trunk_id = (os.getenv("SIP_OUTBOUND_TRUNK_ID") or "").strip()
+    trunk_id = await resolve_outbound_trunk_id(int(empresa_id) if str(empresa_id).isdigit() else None)
     if not trunk_id:
         raise HTTPException(
             status_code=500,
@@ -1333,7 +1334,7 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
         contacto_id = int(lead_id) if lead_id else 0
         camp_id_str = str(campaign_id) if campaign_id else "0"
         room_name = f"llamada_ausarta_empresa_{emp_id or 0}_campana_{camp_id_str}_contacto_{contacto_id}_encuesta_{encuesta_id}"
-        sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID")
+        sip_trunk_id = await resolve_outbound_trunk_id(int(emp_id) if str(emp_id).isdigit() else None)
 
         # Prevención de doble despacho (lock distribuido vía Redis)
         if not await _acquire_room_lock(room_name):

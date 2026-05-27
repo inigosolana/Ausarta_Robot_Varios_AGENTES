@@ -18,6 +18,7 @@ import {
   Settings,
   Share2,
   Server,
+  Route,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -71,6 +72,7 @@ const AppShell: React.FC = () => {
       '/usage': 'usage',
       '/admin': 'admin',
       '/crm': 'crm',
+      '/trunks': 'admin',
       '/copilot': 'assistant',
     };
     const perm = pathToPermission[location.pathname];
@@ -277,6 +279,9 @@ const AppShell: React.FC = () => {
             )}
             {hasPermission('admin') && (
               <SidebarItem icon={<Server size={18} />} label={t('Telephony PBX', 'Telefonía PBX')} to="/telephony" collapsed={!isSidebarOpen} />
+            )}
+            {hasPermission('admin') && (
+              <SidebarItem icon={<Route size={18} />} label={t('SIP Trunks', 'Troncales SIP')} to="/trunks" collapsed={!isSidebarOpen} />
             )}
           </nav>
 

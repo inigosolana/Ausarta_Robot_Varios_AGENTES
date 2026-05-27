@@ -15,6 +15,7 @@ const AgentManagementView = lazy(() => import('./views/AgentManagementView'));
 const LoginView          = lazy(() => import('./views/LoginView'));
 const CrmIntegrationView = lazy(() => import('./views/CrmIntegrationView'));
 const TelephonyView      = lazy(() => import('./views/TelephonyView'));
+const TrunksView         = lazy(() => import('./views/TrunksView'));
 const AssistantView      = lazy(() => import('./views/AssistantView'));
 const ProfileView        = lazy(() => import('./views/ProfileView'));
 
@@ -47,6 +48,7 @@ const App: React.FC = () => (
         <Route path="admin"     element={<PermissionGate view="admin"><UserManagementView /></PermissionGate>} />
         <Route path="crm"       element={<CrmIntegrationView />} />
         <Route path="telephony" element={<PermissionGate view="admin"><TelephonyView /></PermissionGate>} />
+        <Route path="trunks"    element={<PermissionGate view="admin"><TrunksView /></PermissionGate>} />
         <Route path="profile"   element={<ProfileView />} />
       </Route>
     </Route>

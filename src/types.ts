@@ -37,6 +37,8 @@ export interface Empresa {
   logo_url?: string | null;
   created_at?: string;
   updated_at?: string;
+  sip_outbound_trunk_id?: string | null;
+  sip_inbound_trunk_id?: string | null;
 }
 
 // ── Workflow types ──────────────────────────────────────────────────────────
