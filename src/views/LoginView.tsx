@@ -1,37 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Loader2, ArrowLeft, CheckCircle } from 'lucide-react';
+import { Loader2, ArrowLeft, CheckCircle, Mail, Lock, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import './login.css';
 
 type ViewMode = 'login' | 'forgot' | 'forgot-sent' | 'update-password';
-
-const HERO_IMAGE =
-    'https://lh3.googleusercontent.com/aida-public/AB6AXuBI0FAyCBh5GD1o0HyH4mJd5H0_03ddB65__x_JvjZ41QFFoWcfXkstBeEdZ_cK-_OZP9ADsNkNA-LMGni6tjxCF3yrXmbb8aHC2n2BBZlQX2NBi52-5K5pihmH1lXAUb8rKSKuhQCjFqpJ8O20iJdYGO-UvDmF3nqbfB3-HMcMczLRpNhySEcUJ2DLyxeBle-XVaiBdQAVZyps2ERicJHt_lVmJuedV5uZRPs3HuN1LOYNbexenkqLo_B29Z6YNhBe2bTkUrp2guDg';
-
-function MaterialIcon({
-    name,
-    className = '',
-    filled = false,
-}: {
-    name: string;
-    className?: string;
-    filled?: boolean;
-}) {
-    return (
-        <span
-            className={`material-symbols-outlined leading-none ${className}`}
-            style={{
-                fontVariationSettings: `'FILL' ${filled ? 1 : 0}, 'wght' 400, 'GRAD' 0, 'opsz' 24`,
-            }}
-        >
-            {name}
-        </span>
-    );
-}
-
-const inputClass =
-    'w-full bg-surface-container border border-outline-variant rounded-lg py-2.5 pl-10 pr-3 text-on-surface text-base placeholder:text-on-surface-variant/50 focus:border-primary focus:ring-1 focus:ring-primary transition-colors outline-none';
 
 const LoginView: React.FC = () => {
     const { signIn, user, profile, loading: authLoading } = useAuth();
@@ -49,7 +23,16 @@ const LoginView: React.FC = () => {
     const redirectTo =
         (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/';
 
-    React.useEffect(() => {
+    useEffect(() => {
+        document.documentElement.classList.add('dark');
+        const prevBodyBg = document.body.style.backgroundColor;
+        document.body.style.backgroundColor = '#060e20';
+        return () => {
+            document.body.style.backgroundColor = prevBodyBg;
+        };
+    }, []);
+
+    useEffect(() => {
         const urlParams = window.location.hash + window.location.search;
         if (
             urlParams &&
@@ -61,7 +44,7 @@ const LoginView: React.FC = () => {
         }
     }, []);
 
-    React.useEffect(() => {
+    useEffect(() => {
         if (!authLoading && user && profile) {
             navigate(redirectTo, { replace: true });
         }
@@ -150,128 +133,131 @@ const LoginView: React.FC = () => {
                 ? 'Hemos enviado las instrucciones a tu bandeja.'
                 : 'Introduce y confirma tu nueva contraseña.';
 
-    const primaryButtonClass =
-        'w-full bg-primary text-on-primary font-bold py-3 rounded-lg hover:brightness-110 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed';
+    const Field = ({
+        id,
+        label,
+        type,
+        value,
+        onChange,
+        placeholder,
+        icon: Icon,
+        showToggle,
+    }: {
+        id: string;
+        label: string;
+        type: string;
+        value: string;
+        onChange: (v: string) => void;
+        placeholder: string;
+        icon: typeof Mail;
+        showToggle?: boolean;
+    }) => (
+        <div className="mb-4">
+            <label htmlFor={id} className="block text-sm font-medium text-[#bbcabf] mb-1.5">
+                {label}
+            </label>
+            <div className="relative">
+                <Icon
+                    size={18}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-[#86948a] pointer-events-none"
+                />
+                <input
+                    id={id}
+                    type={type}
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    className={`login-input${showToggle ? ' !pr-10' : ''}`}
+                    placeholder={placeholder}
+                    required
+                    autoComplete={id.includes('password') || id.includes('pw') ? 'current-password' : 'email'}
+                />
+                {showToggle && (
+                    <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#86948a] hover:text-[#4edea3] transition-colors"
+                        aria-label={showPassword ? 'Ocultar' : 'Mostrar'}
+                    >
+                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+
+    if (authLoading) {
+        return (
+            <div className="login-page">
+                <Loader2 size={32} className="animate-spin text-[#4edea3]" />
+            </div>
+        );
+    }
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-background p-4 md:p-12 font-geist text-on-background antialiased">
-            <main className="w-full max-w-[1440px] flex flex-col md:flex-row h-[min(90vh,800px)] min-h-[600px] rounded-2xl overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] border border-white/10">
-                {/* Panel visual — desktop (mockup Voice AI Hub) */}
-                <section className="hidden md:flex flex-1 relative bg-surface-container-low items-center justify-center overflow-hidden">
-                    <div className="absolute inset-0 bg-gradient-to-br from-surface-container-low to-surface-container-highest z-0" />
-                    <img
-                        alt="Visualización abstracta de ondas de voz"
-                        className="w-full h-full object-cover z-10 mix-blend-screen opacity-80"
-                        src={HERO_IMAGE}
-                    />
-                    <div className="absolute bottom-10 left-10 z-20">
-                        <div className="flex items-center gap-3 mb-3">
-                            <img src="/ausarta.png" alt="Ausarta" className="h-12 w-12 object-contain" />
-                        </div>
-                        <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-primary">
-                            Ausarta
-                        </h1>
-                        <p className="text-lg text-on-surface-variant mt-2 max-w-md">
-                            Enterprise Voice Intelligence Command Center
-                        </p>
+        <div className="login-page">
+            <div className="login-card">
+                {/* Panel hero — solo desktop, una sola columna visual */}
+                <aside className="login-hero" aria-hidden="true">
+                    <div className="login-hero-glow" />
+                    <div className="login-hero-wave" />
+                    <div className="login-hero-brand">
+                        <img
+                            src="/ausarta.png"
+                            alt=""
+                            className="h-14 w-14 object-contain"
+                        />
+                        <h1>Ausarta</h1>
+                        <p>Enterprise Voice Intelligence Command Center</p>
                     </div>
-                </section>
+                </aside>
 
-                {/* Panel formulario */}
-                <section className="flex-1 w-full md:w-[480px] md:max-w-[480px] bg-surface flex flex-col justify-center px-4 py-10 md:px-8 relative z-10 overflow-y-auto">
-                    <div className="w-full max-w-md mx-auto">
+                {/* Panel formulario — única columna de inputs */}
+                <section className="login-form-panel">
+                    <div className="w-full max-w-[360px] mx-auto">
                         {/* Marca móvil */}
-                        <div className="flex items-center justify-center gap-2 mb-8 md:hidden">
-                            <MaterialIcon name="graphic_eq" className="text-primary text-2xl" filled />
-                            <span className="text-xl font-bold text-primary">Ausarta</span>
+                        <div className="flex items-center justify-center gap-2 mb-8 lg:hidden">
+                            <img src="/ausarta.png" alt="Ausarta" className="h-10 w-10 object-contain" />
+                            <span className="text-xl font-bold text-[#4edea3]">Ausarta</span>
                         </div>
 
-                        <div className="mb-8 text-center md:text-left">
-                            <h2 className="text-2xl md:text-3xl font-semibold text-on-surface mb-1">
-                                {title}
-                            </h2>
-                            <p className="text-base text-on-surface-variant">{subtitle}</p>
-                        </div>
+                        <header className="mb-8 text-center lg:text-left">
+                            <h2 className="text-2xl font-semibold text-[#dae2fd] m-0">{title}</h2>
+                            <p className="text-[#bbcabf] text-[0.9375rem] mt-2 mb-0">{subtitle}</p>
+                        </header>
 
-                        {error && (
-                            <div className="mb-4 p-3 rounded-lg bg-red-950/40 border border-error/30 text-on-error-container text-sm">
-                                {error}
-                            </div>
-                        )}
+                        {error && <div className="login-error">{error}</div>}
 
                         {viewMode === 'login' && (
-                            <form onSubmit={handleSubmit} className="space-y-4">
-                                <div>
-                                    <label
-                                        className="block text-sm font-medium text-on-surface-variant mb-1"
-                                        htmlFor="email"
-                                    >
-                                        Email
-                                    </label>
-                                    <div className="relative">
-                                        <MaterialIcon
-                                            name="mail"
-                                            className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-xl"
-                                        />
-                                        <input
-                                            id="email"
-                                            type="email"
-                                            value={email}
-                                            onChange={(e) => setEmail(e.target.value)}
-                                            className={inputClass}
-                                            placeholder="admin@enterprise.com"
-                                            required
-                                            autoFocus
-                                        />
-                                    </div>
-                                </div>
+                            <form onSubmit={handleSubmit}>
+                                <Field
+                                    id="email"
+                                    label="Email"
+                                    type="email"
+                                    value={email}
+                                    onChange={setEmail}
+                                    placeholder="tu@empresa.com"
+                                    icon={Mail}
+                                />
+                                <Field
+                                    id="password"
+                                    label="Contraseña"
+                                    type={showPassword ? 'text' : 'password'}
+                                    value={password}
+                                    onChange={setPassword}
+                                    placeholder="••••••••"
+                                    icon={Lock}
+                                    showToggle
+                                />
 
-                                <div>
-                                    <label
-                                        className="block text-sm font-medium text-on-surface-variant mb-1"
-                                        htmlFor="password"
-                                    >
-                                        Contraseña
-                                    </label>
-                                    <div className="relative">
-                                        <MaterialIcon
-                                            name="lock"
-                                            className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-xl"
-                                        />
-                                        <input
-                                            id="password"
-                                            type={showPassword ? 'text' : 'password'}
-                                            value={password}
-                                            onChange={(e) => setPassword(e.target.value)}
-                                            className={`${inputClass} pr-10`}
-                                            placeholder="••••••••"
-                                            required
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowPassword(!showPassword)}
-                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary transition-colors"
-                                            aria-label={
-                                                showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'
-                                            }
-                                        >
-                                            <MaterialIcon
-                                                name={showPassword ? 'visibility' : 'visibility_off'}
-                                                className="text-xl"
-                                            />
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center justify-between pt-1 pb-2">
-                                    <label className="flex items-center gap-2 cursor-pointer">
+                                <div className="flex items-center justify-between mb-6 text-sm">
+                                    <label className="flex items-center gap-2 cursor-pointer text-[#bbcabf]">
                                         <input
                                             type="checkbox"
                                             checked={rememberMe}
                                             onChange={(e) => setRememberMe(e.target.checked)}
-                                            className="rounded border-outline-variant bg-surface-container text-primary focus:ring-primary focus:ring-offset-background"
+                                            className="rounded border-[#3c4a42] bg-[#171f33] text-[#4edea3] focus:ring-[#4edea3]"
                                         />
-                                        <span className="text-sm text-on-surface-variant">Recordarme</span>
+                                        Recordarme
                                     </label>
                                     <button
                                         type="button"
@@ -279,13 +265,13 @@ const LoginView: React.FC = () => {
                                             setError('');
                                             setViewMode('forgot');
                                         }}
-                                        className="text-sm text-primary hover:text-primary-fixed-dim transition-colors"
+                                        className="text-[#4edea3] hover:text-[#6ffbbe] transition-colors bg-transparent border-none cursor-pointer p-0 text-sm"
                                     >
                                         ¿Olvidaste tu contraseña?
                                     </button>
                                 </div>
 
-                                <button type="submit" disabled={loading} className={primaryButtonClass}>
+                                <button type="submit" disabled={loading} className="login-btn-primary">
                                     {loading ? (
                                         <>
                                             <Loader2 size={18} className="animate-spin" />
@@ -294,10 +280,20 @@ const LoginView: React.FC = () => {
                                     ) : (
                                         <>
                                             Iniciar sesión
-                                            <MaterialIcon name="arrow_forward" className="text-xl" />
+                                            <ArrowRight size={18} />
                                         </>
                                     )}
                                 </button>
+
+                                <p className="mt-8 text-center lg:text-left text-[#bbcabf] text-sm">
+                                    ¿Necesitas acceso?{' '}
+                                    <a
+                                        href="mailto:soporte@ausarta.net"
+                                        className="text-[#4edea3] hover:text-[#6ffbbe] font-medium no-underline"
+                                    >
+                                        Solicitar demo
+                                    </a>
+                                </p>
                             </form>
                         )}
 
@@ -309,43 +305,25 @@ const LoginView: React.FC = () => {
                                         setError('');
                                         setViewMode('login');
                                     }}
-                                    className="flex items-center gap-1 text-sm text-on-surface-variant hover:text-on-surface mb-4 transition-colors"
+                                    className="flex items-center gap-1 text-sm text-[#bbcabf] hover:text-[#dae2fd] mb-5 bg-transparent border-none cursor-pointer p-0"
                                 >
                                     <ArrowLeft size={16} /> Volver al login
                                 </button>
-                                <form onSubmit={handleForgotPassword} className="space-y-4">
-                                    <div>
-                                        <label
-                                            className="block text-sm font-medium text-on-surface-variant mb-1"
-                                            htmlFor="forgot-email"
-                                        >
-                                            Email
-                                        </label>
-                                        <div className="relative">
-                                            <MaterialIcon
-                                                name="mail"
-                                                className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-xl"
-                                            />
-                                            <input
-                                                id="forgot-email"
-                                                type="email"
-                                                value={email}
-                                                onChange={(e) => setEmail(e.target.value)}
-                                                className={inputClass}
-                                                placeholder="tu@email.com"
-                                                required
-                                                autoFocus
-                                            />
-                                        </div>
-                                    </div>
-                                    <button type="submit" disabled={loading} className={primaryButtonClass}>
+                                <form onSubmit={handleForgotPassword}>
+                                    <Field
+                                        id="forgot-email"
+                                        label="Email"
+                                        type="email"
+                                        value={email}
+                                        onChange={setEmail}
+                                        placeholder="tu@email.com"
+                                        icon={Mail}
+                                    />
+                                    <button type="submit" disabled={loading} className="login-btn-primary">
                                         {loading ? (
                                             <Loader2 size={18} className="animate-spin" />
                                         ) : (
-                                            <>
-                                                Enviar enlace
-                                                <MaterialIcon name="send" className="text-xl" />
-                                            </>
+                                            'Enviar enlace'
                                         )}
                                     </button>
                                 </form>
@@ -354,13 +332,13 @@ const LoginView: React.FC = () => {
 
                         {viewMode === 'forgot-sent' && (
                             <div className="text-center py-4">
-                                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-950/50 mb-4">
-                                    <CheckCircle size={32} className="text-primary" />
+                                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-950/60 mb-4">
+                                    <CheckCircle size={32} className="text-[#4edea3]" />
                                 </div>
-                                <p className="text-on-surface-variant text-sm mb-6">
+                                <p className="text-[#bbcabf] text-sm mb-6">
                                     Hemos enviado un enlace a{' '}
-                                    <strong className="text-on-surface">{email}</strong>. Revisa también la
-                                    carpeta de spam.
+                                    <strong className="text-[#dae2fd]">{email}</strong>. Revisa también
+                                    spam.
                                 </p>
                                 <button
                                     type="button"
@@ -368,7 +346,7 @@ const LoginView: React.FC = () => {
                                         setError('');
                                         setViewMode('login');
                                     }}
-                                    className="px-6 py-2.5 bg-surface-container border border-outline-variant text-on-surface rounded-lg hover:border-primary/50 transition-all text-sm font-medium"
+                                    className="px-6 py-2.5 bg-[#171f33] border border-[#3c4a42] text-[#dae2fd] rounded-lg hover:border-[#4edea3]/40 transition-all text-sm font-medium cursor-pointer"
                                 >
                                     Volver al login
                                 </button>
@@ -376,97 +354,42 @@ const LoginView: React.FC = () => {
                         )}
 
                         {viewMode === 'update-password' && (
-                            <form onSubmit={handleUpdatePassword} className="space-y-4">
-                                <div>
-                                    <label
-                                        className="block text-sm font-medium text-on-surface-variant mb-1"
-                                        htmlFor="new-pw"
-                                    >
-                                        Nueva contraseña
-                                    </label>
-                                    <div className="relative">
-                                        <MaterialIcon
-                                            name="lock"
-                                            className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-xl"
-                                        />
-                                        <input
-                                            id="new-pw"
-                                            type={showPassword ? 'text' : 'password'}
-                                            value={newPassword}
-                                            onChange={(e) => setNewPassword(e.target.value)}
-                                            className={`${inputClass} pr-10`}
-                                            placeholder="Mínimo 6 caracteres"
-                                            required
-                                            autoFocus
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowPassword(!showPassword)}
-                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary"
-                                        >
-                                            <MaterialIcon
-                                                name={showPassword ? 'visibility' : 'visibility_off'}
-                                                className="text-xl"
-                                            />
-                                        </button>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label
-                                        className="block text-sm font-medium text-on-surface-variant mb-1"
-                                        htmlFor="confirm-pw"
-                                    >
-                                        Confirmar contraseña
-                                    </label>
-                                    <div className="relative">
-                                        <MaterialIcon
-                                            name="lock"
-                                            className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-xl"
-                                        />
-                                        <input
-                                            id="confirm-pw"
-                                            type="password"
-                                            value={confirmPassword}
-                                            onChange={(e) => setConfirmPassword(e.target.value)}
-                                            className={inputClass}
-                                            placeholder="Repite la contraseña"
-                                            required
-                                        />
-                                    </div>
-                                </div>
-                                <button type="submit" disabled={loading} className={primaryButtonClass}>
+                            <form onSubmit={handleUpdatePassword}>
+                                <Field
+                                    id="new-pw"
+                                    label="Nueva contraseña"
+                                    type={showPassword ? 'text' : 'password'}
+                                    value={newPassword}
+                                    onChange={setNewPassword}
+                                    placeholder="Mínimo 6 caracteres"
+                                    icon={Lock}
+                                    showToggle
+                                />
+                                <Field
+                                    id="confirm-pw"
+                                    label="Confirmar contraseña"
+                                    type="password"
+                                    value={confirmPassword}
+                                    onChange={setConfirmPassword}
+                                    placeholder="Repite la contraseña"
+                                    icon={Lock}
+                                />
+                                <button type="submit" disabled={loading} className="login-btn-primary">
                                     {loading ? (
                                         <Loader2 size={18} className="animate-spin" />
                                     ) : (
-                                        <>
-                                            Guardar contraseña
-                                            <MaterialIcon name="check" className="text-xl" />
-                                        </>
+                                        'Guardar contraseña'
                                     )}
                                 </button>
                             </form>
                         )}
 
-                        {viewMode === 'login' && (
-                            <div className="mt-8 text-center md:text-left">
-                                <p className="text-base text-on-surface-variant">
-                                    ¿Necesitas acceso?{' '}
-                                    <a
-                                        href="mailto:soporte@ausarta.net"
-                                        className="text-primary hover:text-primary-fixed-dim font-medium transition-colors"
-                                    >
-                                        Solicitar demo
-                                    </a>
-                                </p>
-                            </div>
-                        )}
-
-                        <p className="text-center text-outline text-xs mt-8">
+                        <p className="text-center text-[#86948a] text-xs mt-10 mb-0">
                             Ausarta Voice AI v2.0 · © {new Date().getFullYear()}
                         </p>
                     </div>
                 </section>
-            </main>
+            </div>
         </div>
     );
 };

@@ -1,0 +1,190 @@
+/* Pantalla de login — estilos aislados para evitar conflictos con el resto de la app */
+
+.login-page {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: #060e20;
+  font-family: 'Geist', 'Inter', system-ui, sans-serif;
+  color: #dae2fd;
+  box-sizing: border-box;
+}
+
+.login-page *,
+.login-page *::before,
+.login-page *::after {
+  box-sizing: border-box;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 1100px;
+  min-height: min(90vh, 720px);
+  display: grid;
+  grid-template-columns: 1fr;
+  border-radius: 1rem;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+}
+
+@media (min-width: 900px) {
+  .login-card {
+    grid-template-columns: minmax(0, 1fr) 440px;
+  }
+}
+
+.login-hero {
+  display: none;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(145deg, #0f1a30 0%, #131b2e 45%, #0b1326 100%);
+  min-height: 280px;
+}
+
+@media (min-width: 900px) {
+  .login-hero {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 2.5rem;
+    min-height: auto;
+  }
+}
+
+.login-hero-glow {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 30% 40%, rgba(78, 222, 163, 0.18) 0%, transparent 55%),
+    radial-gradient(ellipse 50% 40% at 70% 20%, rgba(5, 102, 217, 0.2) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.login-hero-wave {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 120px;
+  opacity: 0.35;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent,
+    transparent 8px,
+    rgba(78, 222, 163, 0.15) 8px,
+    rgba(78, 222, 163, 0.15) 10px
+  );
+  mask-image: linear-gradient(to bottom, transparent, black 30%, black 70%, transparent);
+}
+
+.login-hero-brand {
+  position: relative;
+  z-index: 2;
+}
+
+.login-hero-brand h1 {
+  margin: 0.75rem 0 0;
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #4edea3;
+}
+
+.login-hero-brand p {
+  margin: 0.5rem 0 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: #bbcabf;
+  max-width: 22rem;
+}
+
+.login-form-panel {
+  background: #0b1326;
+  padding: 2rem 1.75rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+@media (min-width: 900px) {
+  .login-form-panel {
+    padding: 2.5rem 2.25rem;
+    border-top: none;
+    border-left: 1px solid rgba(255, 255, 255, 0.06);
+  }
+}
+
+.login-input {
+  width: 100%;
+  background: #171f33;
+  border: 1px solid #3c4a42;
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.75rem 0.65rem 2.5rem;
+  color: #dae2fd;
+  font-size: 0.9375rem;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.login-input::placeholder {
+  color: rgba(187, 202, 191, 0.45);
+}
+
+.login-input:focus {
+  border-color: #4edea3;
+  box-shadow: 0 0 0 3px rgba(78, 222, 163, 0.15);
+}
+
+.login-input:-webkit-autofill,
+.login-input:-webkit-autofill:hover,
+.login-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #dae2fd;
+  -webkit-box-shadow: 0 0 0 1000px #171f33 inset;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+.login-btn-primary {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: linear-gradient(135deg, #4edea3 0%, #3dd194 100%);
+  color: #003824;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: filter 0.15s, transform 0.1s;
+}
+
+.login-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.login-btn-primary:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.login-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.login-error {
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  background: rgba(147, 0, 10, 0.35);
+  border: 1px solid rgba(255, 180, 171, 0.25);
+  color: #ffdad6;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
