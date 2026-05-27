@@ -138,8 +138,8 @@ const PrimaryValue: React.FC<{ entry: ApiCreditEntry }> = ({ entry }) => {
 
 export const ApiCreditsWidget: React.FC = () => {
     const { t } = useTranslation();
-    const { profile } = useAuth();
-    const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
+    const { profile, loading } = useAuth();
+    const isAdmin = !loading && (profile?.role === 'admin' || profile?.role === 'superadmin');
 
     const { data, isLoading, isError, refetch, isFetching } = useQuery<ApiCreditsResponse>({
         queryKey: ['api-credits'],
@@ -152,6 +152,15 @@ export const ApiCreditsWidget: React.FC = () => {
         staleTime: 5 * 60 * 1000,
         refetchInterval: 5 * 60 * 1000,
     });
+
+    if (loading) {
+        return (
+            <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl p-6 rounded-2xl shadow-[0_0_15px_rgba(0,240,255,0.05)] border border-gray-100 dark:border-cyan-900/30">
+                <div className="h-6 w-40 bg-gray-100 dark:bg-slate-800 rounded mb-4 animate-pulse" />
+                <div className="h-10 w-full bg-gray-100 dark:bg-slate-800 rounded animate-pulse" />
+            </div>
+        );
+    }
 
     if (!isAdmin) return null;
 
