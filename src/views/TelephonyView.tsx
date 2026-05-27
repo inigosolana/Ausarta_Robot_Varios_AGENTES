@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   ChevronDown, AlertTriangle, Trash2, Building2,
   Server, Eye, EyeOff, Wifi, WifiOff,
-  Save, Loader2, CheckCircle2, XCircle, Info
+  Save, Loader2, CheckCircle2, XCircle, Info, Copy, Check
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/apiFetch';
@@ -48,6 +48,8 @@ const TelephonyView: React.FC = () => {
   const [ausartaPublicIp, setAusartaPublicIp] = useState(
     () => (import.meta.env.VITE_AUSARTA_PUBLIC_IP as string | undefined)?.trim() || '',
   );
+  const [yeastarWebhookUrl, setYeastarWebhookUrl] = useState('');
+  const [webhookCopied, setWebhookCopied] = useState(false);
 
   useEffect(() => {
     apiFetch('/api/telephony/platform-info')
@@ -56,11 +58,30 @@ const TelephonyView: React.FC = () => {
         const data = await res.json();
         const ip = String(data?.ausarta_public_ip || '').trim();
         if (ip) setAusartaPublicIp(ip);
+        const webhook = String(data?.yeastar_webhook_url || '').trim();
+        if (webhook) {
+          setYeastarWebhookUrl(webhook);
+        } else if (typeof window !== 'undefined') {
+          setYeastarWebhookUrl(`${window.location.origin}/webhooks/yeastar`);
+        }
       })
       .catch(() => {
-        /* silencioso: se usa fallback VITE_ o placeholder */
+        if (typeof window !== 'undefined') {
+          setYeastarWebhookUrl(`${window.location.origin}/webhooks/yeastar`);
+        }
       });
   }, []);
+
+  const copyWebhookUrl = async () => {
+    if (!yeastarWebhookUrl) return;
+    try {
+      await navigator.clipboard.writeText(yeastarWebhookUrl);
+      setWebhookCopied(true);
+      setTimeout(() => setWebhookCopied(false), 2000);
+    } catch {
+      /* clipboard no disponible */
+    }
+  };
 
   useEffect(() => {
     if (isPlatformOwner) {
@@ -298,7 +319,7 @@ const TelephonyView: React.FC = () => {
                 <em className="text-blue-700/80">(La IP pública de este servidor)</em>
                 {!ausartaPublicIp && (
                   <span className="block mt-1.5 text-xs text-amber-800/90">
-                    Añade <code className="bg-amber-50 px-1 rounded">AUSARTA_PUBLIC_IP=15.218.15.30</code>{' '}
+                    Añade <code className="bg-amber-50 px-1 rounded">AUSARTA_PUBLIC_IP=tu.ip.publica</code>{' '}
                     en el <strong>.env del backend</strong> (contenedor <code>backend</code> en Portainer) y
                     reinicia solo el backend. No hace falta rebuild del frontend.
                   </span>
@@ -312,6 +333,102 @@ const TelephonyView: React.FC = () => {
             <p className="pt-1 border-t border-blue-200/60">
               Una vez guardado, copia el <strong>Client ID</strong> y <strong>Client Secret</strong>{' '}
               generados y pégalos aquí abajo.
+            </p>
+          </div>
+        </div>
+
+        {/* Paso 2: Webhook Event Push (vincular callid ↔ encuesta / transferencias) */}
+        <div className="px-8 py-6 bg-violet-50 border-b border-violet-100">
+          <h3 className="flex items-center gap-2 text-sm font-bold text-violet-900 mb-3">
+            <Info size={16} className="text-violet-600 shrink-0" />
+            Paso 2 — Webhook Event Push (en el panel de Yeastar)
+          </h3>
+          <div className="text-sm text-violet-900/90 space-y-3 leading-relaxed">
+            <p className="bg-white/60 border border-violet-200 rounded-lg px-3 py-2 text-xs">
+              <strong>No confundas con el Paso 1 (API):</strong> el estado de extensión y la transferencia
+              se hacen con <strong>Extension GET</strong> y <strong>Call Control POST</strong> en{' '}
+              <em>Integraciones → API</em>. El webhook es solo para que Ausarta reciba el{' '}
+              <strong>ID de la llamada</strong> (<code className="font-mono">call_id</code>) y pueda
+              transferir correctamente.
+            </p>
+            <p>
+              En <strong>Integraciones → Webhook</strong> (o Event Push), activa el checkbox y crea una fila:
+            </p>
+            <ul className="list-none space-y-3">
+              <li>
+                <strong>URL del webhook:</strong>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <code className="flex-1 min-w-0 break-all bg-violet-100 px-2 py-1.5 rounded font-mono text-xs text-violet-950 font-semibold">
+                    {yeastarWebhookUrl || 'https://tu-dominio-ausarta.com/webhooks/yeastar'}
+                  </code>
+                  {yeastarWebhookUrl && (
+                    <button
+                      type="button"
+                      onClick={copyWebhookUrl}
+                      className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold text-violet-800 bg-white border border-violet-200 px-3 py-1.5 rounded-lg hover:bg-violet-100 transition-colors"
+                    >
+                      {webhookCopied ? <Check size={14} /> : <Copy size={14} />}
+                      {webhookCopied ? 'Copiado' : 'Copiar URL'}
+                    </button>
+                  )}
+                </div>
+                <span className="block mt-1 text-xs text-violet-700/80">
+                  Debe ser accesible desde Internet. Si tu Yeastar Cloud exige HTTPS, usa `https://...` en vez de `http://...`.
+                </span>
+              </li>
+              <li>
+                <strong>Secret:</strong> deja el que genere Yeastar (no hace falta pegarlo en Ausarta).
+              </li>
+              <li>
+                <strong>Request Method:</strong>{' '}
+                <code className="bg-violet-100 px-1.5 py-0.5 rounded font-mono">POST</code>
+              </li>
+              <li>
+                <strong>Event (obligatorio):</strong> busca y marca{' '}
+                <strong>30011 — Call State Changed</strong> (cambio de estado de llamada; trae{' '}
+                <code className="font-mono text-xs">call_id</code>). Si el panel permite varias filas, una
+                sola con 30011 basta.
+                <ul className="list-none mt-2 ml-1 space-y-1 text-xs text-violet-800/90">
+                  <li>
+                    • <strong>30008 — Extension Call State Changed</strong> → solo Ringing/Busy/Idle de la
+                    extensión; <em>no sustituye</em> la consulta Extension GET del Paso 1.
+                  </li>
+                  <li>
+                    • <strong>30007 / 30009</strong> → registro y presencia; <em>no los necesitas</em> para
+                    Ausarta.
+                  </li>
+                </ul>
+              </li>
+            </ul>
+
+            <div className="pt-3 border-t border-violet-200/60">
+              <p className="text-xs text-violet-900/80 font-semibold mb-2">
+                Cómo confirmar que Ausarta está recibiendo el webhook
+              </p>
+              <ol className="list-decimal list-inside space-y-2 text-xs text-violet-900/80">
+                <li>
+                  En Yeastar, guarda la fila del webhook con evento <strong>30011</strong> y URL <strong>/webhooks/yeastar</strong>.
+                  Si Yeastar tiene botón <em>Send test</em>, úsalo; si no, haz una llamada de prueba desde la extensión configurada.
+                </li>
+                <li>
+                  En la tabla del webhook de Yeastar, revisa el <strong>historial/operaciones</strong>:
+                  debe aparecer al menos un envío correcto (habitualmente respuesta OK).
+                </li>
+                <li>
+                  En Ausarta, abre el contenedor <code>backend</code> en Portainer → <strong>Logs</strong>
+                  y busca líneas como <code className="font-mono">[Yeastar Background] Evento</code>.
+                </li>
+                <li>
+                  Si no aparece nada: verifica que la URL tenga exactamente <code className="font-mono">/webhooks/yeastar</code>
+                  y que el firewall/router permita tráfico entrante por el puerto donde está Nginx (80/443).
+                </li>
+              </ol>
+            </div>
+            <p className="text-xs text-violet-700/80 pt-1 border-t border-violet-200/60">
+              Si la URL no coincide con tu dominio, define{' '}
+              <code className="bg-violet-100/80 px-1 rounded">FRONTEND_URL=https://app.tudominio.com</code>{' '}
+              o <code className="bg-violet-100/80 px-1 rounded">AUSARTA_PUBLIC_WEBHOOK_BASE_URL</code> en el
+              .env del backend y reinicia el contenedor.
             </p>
           </div>
         </div>

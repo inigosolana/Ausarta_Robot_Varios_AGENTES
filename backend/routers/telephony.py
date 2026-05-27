@@ -74,16 +74,37 @@ def _resolve_ausarta_public_ip() -> str:
     return ""
 
 
+def _resolve_yeastar_webhook_url() -> str:
+    """
+    URL pública donde Yeastar envía Event Push (POST /webhooks/yeastar).
+    Prioridad: AUSARTA_PUBLIC_WEBHOOK_BASE_URL > FRONTEND_URL + /webhooks/yeastar
+    """
+    explicit = (os.getenv("AUSARTA_PUBLIC_WEBHOOK_BASE_URL") or "").strip().rstrip("/")
+    if explicit:
+        if explicit.endswith("/webhooks/yeastar"):
+            return explicit
+        return f"{explicit}/webhooks/yeastar"
+
+    frontend = (os.getenv("FRONTEND_URL") or os.getenv("INVITE_REDIRECT_TO") or "").strip().rstrip("/")
+    if frontend:
+        return f"{frontend}/webhooks/yeastar"
+
+    return ""
+
+
 @router.get("/api/telephony/platform-info")
 async def get_telephony_platform_info(
     current_user: CurrentUser = Depends(require_admin),
 ):
     """
-    Metadatos de plataforma para la pantalla de telefonía (IP whitelist Yeastar).
-    La variable debe estar en el .env del backend, p. ej. AUSARTA_PUBLIC_IP=1.2.3.4
+    Metadatos de plataforma para la pantalla de telefonía (IP whitelist + webhook Yeastar).
+    Variables backend: AUSARTA_PUBLIC_IP, AUSARTA_PUBLIC_WEBHOOK_BASE_URL o FRONTEND_URL
     """
     _ = current_user
-    return {"ausarta_public_ip": _resolve_ausarta_public_ip()}
+    return {
+        "ausarta_public_ip": _resolve_ausarta_public_ip(),
+        "yeastar_webhook_url": _resolve_yeastar_webhook_url(),
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -573,32 +594,74 @@ async def yeastar_webhook(
         logger.error(f"❌ Error recibiendo webhook de Yeastar: {e}")
         return JSONResponse(status_code=400, content={"error": "Invalid payload"})
 
+def _normalize_yeastar_webhook_payload(payload: dict) -> tuple[str | None, list[str]]:
+    """
+    Unifica payloads legacy (action/callid) y P-Series Cloud (type + msg con call_id).
+    Evento recomendado en Yeastar: 30011 Call State Changed.
+    """
+    import json as _json
+
+    msg = payload.get("msg")
+    if isinstance(msg, str):
+        try:
+            msg = _json.loads(msg)
+        except Exception:
+            msg = {}
+    if not isinstance(msg, dict):
+        msg = {}
+
+    call_id = (
+        payload.get("callid")
+        or payload.get("call_id")
+        or msg.get("call_id")
+        or msg.get("callid")
+    )
+    if call_id is not None:
+        call_id = str(call_id).strip() or None
+
+    phones: list[str] = []
+    for key in (
+        "caller", "from", "src", "callernumber",
+        "callee", "to", "dst", "calleenumber",
+    ):
+        val = payload.get(key)
+        if val:
+            phones.append(str(val))
+
+    members = msg.get("members")
+    if isinstance(members, str):
+        try:
+            members = _json.loads(members)
+        except Exception:
+            members = []
+    if isinstance(members, list):
+        for member in members:
+            if not isinstance(member, dict):
+                continue
+            for section in ("extension", "inbound", "outbound", "internal"):
+                block = member.get(section)
+                if not isinstance(block, dict):
+                    continue
+                for key in ("from", "to", "number"):
+                    val = block.get(key)
+                    if val:
+                        phones.append(str(val))
+
+    return call_id, phones
+
+
 async def _process_yeastar_event(payload: dict):
     """Lógica pesada de procesamiento de eventos en segundo plano."""
     try:
-        event_action = payload.get("action")
-        call_id = payload.get("callid")
-        logger.info(f"📞 [Yeastar Background] Procesando {event_action} para callid {call_id}")
+        event_label = payload.get("action") or payload.get("type")
+        call_id, phone_candidates = _normalize_yeastar_webhook_payload(payload)
+        logger.info(
+            f"📞 [Yeastar Background] Evento {event_label} — callid={call_id}, "
+            f"teléfonos={len(phone_candidates)}"
+        )
 
         if not call_id or not supabase:
             return
-
-        # Vincular callid de Yeastar con encuesta activa por teléfono (normalizado)
-        caller = (
-            payload.get("caller")
-            or payload.get("from")
-            or payload.get("src")
-            or payload.get("callernumber")
-            or ""
-        )
-        callee = (
-            payload.get("callee")
-            or payload.get("to")
-            or payload.get("dst")
-            or payload.get("calleenumber")
-            or ""
-        )
-        phone_candidates = [p for p in (caller, callee) if p]
 
         for raw_phone in phone_candidates:
             digits = "".join(c for c in str(raw_phone) if c.isdigit())
