@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional, List, Literal, Any
 from datetime import datetime
 
@@ -79,9 +79,20 @@ class CallEndRequest(BaseModel):
 
 class TestOutboundCallRequest(BaseModel):
     """Payload para pruebas de llamada saliente vía LiveKit SIP."""
+
     phone_number: str
-    empresa_id: str
-    survey_id: str
+    empresa_id: Optional[str] = None
+    survey_id: Optional[str] = None
+    """Si viene (p. ej. 'Ausarta'), localiza empresa_id ignorando mayúsculas."""
+    from_empresa_nombre: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _require_tenant_hint(self):
+        emp = (self.empresa_id or "").strip()
+        nom = (self.from_empresa_nombre or "").strip()
+        if not emp and not nom:
+            raise ValueError("Indica empresa_id o from_empresa_nombre")
+        return self
 
 class AIPromptRequest(BaseModel):
     user_request: str

@@ -92,6 +92,129 @@ def _resolve_yeastar_webhook_url() -> str:
     return ""
 
 
+def _normalize_test_outbound_phone(raw: str) -> str:
+    """Convierte números españoles sin prefijo a E.164 (+34…)."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    if s.startswith("+"):
+        return s
+    digits = "".join(c for c in s if c.isdigit())
+    if len(digits) == 9 and digits[0] in "6789":
+        return f"+34{digits}"
+    if len(digits) == 11 and digits.startswith("34"):
+        return f"+{digits}"
+    return s
+
+
+async def _resolve_test_outbound_context(payload: TestOutboundCallRequest) -> tuple[str, str, int]:
+    """
+    Resuelve empresa + encuesta (ID fila encuestas) + campaign_id para el dispatch del agente.
+    El worker LiveKit exige survey_id ≠ 0 y presencia de campana_id/client_id en metadata del job.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Supabase no disponible")
+
+    from_name = (payload.from_empresa_nombre or "").strip()
+    empresa_hint = (payload.empresa_id or "").strip()
+
+    empresa_id_int: int | None = None
+    if empresa_hint.isdigit():
+        empresa_id_int = int(empresa_hint)
+
+    if from_name:
+        emp_res = await sb_query(lambda: supabase.table("empresas").select("id,nombre").execute())
+        want = from_name.casefold()
+        candidates = emp_res.data or []
+        exact = next(
+            (r for r in candidates if str(r.get("nombre") or "").strip().casefold() == want),
+            None,
+        )
+        partial = next(
+            (r for r in candidates if want in str(r.get("nombre") or "").strip().casefold()),
+            None,
+        )
+        picked = exact or partial
+        if not picked:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Empresa no encontrada por nombre: {from_name}",
+            )
+        resolved = int(picked["id"])
+        if empresa_id_int is not None and empresa_id_int != resolved:
+            logger.warning(
+                "[test-outbound] empresa_id (%s) no coincide con from_empresa_nombre='%s' (id=%s); "
+                "se usa la empresa resuelta por nombre.",
+                empresa_id_int,
+                from_name,
+                resolved,
+            )
+        empresa_id_int = resolved
+
+    if empresa_id_int is None:
+        raise HTTPException(
+            status_code=400,
+            detail="empresa_id o from_empresa_nombre es obligatorio",
+        )
+
+    survey_hint = (payload.survey_id or "").strip()
+
+    survey_id_int: int | None = None
+    campaign_id_int = 0
+
+    if survey_hint.isdigit() and int(survey_hint) > 0:
+        survey_id_int = int(survey_hint)
+        chk = await sb_query(
+            lambda sid=survey_id_int: supabase.table("encuestas")
+            .select("id, empresa_id, campaign_id, agent_id")
+            .eq("id", sid)
+            .limit(1)
+            .execute()
+        )
+        row = chk.data[0] if chk.data else None
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Encuesta id={survey_id_int} no encontrada")
+        if row.get("empresa_id") != empresa_id_int:
+            raise HTTPException(
+                status_code=400,
+                detail="survey_id no pertenece a la empresa indicada",
+            )
+        if row.get("agent_id") is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Esa encuesta no tiene agent_id; elige otra o deja survey_id vacío para autoselección",
+            )
+        campaign_id_int = int(row["campaign_id"] or 0)
+    else:
+        enc_res = await sb_query(
+            lambda eid=empresa_id_int: supabase.table("encuestas")
+            .select("id,campaign_id")
+            .eq("empresa_id", eid)
+            .not_.is_("agent_id", "null")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = enc_res.data or []
+        if not rows:
+            raise HTTPException(
+                status_code=400,
+                detail="No hay encuestas con agente asignado para esa empresa — indica survey_id explícito",
+            )
+        survey_id_int = int(rows[0]["id"])
+        campaign_id_int = int(rows[0].get("campaign_id") or 0)
+
+    empresa_str = str(empresa_id_int)
+    survey_str = str(survey_id_int)
+    logger.info(
+        "[test-outbound] Contexto resuelto: empresa_id=%s encuesta_id=%s campaign_id=%s",
+        empresa_str,
+        survey_str,
+        campaign_id_int,
+    )
+    return empresa_str, survey_str, campaign_id_int
+
+
 @router.get("/api/telephony/platform-info")
 async def get_telephony_platform_info(
     current_user: CurrentUser = Depends(require_admin),
@@ -984,17 +1107,22 @@ async def test_outbound_call(payload: TestOutboundCallRequest):
             detail="SIP_OUTBOUND_TRUNK_ID no está configurado. Define el trunk de salida en .env.",
         )
 
-    phone = payload.phone_number.strip()
+    phone = _normalize_test_outbound_phone(payload.phone_number)
     if not phone:
         raise HTTPException(status_code=400, detail="phone_number es obligatorio")
 
-    empresa_id = str(payload.empresa_id).strip()
-    survey_id = str(payload.survey_id).strip()
+    empresa_id, survey_id, campaign_id = await _resolve_test_outbound_context(payload)
     room_name = f"llamada_ausarta_{empresa_id}_{survey_id}"
 
+    test_contact_id = 0
     room_metadata = {
-        "empresa_id": int(empresa_id) if empresa_id.isdigit() else 0,
-        "survey_id": int(survey_id) if survey_id.isdigit() else 0,
+        "empresa_id": int(empresa_id),
+        "survey_id": int(survey_id),
+        "campaign_id": int(campaign_id),
+        "campana_id": int(campaign_id),
+        "contacto_id": test_contact_id,
+        "client_id": test_contact_id,
+        "lead_id": test_contact_id,
     }
 
     try:
@@ -1010,12 +1138,14 @@ async def test_outbound_call(payload: TestOutboundCallRequest):
                 agent_name=agent_name_dispatch,
                 metadata=room_metadata,
             )
-            # FIX 1: polling real en vez de sleep fijo — aborta si el agente no arranca
             agent_ready = await wait_for_agent_ready(room_name)
             if not agent_ready:
                 raise HTTPException(
                     status_code=503,
-                    detail="Agente no disponible (timeout de arranque). La llamada fue abortada para evitar audio mudo.",
+                    detail=(
+                        "Agente no disponible (timeout de arranque). Revisa logs del worker LiveKit "
+                        f"({agent_name_dispatch}) y que ROOM_PREFIX coincida."
+                    ),
                 )
         except HTTPException:
             raise
@@ -1039,6 +1169,9 @@ async def test_outbound_call(payload: TestOutboundCallRequest):
             "message": "Llamada saliente iniciada",
             "room_name": room_name,
             "phone_number": phone,
+            "empresa_id": int(empresa_id),
+            "survey_id": int(survey_id),
+            "campaign_id": int(campaign_id),
             "participant_id": participant_id,
         }
     except HTTPException:
