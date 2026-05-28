@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { AgentConfig } from '../types';
 import { apiFetch } from '../lib/apiFetch';
+import { LiveCallPanel } from '../components/LiveCallPanel';
 
 const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8001/api';
 
@@ -15,6 +16,7 @@ const TestCallView: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [isCalling, setIsCalling] = useState(false);
     const [callResult, setCallResult] = useState<{ success: boolean; message: string } | null>(null);
+    const [activeRoomName, setActiveRoomName] = useState<string | null>(null);
 
     useEffect(() => {
         loadAgents();
@@ -103,9 +105,11 @@ const TestCallView: React.FC = () => {
 
             const data = await response.json().catch(() => ({}));
             if (response.ok) {
+                const roomName = data.roomName || data.room_name || null;
+                setActiveRoomName(roomName);
                 setCallResult({
                     success: true,
-                    message: `✅ Llamada iniciada! Sala: ${data.roomName}`
+                    message: `✅ Llamada iniciada! Sala: ${roomName || '—'}`
                 });
             } else {
                 const detail = data.detail;
@@ -130,7 +134,8 @@ const TestCallView: React.FC = () => {
     const selectedAgent = agents.find(a => String(a.id) === selectedAgentId);
 
     return (
-        <div className="max-w-lg mx-auto mt-8">
+        <div className={`mx-auto mt-8 flex gap-6 items-start ${activeRoomName ? 'max-w-4xl' : 'max-w-lg'}`}>
+        <div className="flex-1 min-w-0">
             {/* Header */}
             <div className="text-center mb-8">
                 <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-green-400 to-green-600 rounded-2xl shadow-lg shadow-green-500/30 mb-4">
@@ -241,6 +246,17 @@ const TestCallView: React.FC = () => {
                     </button>
                 </div>
             </div>
+        </div>
+
+        {/* Panel de llamada en vivo */}
+        {activeRoomName && (
+            <div className="shrink-0 sticky top-6 self-start">
+                <LiveCallPanel
+                    roomName={activeRoomName}
+                    onClose={() => setActiveRoomName(null)}
+                />
+            </div>
+        )}
         </div>
     );
 };

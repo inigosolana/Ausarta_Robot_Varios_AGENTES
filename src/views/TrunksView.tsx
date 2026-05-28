@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Building2, Route, Save, RefreshCw } from 'lucide-react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { Building2, Route, Save, RefreshCw, Plus, Pencil, Trash2, X, Phone } from 'lucide-react';
 import { apiFetch } from '../lib/apiFetch';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -8,6 +8,19 @@ type EmpresaRow = {
   nombre: string;
   sip_outbound_trunk_id?: string | null;
   sip_inbound_trunk_id?: string | null;
+};
+
+type Extension = {
+  id: string;
+  extension_number: string;
+  extension_name: string | null;
+  departamento: string | null;
+};
+
+type ExtModalState = {
+  open: boolean;
+  mode: 'add' | 'edit';
+  ext: Partial<Extension>;
 };
 
 const TrunksView: React.FC = () => {
@@ -19,6 +32,18 @@ const TrunksView: React.FC = () => {
   const [inbound, setInbound] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Extensions state
+  const [extensions, setExtensions] = useState<Extension[]>([]);
+  const [extLoading, setExtLoading] = useState(false);
+  const [extMsg, setExtMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [extModal, setExtModal] = useState<ExtModalState>({
+    open: false,
+    mode: 'add',
+    ext: {},
+  });
+  const [extSaving, setExtSaving] = useState(false);
+  const [deletingExtId, setDeletingExtId] = useState<string | null>(null);
 
   const isSuperadmin = profile?.role === 'superadmin';
 
@@ -47,6 +72,21 @@ const TrunksView: React.FC = () => {
     }
   };
 
+  const loadExtensions = useCallback(async (empresaId: number) => {
+    setExtLoading(true);
+    setExtMsg(null);
+    try {
+      const res = await apiFetch(`/api/empresas/${empresaId}/extensions`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: Extension[] = await res.json();
+      setExtensions(data || []);
+    } catch (err: any) {
+      setExtMsg({ ok: false, text: err?.message || 'No se pudieron cargar las extensiones' });
+    } finally {
+      setExtLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadEmpresas();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -56,7 +96,8 @@ const TrunksView: React.FC = () => {
     if (!selected) return;
     setOutbound(selected.sip_outbound_trunk_id || '');
     setInbound(selected.sip_inbound_trunk_id || '');
-  }, [selected]);
+    loadExtensions(selected.id);
+  }, [selected, loadExtensions]);
 
   const save = async () => {
     if (!selectedEmpresaId) return;
@@ -93,6 +134,81 @@ const TrunksView: React.FC = () => {
     }
   };
 
+  const openAddExt = () => {
+    setExtModal({ open: true, mode: 'add', ext: {} });
+  };
+
+  const openEditExt = (ext: Extension) => {
+    setExtModal({ open: true, mode: 'edit', ext: { ...ext } });
+  };
+
+  const closeModal = () => {
+    setExtModal({ open: false, mode: 'add', ext: {} });
+  };
+
+  const saveExtension = async () => {
+    if (!selectedEmpresaId) return;
+    const { ext, mode } = extModal;
+    if (!ext.extension_number?.trim()) return;
+
+    setExtSaving(true);
+    setExtMsg(null);
+    try {
+      const body = JSON.stringify({
+        extension_number: ext.extension_number.trim(),
+        extension_name: ext.extension_name?.trim() || '',
+        departamento: ext.departamento?.trim() || '',
+      });
+
+      let res: Response;
+      if (mode === 'add') {
+        res = await apiFetch(`/api/empresas/${selectedEmpresaId}/extensions`, {
+          method: 'POST',
+          body,
+        });
+      } else {
+        res = await apiFetch(`/api/empresas/${selectedEmpresaId}/extensions/${ext.id}`, {
+          method: 'PUT',
+          body,
+        });
+      }
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+
+      await loadExtensions(selectedEmpresaId);
+      closeModal();
+      setExtMsg({ ok: true, text: mode === 'add' ? 'Extensión creada' : 'Extensión actualizada' });
+    } catch (err: any) {
+      setExtMsg({ ok: false, text: err?.message || 'No se pudo guardar la extensión' });
+    } finally {
+      setExtSaving(false);
+    }
+  };
+
+  const deleteExtension = async (extId: string) => {
+    if (!selectedEmpresaId) return;
+    setDeletingExtId(extId);
+    setExtMsg(null);
+    try {
+      const res = await apiFetch(`/api/empresas/${selectedEmpresaId}/extensions/${extId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok && res.status !== 204) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      setExtensions(prev => prev.filter(e => e.id !== extId));
+      setExtMsg({ ok: true, text: 'Extensión eliminada' });
+    } catch (err: any) {
+      setExtMsg({ ok: false, text: err?.message || 'No se pudo eliminar' });
+    } finally {
+      setDeletingExtId(null);
+    }
+  };
+
   if (!isSuperadmin) {
     return (
       <div className="max-w-4xl mx-auto bg-white rounded-2xl border border-amber-200 p-6 text-amber-800">
@@ -106,13 +222,14 @@ const TrunksView: React.FC = () => {
       <header>
         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
           <Route size={24} className="text-indigo-600" />
-          Troncales SIP
+          Troncales SIP y Extensiones
         </h1>
         <p className="text-gray-500 text-sm mt-1">
-          Configura trunk ID saliente y entrante por empresa.
+          Configura trunk ID saliente/entrante y extensiones Yeastar por empresa.
         </p>
       </header>
 
+      {/* ── Selector de empresa ─────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 space-y-5">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
@@ -139,6 +256,7 @@ const TrunksView: React.FC = () => {
           </div>
         </div>
 
+        {/* ── Troncales SIP ─────────────────────────────────────────────── */}
         <div>
           <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
             Troncal saliente (SIP_OUTBOUND_TRUNK_ID)
@@ -188,6 +306,164 @@ const TrunksView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* ── Extensiones Yeastar ─────────────────────────────────────────── */}
+      {selectedEmpresaId && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Phone size={17} className="text-emerald-600" />
+              <h2 className="text-base font-bold text-gray-800">Extensiones Yeastar</h2>
+              <span className="px-2 py-0.5 bg-gray-100 rounded-full text-[11px] text-gray-500 font-medium">
+                {extensions.length}
+              </span>
+            </div>
+            <button
+              onClick={openAddExt}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors"
+            >
+              <Plus size={13} />
+              Añadir extensión
+            </button>
+          </div>
+
+          {extMsg && (
+            <div className={`text-xs px-3 py-2 rounded-lg border ${extMsg.ok ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+              {extMsg.text}
+            </div>
+          )}
+
+          {extLoading ? (
+            <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
+              <RefreshCw size={14} className="animate-spin" /> Cargando extensiones…
+            </div>
+          ) : extensions.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              <Phone size={28} className="mx-auto mb-2 text-gray-200" />
+              <p className="text-sm">Sin extensiones configuradas</p>
+              <p className="text-xs mt-1 text-gray-300">Añade extensiones Yeastar para transferencias dinámicas</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {extensions.map(ext => (
+                <div
+                  key={ext.id}
+                  className="flex items-center justify-between p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center">
+                      <Phone size={15} className="text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-gray-800">
+                        ext {ext.extension_number}
+                        {ext.extension_name && (
+                          <span className="font-normal text-gray-600"> — {ext.extension_name}</span>
+                        )}
+                      </p>
+                      {ext.departamento && (
+                        <p className="text-[11px] text-gray-400">{ext.departamento}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => openEditExt(ext)}
+                      className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                      title="Editar"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      onClick={() => deleteExtension(ext.id)}
+                      disabled={deletingExtId === ext.id}
+                      className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                      title="Eliminar"
+                    >
+                      {deletingExtId === ext.id
+                        ? <RefreshCw size={13} className="animate-spin" />
+                        : <Trash2 size={13} />
+                      }
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Modal de extensión ──────────────────────────────────────────── */}
+      {extModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-gray-800">
+                {extModal.mode === 'add' ? 'Nueva extensión' : 'Editar extensión'}
+              </h3>
+              <button onClick={closeModal} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                  Número de extensión *
+                </label>
+                <input
+                  type="text"
+                  value={extModal.ext.extension_number || ''}
+                  onChange={(e) => setExtModal(m => ({ ...m, ext: { ...m.ext, extension_number: e.target.value } }))}
+                  placeholder="1001"
+                  className="w-full h-10 px-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400/20 focus:border-emerald-400"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                  Nombre
+                </label>
+                <input
+                  type="text"
+                  value={extModal.ext.extension_name || ''}
+                  onChange={(e) => setExtModal(m => ({ ...m, ext: { ...m.ext, extension_name: e.target.value } }))}
+                  placeholder="Ana García"
+                  className="w-full h-10 px-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400/20 focus:border-emerald-400"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                  Departamento
+                </label>
+                <input
+                  type="text"
+                  value={extModal.ext.departamento || ''}
+                  onChange={(e) => setExtModal(m => ({ ...m, ext: { ...m.ext, departamento: e.target.value } }))}
+                  placeholder="Ventas"
+                  className="w-full h-10 px-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400/20 focus:border-emerald-400"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={closeModal}
+                className="flex-1 h-10 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={saveExtension}
+                disabled={extSaving || !extModal.ext.extension_number?.trim()}
+                className="flex-1 h-10 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {extSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

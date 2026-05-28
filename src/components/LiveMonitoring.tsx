@@ -23,8 +23,10 @@ import {
     Bot,
     Database,
     Zap,
-    Plug
+    Plug,
+    LayoutPanelRight,
 } from 'lucide-react';
+import { LiveCallPanel } from './LiveCallPanel';
 import type { LiveCallsMetricsResponse, RedisMetricsResponse } from '../types';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
@@ -108,6 +110,7 @@ export const LiveMonitoring: React.FC = () => {
     const [redisMetrics, setRedisMetrics] = useState<RedisMetricsResponse | null>(null);
     const [metricsLoading, setMetricsLoading] = useState(true);
     const [metricsError, setMetricsError] = useState<string | null>(null);
+    const [livePanelRoom, setLivePanelRoom] = useState<string | null>(null);
 
     const roomRef = useRef<Room | null>(null);
     const transcriptsEndRef = useRef<HTMLDivElement>(null);
@@ -620,13 +623,23 @@ export const LiveMonitoring: React.FC = () => {
                                                     </div>
                                                 </div>
                                             </div>
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); startMonitoring(session.name); }}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-all hover:scale-105 active:scale-95"
-                                            >
-                                                <Eye size={12} />
-                                                {t('Monitor', 'Monitorear')}
-                                            </button>
+                                            <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all">
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); setLivePanelRoom(session.name); }}
+                                                    className="flex items-center gap-1 px-2 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:bg-blue-700 hover:scale-105 active:scale-95"
+                                                    title={t('Live panel', 'Panel en vivo')}
+                                                >
+                                                    <LayoutPanelRight size={12} />
+                                                    {t('Panel', 'Panel')}
+                                                </button>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); startMonitoring(session.name); }}
+                                                    className="flex items-center gap-1.5 px-2 py-1.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg text-[10px] font-bold hover:scale-105 active:scale-95"
+                                                >
+                                                    <Eye size={12} />
+                                                    {t('Monitor', 'Monitorear')}
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 ))
@@ -786,6 +799,17 @@ export const LiveMonitoring: React.FC = () => {
             `}</style>
         </div>
         </div>
+
+        {/* Panel en vivo flotante */}
+        {livePanelRoom && (
+            <div className="fixed bottom-6 right-6 z-50 shadow-2xl">
+                <LiveCallPanel
+                    roomName={livePanelRoom}
+                    onClose={() => setLivePanelRoom(null)}
+                />
+            </div>
+        )}
+    </div>
     );
 };
 

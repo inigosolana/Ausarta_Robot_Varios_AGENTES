@@ -1625,3 +1625,169 @@ async def _handle_participant_left(encuesta_id: int, room_name: str, identity: s
     Solo registramos el evento para auditoría.
     """
     logger.info(f"👤 [LK Webhook] Participante '{identity}' salió de sala {room_name} (encuesta {encuesta_id}, metadata={room_metadata or {}}). Esperando room_finished.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXTENSIONES YEASTAR — CRUD por empresa
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/api/empresas/{empresa_id}/extensions")
+async def list_extensions(
+    empresa_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Lista las extensiones Yeastar configuradas para una empresa."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    is_global = current_user.role in ("superadmin",)
+    if not is_global and str(current_user.empresa_id) != str(empresa_id):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+
+    res = await sb_query(
+        lambda eid=empresa_id: supabase.table("yeastar_extensions")
+        .select("id, extension_number, extension_name, departamento, created_at")
+        .eq("empresa_id", eid)
+        .order("extension_number")
+        .execute()
+    )
+    return res.data or []
+
+
+@router.post("/api/empresas/{empresa_id}/extensions", status_code=201)
+async def create_extension(
+    empresa_id: int,
+    payload: dict,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Crea una nueva extensión Yeastar para una empresa."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    is_global = current_user.role in ("superadmin",)
+    if not is_global and str(current_user.empresa_id) != str(empresa_id):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+
+    extension_number = (payload.get("extension_number") or "").strip()
+    if not extension_number:
+        raise HTTPException(status_code=400, detail="extension_number es obligatorio")
+
+    insert_data = {
+        "empresa_id": empresa_id,
+        "extension_number": extension_number,
+        "extension_name": (payload.get("extension_name") or "").strip() or None,
+        "departamento": (payload.get("departamento") or "").strip() or None,
+    }
+
+    res = await sb_query(
+        lambda d=insert_data: supabase.table("yeastar_extensions").insert(d).execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=500, detail="Error creando extensión")
+    return res.data[0]
+
+
+@router.put("/api/empresas/{empresa_id}/extensions/{ext_id}")
+async def update_extension(
+    empresa_id: int,
+    ext_id: str,
+    payload: dict,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Actualiza una extensión Yeastar existente."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    is_global = current_user.role in ("superadmin",)
+    if not is_global and str(current_user.empresa_id) != str(empresa_id):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+
+    update_data: dict = {}
+    if "extension_number" in payload:
+        update_data["extension_number"] = (payload["extension_number"] or "").strip()
+    if "extension_name" in payload:
+        update_data["extension_name"] = (payload["extension_name"] or "").strip() or None
+    if "departamento" in payload:
+        update_data["departamento"] = (payload["departamento"] or "").strip() or None
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="Nada que actualizar")
+
+    await sb_query(
+        lambda eid=empresa_id, eid2=ext_id, d=update_data: supabase.table("yeastar_extensions")
+        .update(d)
+        .eq("empresa_id", eid)
+        .eq("id", eid2)
+        .execute()
+    )
+
+    res = await sb_query(
+        lambda eid=empresa_id, eid2=ext_id: supabase.table("yeastar_extensions")
+        .select("id, extension_number, extension_name, departamento, created_at")
+        .eq("empresa_id", eid)
+        .eq("id", eid2)
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Extensión no encontrada")
+    return res.data[0]
+
+
+@router.delete("/api/empresas/{empresa_id}/extensions/{ext_id}", status_code=204)
+async def delete_extension(
+    empresa_id: int,
+    ext_id: str,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Elimina una extensión Yeastar."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    is_global = current_user.role in ("superadmin",)
+    if not is_global and str(current_user.empresa_id) != str(empresa_id):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+
+    await sb_query(
+        lambda eid=empresa_id, eid2=ext_id: supabase.table("yeastar_extensions")
+        .delete()
+        .eq("empresa_id", eid)
+        .eq("id", eid2)
+        .execute()
+    )
+    return
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COLGAR LLAMADA — Endpoint para panel de monitorización en vivo
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/api/calls/hang_up")
+async def hang_up_call(
+    payload: dict,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """
+    Cierra/cuelga una sala LiveKit activa.
+    Body: { "room_name": str }
+    """
+    room_name = (payload.get("room_name") or "").strip()
+    if not room_name:
+        raise HTTPException(status_code=400, detail="room_name es obligatorio")
+
+    try:
+        from services.queue_service import get_arq_pool
+        arq_pool = await get_arq_pool()
+        job = await arq_pool.enqueue_job("colgar_sala", room_name)
+        logger.info(f"📬 [hang_up] Colgar sala {room_name} encolado (job={getattr(job, 'job_id', 'n/a')})")
+    except Exception as q_err:
+        logger.warning(f"⚠️ [hang_up] No se pudo encolar colgar sala {room_name}: {q_err}")
+        if lkapi:
+            try:
+                from livekit import api as lk_api
+                await lkapi.room.delete_room(lk_api.DeleteRoomRequest(room=room_name))
+                logger.info(f"✅ [hang_up] Sala {room_name} cerrada directamente via LiveKit API")
+            except Exception as lk_err:
+                raise HTTPException(status_code=502, detail=f"Error cerrando sala: {lk_err}") from lk_err
+
+    return {"status": "ok", "room_name": room_name, "message": "Sala cerrada"}

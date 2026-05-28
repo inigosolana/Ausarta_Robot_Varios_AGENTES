@@ -513,6 +513,7 @@ class DynamicAgent(Agent):
         self.tts_model = agent_config.get("tts_model", "sonic-multilingual")
         self.speaking_speed = agent_config.get("speaking_speed", 1.0)
         self.hangup_started = False
+        self._transfer_completed = asyncio.Event()
         
         try:
             # Soportamos formatos:
@@ -739,25 +740,137 @@ class DynamicAgent(Agent):
 
         return "Dato guardado."
 
+    async def _generate_transfer_briefing(self) -> str:
+        """
+        Genera un briefing de 2-3 frases para el agente humano que recibirá la llamada.
+        Extrae las últimas 10 entradas del chat y llama al LLM via aiohttp.
+        """
+        try:
+            raw_msgs, _ = _extract_transcript_from_session(getattr(self, "session", None))
+            last_10 = raw_msgs[-10:] if len(raw_msgs) > 10 else raw_msgs
+            if not last_10:
+                return ""
+
+            lines = []
+            for m in last_10:
+                role_label = "Cliente" if m["role"] == "user" else "Agente"
+                lines.append(f"{role_label}: {m['content']}")
+            transcript_text = "\n".join(lines)
+
+            system_prompt = (
+                "Eres un asistente que genera briefings para agentes humanos. "
+                "Genera SOLO el briefing, sin introducción ni explicación adicional."
+            )
+            user_prompt = (
+                f"Basándote en esta transcripción, genera un briefing de máximo 3 frases "
+                f"para el agente humano que va a recibir esta transferencia. "
+                f"Incluye: (1) nombre del cliente si se mencionó, (2) motivo de la llamada, "
+                f"(3) cualquier dato clave (número de pedido, referencia, preferencia). "
+                f"Responde SOLO el briefing, sin introducción.\n\n"
+                f"Transcripción:\n{transcript_text}"
+            )
+
+            openai_key = os.getenv("OPENAI_API_KEY", "")
+            if not openai_key:
+                return ""
+
+            payload = {
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "max_tokens": 200,
+                "temperature": 0.3,
+            }
+
+            async with aiohttp.ClientSession() as http_session:
+                async with http_session.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {openai_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=aiohttp.ClientTimeout(total=8),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        briefing = data["choices"][0]["message"]["content"].strip()
+                        logger.info(f"🗒️ [{self.room_name}] Briefing generado: {briefing[:80]}…")
+                        return briefing
+                    else:
+                        logger.warning(f"⚠️ [{self.room_name}] Error OpenAI briefing: HTTP {resp.status}")
+                        return ""
+        except Exception as briefing_err:
+            logger.warning(f"⚠️ [{self.room_name}] No se pudo generar briefing: {briefing_err}")
+            return ""
+
+    async def _resolve_transfer_extension(self, extension_number: str, empresa_id_int: int) -> str:
+        """
+        Resuelve la extensión de transferencia:
+        1. extension_number si viene especificada
+        2. Primera extensión activa de yeastar_extensions para la empresa
+        3. Fallback a YEASTAR_HUMAN_TRANSFER_EXTENSION env var
+        """
+        if extension_number and extension_number.strip():
+            return extension_number.strip()
+
+        try:
+            url = f"{BRIDGE_SERVER_URL_INTERNAL}/api/empresas/{empresa_id_int}/extensions"
+            async with aiohttp.ClientSession() as http_session:
+                async with http_session.get(
+                    url,
+                    timeout=aiohttp.ClientTimeout(total=4),
+                    headers={"X-Internal-Request": "agent"},
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if isinstance(data, list) and data:
+                            ext = str(data[0].get("extension_number", "")).strip()
+                            if ext:
+                                logger.info(
+                                    f"📞 [{self.room_name}] Extensión dinámica: {ext} "
+                                    f"({data[0].get('extension_name', '')})"
+                                )
+                                return ext
+        except Exception as ext_err:
+            logger.warning(f"⚠️ [{self.room_name}] No se pudo obtener extensión dinámica: {ext_err}")
+
+        return os.getenv("YEASTAR_HUMAN_TRANSFER_EXTENSION", "1000")
+
+    async def _wait_and_signal_transfer(self) -> None:
+        """Espera 4 s tras encolar la transferencia y señaliza desconexión limpia del agente IA."""
+        await asyncio.sleep(4)
+        self._transfer_completed.set()
+        logger.info(f"🔄 [{self.room_name}] Señal de transferencia completada emitida")
+
     @function_tool(name="transferir_a_agente_humano")
     async def _http_tool_transferir_humano(
         self,
         context: RunContext,
         motivo: str = "El cliente solicita hablar con una persona",
+        extension_number: str = "",
     ) -> str | None:
         """
         Transfiere la llamada a un agente humano vía backend multi-tenant (Yeastar).
         Usa esta herramienta SOLO cuando el cliente pida EXPLÍCITAMENTE hablar con una persona.
         Antes de transferir:
-        1. Confirma con el cliente: \"Entendido, le paso con un compañero. Un momento por favor.\"
+        1. Confirma con el cliente: \"Perfecto, le paso con un compañero y le informo de su consulta.\"
         2. llama a esta herramienta.
+
+        Parámetros:
+        - motivo: Razón de la transferencia (el LLM lo rellena)
+        - extension_number: Extensión del departamento o persona específica a quien transferir.
+          Si no se especifica, se usará la extensión por defecto de la empresa.
+          Ejemplo: si el cliente pide hablar con ventas y hay extensión de ventas, pásala aquí.
         """
         survey_id_raw = self.survey_id
         survey_id: int | None = int(survey_id_raw) if str(survey_id_raw).isdigit() else None
 
         logger.info(
             f"📞 [{self.room_name}] Transferencia solicitada "
-            f"(survey={survey_id_raw}, motivo: {motivo})"
+            f"(survey={survey_id_raw}, motivo: {motivo}, ext: {extension_number or 'auto'})"
         )
 
         busy_message = "Lo siento, nuestros agentes están ocupados, ¿puedo tomar nota?"
@@ -788,11 +901,29 @@ class DynamicAgent(Agent):
             else None
         )
 
+        # ── Generar briefing en paralelo con la resolución de extensión ─────────
+        briefing_task = asyncio.create_task(self._generate_transfer_briefing())
+        ext_task = asyncio.create_task(
+            self._resolve_transfer_extension(extension_number, empresa_id_int)
+        )
+        briefing, resolved_extension = await asyncio.gather(briefing_task, ext_task)
+
+        # ── Guardar briefing en encuesta ANTES de transferir ────────────────────
+        if briefing and survey_id is not None:
+            try:
+                await enqueue_guardar_encuesta({
+                    "id_encuesta": survey_id,
+                    "datos_extra": {"transfer_briefing": briefing},
+                })
+                logger.info(f"📬 [{self.room_name}] Briefing guardado en encuesta {survey_id}")
+            except Exception as b_err:
+                logger.warning(f"⚠️ [{self.room_name}] Error guardando briefing: {b_err}")
+
         transfer_payload: dict[str, Any] = {
             "room_name": self.room_name,
             "empresa_id": empresa_id_int,
             "call_id": str(yeastar_call_id or self.room_name),
-            "extension": os.getenv("YEASTAR_HUMAN_TRANSFER_EXTENSION", "1000"),
+            "extension": resolved_extension,
         }
         if survey_id is not None:
             transfer_payload["survey_id"] = survey_id
@@ -812,16 +943,20 @@ class DynamicAgent(Agent):
         try:
             job_id = await enqueue_transfer_to_human(queue_payload)
             logger.info(
-                f"📬 [{self.room_name}] Transferencia encolada (job={job_id}, survey={survey_id_raw})"
+                f"📬 [{self.room_name}] Transferencia encolada "
+                f"(job={job_id}, survey={survey_id_raw}, ext={resolved_extension})"
             )
             if current_session:
                 try:
                     await current_session.say(
-                        "Transferencia en curso, un momento por favor",
+                        "Perfecto, le paso con un compañero. Un momento por favor.",
                         allow_interruptions=False,
                     )
                 except Exception as say_err:
                     logger.warning(f"⚠️ [{self.room_name}] No se pudo reproducir aviso TTS: {say_err}")
+
+            # Esperar 4 s en background y luego señalizar desconexión limpia del agente IA
+            asyncio.create_task(self._wait_and_signal_transfer())
             return "Transferencia iniciada"
         except Exception as transfer_err:
             logger.error(f"❌ [{self.room_name}] Error encolando transferencia: {transfer_err}")
@@ -1669,10 +1804,71 @@ class CallSession:
             asyncio.create_task(self.run_autosave()),
             asyncio.create_task(self.run_silence_watchdog()),
         ]
+
+        transfer_event = getattr(self.agent_instance, "_transfer_completed", None)
+        finished_task = asyncio.create_task(self.finished.wait())
+        transfer_task = asyncio.create_task(
+            transfer_event.wait() if transfer_event else asyncio.sleep(float("inf"))
+        )
+
         try:
-            await asyncio.wait_for(
-                self.finished.wait(), timeout=self.CALL_TIMEOUT_SECONDS
+            done, pending = await asyncio.wait(
+                {finished_task, transfer_task},
+                timeout=self.CALL_TIMEOUT_SECONDS,
+                return_when=asyncio.FIRST_COMPLETED,
             )
+
+            for p in pending:
+                p.cancel()
+
+            if transfer_task in done and transfer_event and transfer_event.is_set():
+                # Transferencia limpia: desconectamos el agente IA sin cerrar la sala
+                logger.info(
+                    f"🔄 [{self.job_id}] Transferencia completada — desconectando agente IA "
+                    f"sin cerrar sala '{self.room_name}'"
+                )
+                self.stop_guard.set()
+                for t in self._tasks:
+                    t.cancel()
+
+                survey_id_int = int(self.survey_id) if str(self.survey_id).isdigit() else 0
+                if survey_id_int:
+                    try:
+                        await enqueue_guardar_encuesta({
+                            "id_encuesta": survey_id_int,
+                            "status": "transferred",
+                            "comentarios": "Agente IA desconectado tras transferencia a humano",
+                        })
+                    except Exception as save_err:
+                        logger.warning(f"⚠️ [{self.job_id}] Error guardando estado transferred: {save_err}")
+
+                try:
+                    await self.session.aclose()
+                except Exception:
+                    pass
+
+                # Solo desconectar el agente IA — NO cerrar la sala ni expulsar al participante SIP
+                try:
+                    await self.ctx.room.disconnect()
+                except Exception as disc_err:
+                    logger.debug(f"[{self.job_id}] Desconexión tras transferencia: {disc_err}")
+
+                self.finished.set()
+                return
+
+            if not done:
+                # Timeout de seguridad
+                logger.error(
+                    f"🚨 [{self.job_id}] KILL SWITCH: Timeout de seguridad "
+                    f"({self.CALL_TIMEOUT_SECONDS}s) alcanzado. "
+                    f"Forzando desconexión del worker para sala '{self.room_name}'."
+                )
+                try:
+                    await self.ctx.room.disconnect()
+                except Exception as disc_err:
+                    logger.warning(f"[{self.job_id}] Error al forzar desconexión: {disc_err}")
+                self.finished.set()
+
         except asyncio.TimeoutError:
             logger.error(
                 f"🚨 [{self.job_id}] KILL SWITCH: Timeout de seguridad "

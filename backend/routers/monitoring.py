@@ -162,6 +162,186 @@ async def _resolve_sse_user(token: str) -> CurrentUser:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
+_CALL_SSE_INTERVAL = 1.5
+
+
+async def _build_call_payload(room_name: str) -> dict:
+    """
+    Construye el payload SSE para una llamada individual.
+    Extrae transcript, contacto y extensiones desde Supabase + LiveKit.
+    """
+    from services.supabase_service import supabase, sb_query
+    import re as _re
+
+    status = "active"
+    duration_seconds = 0
+    transcript: list[dict] = []
+    contact: dict = {"nombre": None, "telefono": "", "datos_extra": {}}
+    transfer_briefing: str | None = None
+    extensions_available: list[dict] = []
+    empresa_id: int | None = None
+
+    # ── Duración y status de la sala (LiveKit) ──────────────────────────────
+    try:
+        from services.livekit_service import lkapi
+        if lkapi:
+            from livekit import api as lk_api
+            rooms_res = await lkapi.room.list_rooms(lk_api.ListRoomsRequest(names=[room_name]))
+            if rooms_res.rooms:
+                r = rooms_res.rooms[0]
+                now_ts = int(time.time())
+                duration_seconds = max(0, now_ts - r.creation_time) if r.creation_time else 0
+    except Exception:
+        pass
+
+    # ── Datos de encuesta (Supabase) ─────────────────────────────────────────
+    if supabase:
+        try:
+            enc_m = _re.search(r"encuesta_(\d+)", room_name)
+            enc_id = int(enc_m.group(1)) if enc_m else None
+
+            if enc_id:
+                enc_res = await sb_query(
+                    lambda eid=enc_id: supabase.table("encuestas")
+                    .select("status, datos_extra, empresa_id")
+                    .eq("id", eid)
+                    .limit(1)
+                    .execute()
+                )
+                if enc_res.data:
+                    enc = enc_res.data[0]
+                    enc_status = enc.get("status") or "active"
+                    empresa_id = enc.get("empresa_id")
+
+                    if enc_status in ("transferred",):
+                        status = "transferred"
+                    elif enc_status in ("completed", "failed", "no_contesta"):
+                        status = "ended"
+
+                    datos_extra_raw = enc.get("datos_extra") or {}
+                    if isinstance(datos_extra_raw, str):
+                        try:
+                            import json as _json
+                            datos_extra_raw = _json.loads(datos_extra_raw)
+                        except Exception:
+                            datos_extra_raw = {}
+
+                    transfer_briefing = datos_extra_raw.get("transfer_briefing") or None
+
+                    # Transcript desde datos_extra o transcripcion
+                    raw_transcript = datos_extra_raw.get("raw") or []
+                    if raw_transcript and isinstance(raw_transcript, list):
+                        for entry in raw_transcript[-50:]:
+                            role = entry.get("role", "assistant")
+                            speaker = "agent" if role == "assistant" else "user"
+                            transcript.append({
+                                "speaker": speaker,
+                                "text": entry.get("content", ""),
+                                "ts": "",
+                            })
+
+            # ── Contacto ─────────────────────────────────────────────────────
+            if empresa_id:
+                emp_m = _re.search(r"empresa_(\d+)", room_name)
+                eid_room = int(emp_m.group(1)) if emp_m else empresa_id
+
+                phone_patterns = _re.findall(r"\+?[\d]{9,15}", room_name)
+                if not phone_patterns:
+                    contact_res = await sb_query(
+                        lambda eid=eid_room: supabase.table("contactos")
+                        .select("nombre, telefono, datos_extra")
+                        .eq("empresa_id", eid)
+                        .limit(1)
+                        .execute()
+                    )
+                else:
+                    phone = phone_patterns[0]
+                    contact_res = await sb_query(
+                        lambda eid=eid_room, p=phone: supabase.table("contactos")
+                        .select("nombre, telefono, datos_extra")
+                        .eq("empresa_id", eid)
+                        .eq("telefono", p)
+                        .limit(1)
+                        .execute()
+                    )
+                if contact_res.data:
+                    c = contact_res.data[0]
+                    contact = {
+                        "nombre": c.get("nombre"),
+                        "telefono": c.get("telefono", ""),
+                        "datos_extra": c.get("datos_extra") or {},
+                    }
+
+                # ── Extensiones disponibles ──────────────────────────────────
+                ext_res = await sb_query(
+                    lambda eid=eid_room: supabase.table("yeastar_extensions")
+                    .select("id, extension_number, extension_name, departamento")
+                    .eq("empresa_id", eid)
+                    .order("extension_number")
+                    .execute()
+                )
+                extensions_available = ext_res.data or []
+
+        except Exception as db_err:
+            logger.debug("[SSE call] Error obteniendo datos encuesta/contacto: %s", db_err)
+
+    return {
+        "room_name": room_name,
+        "status": status,
+        "duration_seconds": duration_seconds,
+        "transcript": transcript,
+        "contact": contact,
+        "transfer_briefing": transfer_briefing,
+        "extensions_available": extensions_available,
+    }
+
+
+async def _call_event_generator(room_name: str, user: CurrentUser) -> AsyncGenerator[str, None]:
+    """Generador SSE para una llamada individual. Emite cada 1.5 s."""
+    last_keepalive = time.monotonic()
+    while True:
+        try:
+            payload = await _build_call_payload(room_name)
+            data = json.dumps(payload, ensure_ascii=False)
+            yield f"data: {data}\n\n"
+        except asyncio.CancelledError:
+            return
+        except Exception as err:
+            logger.warning("[SSE call] Error construyendo payload: %s", err)
+            yield f"data: {json.dumps({'error': str(err)})}\n\n"
+
+        now = time.monotonic()
+        if now - last_keepalive >= _SSE_KEEPALIVE_INTERVAL:
+            yield ": keep-alive\n\n"
+            last_keepalive = now
+
+        try:
+            await asyncio.sleep(_CALL_SSE_INTERVAL)
+        except asyncio.CancelledError:
+            return
+
+
+@router.get("/call/{room_name}/stream")
+async def call_stream(
+    room_name: str,
+    token: str = Query(..., description="Bearer JWT"),
+) -> StreamingResponse:
+    """
+    SSE endpoint de llamada individual en tiempo real.
+    Emite cada 1.5 s con: status, duration, transcript, contact, transfer_briefing, extensions.
+    Autenticación: pasa el JWT como ?token=<jwt>.
+    """
+    user = await _resolve_sse_user(token)
+    return StreamingResponse(
+        _call_event_generator(room_name, user),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/stream")
 async def monitoring_stream(
     token: str = Query(..., description="Bearer JWT (EventSource no soporta Authorization header)"),
