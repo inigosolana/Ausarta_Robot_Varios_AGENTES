@@ -18,6 +18,8 @@ const TelephonyView      = lazy(() => import('./views/TelephonyView'));
 const TrunksView         = lazy(() => import('./views/TrunksView'));
 const AssistantView      = lazy(() => import('./views/AssistantView'));
 const ProfileView        = lazy(() => import('./views/ProfileView'));
+const KnowledgeBaseView  = lazy(() => import('./views/KnowledgeBaseView').then(m => ({ default: m.KnowledgeBaseView })));
+const ContactsView       = lazy(() => import('./views/ContactsView').then(m => ({ default: m.ContactsView })));
 
 const LoadingFallback = () => (
   <div className="flex items-center justify-center min-h-[60vh]">
@@ -49,6 +51,8 @@ const App: React.FC = () => (
         <Route path="crm"       element={<CrmIntegrationView />} />
         <Route path="telephony" element={<PermissionGate view="admin"><TelephonyView /></PermissionGate>} />
         <Route path="trunks"    element={<PermissionGate view="admin"><TrunksView /></PermissionGate>} />
+        <Route path="knowledge" element={<PermissionGate view="admin"><KnowledgeBaseView /></PermissionGate>} />
+        <Route path="contacts"  element={<ContactsView />} />
         <Route path="profile"   element={<ProfileView />} />
       </Route>
     </Route>

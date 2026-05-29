@@ -28,6 +28,8 @@ from routers.n8n_proxy import router as n8n_proxy_router
 from routers.assistant import router as assistant_router
 from routers.api_credits import router as api_credits_router
 from routers.monitoring import router as monitoring_router
+from routers.knowledge import router as knowledge_router
+from routers.contacts import router as contacts_router
 
 # --- CONFIGURACIÓN DE LOGS ---
 # Configurado antes de load_dotenv para capturar cualquier problema de arranque
@@ -135,6 +137,8 @@ app.include_router(n8n_proxy_router)
 app.include_router(assistant_router)
 app.include_router(api_credits_router)
 app.include_router(monitoring_router)
+app.include_router(knowledge_router)
+app.include_router(contacts_router)
 
 
 # --- ENDPOINTS BASE ---

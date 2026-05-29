@@ -98,8 +98,20 @@ def _resolve_enthusiasm_instruction(level: str) -> str:
     return ENTHUSIASM_INSTRUCTIONS["Normal"]
 
 
-def build_agent_prompt(agent_config: dict, enthusiasm_level: str, speaking_speed: float) -> str:
-    """Ensambla el system prompt: reglas base, contexto, guion y bloque JSON de extracción si aplica."""
+def build_agent_prompt(
+    agent_config: dict,
+    enthusiasm_level: str,
+    speaking_speed: float,
+    kb_context: str = "",
+    customer_context: str = "",
+) -> str:
+    """
+    Ensambla el system prompt: reglas base, contexto, guion y bloque JSON de extracción si aplica.
+
+    Parámetros adicionales (Fase 2):
+    - kb_context: fragmentos relevantes de la base de conocimiento RAG (pre-cargados).
+    - customer_context: datos del cliente obtenidos de la BD externa.
+    """
     agent_instructions = agent_config.get("instructions", "Eres un asistente virtual.")
     agent_name = agent_config.get("name", "Bot")
     company_name = (
@@ -110,6 +122,12 @@ def build_agent_prompt(agent_config: dict, enthusiasm_level: str, speaking_speed
     company_context = agent_config.get("company_context", "") or ""
     extraction_schema = agent_config.get("extraction_schema") or []
 
+    # Contextos adicionales de Fase 2 (también pueden venir en agent_config)
+    if not kb_context:
+        kb_context = agent_config.get("_kb_context", "") or ""
+    if not customer_context:
+        customer_context = agent_config.get("_customer_context", "") or ""
+
     base_rules_to_use = BASE_RULES
 
     full_instructions = f"{base_rules_to_use}\n\n"
@@ -118,6 +136,28 @@ def build_agent_prompt(agent_config: dict, enthusiasm_level: str, speaking_speed
     full_instructions += f"DATOS DEL AGENTE:\n- NOMBRE: {agent_name}\n- EMPRESA: {company_name}\n"
     full_instructions += f"- NIVEL DE ENTUSIASMO: {enthusiasm_level}\n"
     full_instructions += f"- VELOCIDAD DE VOZ OBJETIVO: {speaking_speed}\n\n"
+
+    # Contexto RAG (Base de Conocimiento) — solo si tiene contenido
+    if kb_context:
+        full_instructions += "=== BASE DE CONOCIMIENTO DE LA EMPRESA ===\n"
+        full_instructions += kb_context + "\n\n"
+        full_instructions += (
+            "INSTRUCCIONES PARA LA BASE DE CONOCIMIENTO:\n"
+            "- Usa estos documentos para responder preguntas sobre la empresa, sus servicios, "
+            "políticas y procedimientos.\n"
+            "- PRIORIZA siempre la información de estos documentos sobre tu conocimiento general.\n"
+            "- Si la información no aparece aquí, dilo con transparencia y ofrece buscar o derivar.\n\n"
+        )
+
+    # Datos del cliente desde BD externa
+    if customer_context:
+        full_instructions += customer_context + "\n\n"
+        full_instructions += (
+            "INSTRUCCIONES DATOS DEL CLIENTE:\n"
+            "- Usa estos datos para personalizar la llamada (nombre, empresa, saldo, etc.).\n"
+            "- Si el cliente te da datos distintos a los registrados, anótalos sin contradecirle.\n\n"
+        )
+
     full_instructions += "CONTEXTO DE EMPRESA (Knowledge Base):\n"
     full_instructions += f"{company_context if company_context else 'No disponible.'}\n\n"
     full_instructions += (

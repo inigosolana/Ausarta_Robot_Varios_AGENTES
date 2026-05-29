@@ -1,5 +1,6 @@
 """
 Clasificación post-llamada (disposición + datos_extra) vía API Groq.
+También actualiza la ficha de contacto tras cada llamada (Fase 2).
 """
 
 from __future__ import annotations
@@ -8,10 +9,101 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timezone
 
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+
+async def upsert_contacto_post_call(
+    empresa_id: int,
+    telefono: str,
+    nombre_detectado: str | None,
+    disposicion: str | None,
+    resumen: str | None,
+) -> None:
+    """
+    Crea o actualiza la ficha de contacto tras una llamada.
+    - Si no existe el contacto: INSERT con los datos disponibles.
+    - Si existe: UPDATE ultima_llamada, total_llamadas, ultima_disposicion.
+    - Score: +10 si disposición positiva, -5 si negativa.
+    Nunca propaga excepciones; si falla, solo loguea.
+    """
+    if not telefono or not empresa_id:
+        return
+
+    try:
+        from services.supabase_service import supabase, sb_query
+        if not supabase:
+            return
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # Calcular delta de score según disposición
+        score_delta = 0
+        if disposicion in ("completada",):
+            score_delta = 10
+        elif disposicion in ("rechazada",):
+            score_delta = -5
+
+        # Intentar actualizar contacto existente
+        res = await sb_query(
+            lambda eid=empresa_id, tel=telefono: supabase.table("contactos")
+            .select("id, total_llamadas, score, nombre")
+            .eq("empresa_id", eid)
+            .eq("telefono", tel)
+            .limit(1)
+            .execute()
+        )
+
+        if res.data:
+            existing = res.data[0]
+            contact_id = existing["id"]
+            new_total = (existing.get("total_llamadas") or 0) + 1
+            new_score = max(0, (existing.get("score") or 0) + score_delta)
+
+            update_data: dict = {
+                "ultima_llamada": now_iso,
+                "total_llamadas": new_total,
+                "ultima_disposicion": disposicion,
+                "score": new_score,
+            }
+            # Solo sobreescribir nombre si se detectó uno y el existente está vacío
+            if nombre_detectado and not existing.get("nombre"):
+                update_data["nombre"] = nombre_detectado
+
+            await sb_query(
+                lambda cid=contact_id, d=update_data: supabase.table("contactos")
+                .update(d)
+                .eq("id", cid)
+                .execute()
+            )
+            logger.info(
+                "[contacto] Actualizado id=%s empresa=%d total=%d disp=%s",
+                contact_id, empresa_id, new_total, disposicion,
+            )
+        else:
+            # Crear nuevo contacto
+            insert_data: dict = {
+                "empresa_id": empresa_id,
+                "telefono": telefono,
+                "nombre": nombre_detectado or None,
+                "ultima_llamada": now_iso,
+                "total_llamadas": 1,
+                "ultima_disposicion": disposicion,
+                "score": max(0, 50 + score_delta),  # base 50 para nuevos contactos
+            }
+            await sb_query(
+                lambda d=insert_data: supabase.table("contactos").insert(d).execute()
+            )
+            logger.info(
+                "[contacto] Creado nuevo contacto empresa=%d telefono=%s disp=%s",
+                empresa_id, telefono[:6] + "…", disposicion,
+            )
+
+    except Exception as exc:
+        logger.warning("[contacto] upsert_contacto_post_call falló (no bloqueante): %s", exc)
 
 
 async def analyze_call_disposition(

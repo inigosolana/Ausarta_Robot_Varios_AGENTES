@@ -539,11 +539,16 @@ class DynamicAgent(Agent):
         self._agent_mode: str = (agent_config.get("agent_mode") or "prompt").strip().lower()
         self._workflow_sm: "WorkflowStateMachine | None" = None
 
+        # _kb_context y _customer_context son inyectados en agent_config
+        # por entrypoint() antes de crear DynamicAgent (Fase 2).
         base_instructions = build_agent_prompt(
             agent_config,
             self.enthusiasm_level,
             speaking_speed_f,
         )
+
+        # Nombre del cliente detectado en conversación (Fase 2)
+        self._detected_customer_name: str = ""
 
         if self._agent_mode in ("workflow", "mixed"):
             wf_def = agent_config.get("workflow_definition") or {}
@@ -1680,6 +1685,22 @@ class CallSession:
                 self.reprompt_state["waiting_user"] = False
                 self.reprompt_state["reprompt_count"] = 0
 
+                # Fase 2 — Detección de nombre del cliente en conversación
+                if not getattr(self.agent_instance, "_detected_customer_name", ""):
+                    _name_match = re.search(
+                        r"(?:soy|me llamo|mi nombre es)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+"
+                        r"(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)?)",
+                        content,
+                        re.IGNORECASE,
+                    )
+                    if _name_match:
+                        detected = _name_match.group(1).strip()
+                        self.agent_instance._detected_customer_name = detected
+                        logger.info(
+                            "[%s] Nombre del cliente detectado: %s",
+                            self.job_id, detected,
+                        )
+
                 # PARTE 4 — Integración workflow: avanzar máquina de estados
                 wf_sm = getattr(self.agent_instance, "_workflow_sm", None)
                 if wf_sm is not None and not wf_sm.is_finished():
@@ -1995,6 +2016,31 @@ class CallSession:
                     )
                 except Exception as save_err:
                     logger.error(f"Error encolando fallback: {save_err}")
+
+            # Fase 2 — Actualizar ficha de contacto post-llamada (no bloqueante)
+            try:
+                from utils.call_analyzer import upsert_contacto_post_call
+                _telefono = (
+                    (datos_extra or {}).get("telefono")
+                    or self.agent_config.get("contacto_phone")
+                    or ""
+                )
+                _nombre = getattr(self.agent_instance, "_detected_customer_name", "") or None
+                _empresa_id_int = int(self.agent_config.get("empresa_id") or 0)
+                if _telefono and _empresa_id_int:
+                    resumen = (datos_extra or {}).get("resumen_narrativo")
+                    asyncio.create_task(
+                        upsert_contacto_post_call(
+                            empresa_id=_empresa_id_int,
+                            telefono=str(_telefono),
+                            nombre_detectado=_nombre,
+                            disposicion=call_disposition,
+                            resumen=resumen,
+                        )
+                    )
+            except Exception as contact_err:
+                logger.warning("[%s] Error actualizando ficha de contacto: %s", self.job_id, contact_err)
+
         except Exception as fatal_post:
             logger.error(
                 f"🚨 [{self.job_id}] EXCEPCIÓN FATAL NO CAPTURADA en finalize: {fatal_post}"
@@ -2086,6 +2132,98 @@ async def notify_system_alert(message: str, details: Optional[dict] = None):
         logger.info(f"📡 Alerta del sistema encolada: {message}")
     except Exception as e:
         logger.error(f"❌ Error encolando alerta del sistema: {e}")
+
+# ============================================================================
+# FASE 2 — ENRIQUECIMIENTO DE CONTEXTO (KB + BD externa)
+# ============================================================================
+
+async def _enrich_agent_config_with_context(
+    job_id: str,
+    agent_config: dict,
+    empresa_id_str: str,
+    meta_data: dict,
+) -> None:
+    """
+    Carga en paralelo (timeout 5s):
+    1. Base de Conocimiento RAG (top 3 chunks relevantes al greeting del agente).
+    2. Datos del cliente en BD externa (si hay teléfono en metadata).
+
+    Los resultados se inyectan en agent_config como _kb_context y _customer_context,
+    que build_agent_prompt() ya sabe leer.
+    Si cualquiera falla, continúa sin ese contexto (nunca bloquea la llamada).
+    """
+    try:
+        empresa_id_int = int(empresa_id_str) if empresa_id_str.isdigit() else 0
+    except Exception:
+        empresa_id_int = 0
+
+    if not empresa_id_int:
+        return
+
+    async def _load_kb() -> str:
+        try:
+            from services.embedding_service import search_knowledge
+            greeting = agent_config.get("greeting") or agent_config.get("instructions", "")
+            query = (greeting or "información general servicios empresa")[:500]
+            results = await asyncio.wait_for(
+                search_knowledge(empresa_id_int, query, limit=3, threshold=0.70),
+                timeout=5,
+            )
+            if not results:
+                return ""
+            lines = []
+            for r in results:
+                lines.append(f"[{r['titulo']}]\n{r['contenido']}")
+            context = "\n\n".join(lines)
+            logger.info(
+                "[%s] KB context cargado: %d chunks (%.0f chars)",
+                job_id, len(results), len(context),
+            )
+            return context
+        except Exception as kb_err:
+            logger.warning("[%s] KB context no disponible: %s", job_id, kb_err)
+            return ""
+
+    async def _load_customer(telefono: str) -> str:
+        try:
+            from services.external_db_service import query_external_db, format_customer_context
+            rows = await asyncio.wait_for(
+                query_external_db(empresa_id_int, "cliente_por_telefono", [telefono]),
+                timeout=5,
+            )
+            if not rows:
+                return ""
+            ctx_str = format_customer_context(rows)
+            logger.info("[%s] Customer context cargado desde BD externa: %d filas", job_id, len(rows))
+            return ctx_str
+        except Exception as ext_err:
+            logger.warning("[%s] Customer context no disponible: %s", job_id, ext_err)
+            return ""
+
+    # Teléfono del contacto — puede venir en varios campos de metadata
+    telefono = (
+        meta_data.get("contacto_phone")
+        or meta_data.get("telefono")
+        or meta_data.get("phone")
+        or ""
+    )
+
+    tasks: list[asyncio.Task] = [asyncio.create_task(_load_kb())]
+    customer_task: asyncio.Task | None = None
+    if telefono:
+        customer_task = asyncio.create_task(_load_customer(str(telefono)))
+        tasks.append(customer_task)
+
+    results_list = await asyncio.gather(*tasks, return_exceptions=True)
+
+    kb_context = results_list[0] if isinstance(results_list[0], str) else ""
+    customer_context = ""
+    if customer_task is not None and len(results_list) > 1:
+        customer_context = results_list[1] if isinstance(results_list[1], str) else ""
+
+    agent_config["_kb_context"] = kb_context
+    agent_config["_customer_context"] = customer_context
+
 
 # ============================================================================
 # SERVIDOR Y ENTRYPOINT DINÁMICO
@@ -2201,6 +2339,14 @@ async def entrypoint(ctx: JobContext):
             return
 
         logger.info(f"✅ [{job_id}] Conectado a sala {room_name}. Participantes: {len(ctx.room.remote_participants)}")
+
+        # --- PASO 4 (Fase 2): Cargar contextos KB y cliente ANTES de crear el agente ---
+        await _enrich_agent_config_with_context(
+            job_id=job_id,
+            agent_config=agent_config,
+            empresa_id_str=empresa_id,
+            meta_data=meta_data,
+        )
 
         # --- PASO 4: Crear el asistente ---
         agent_instance = DynamicAgent(room_name=room_name, agent_config=agent_config)

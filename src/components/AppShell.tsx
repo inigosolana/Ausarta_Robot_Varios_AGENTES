@@ -19,6 +19,8 @@ import {
   Share2,
   Server,
   Route,
+  BookOpen,
+  Users,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -283,6 +285,10 @@ const AppShell: React.FC = () => {
             {hasPermission('admin') && (
               <SidebarItem icon={<Route size={18} />} label={t('SIP Trunks', 'Troncales SIP')} to="/trunks" collapsed={!isSidebarOpen} />
             )}
+            {hasPermission('admin') && (
+              <SidebarItem icon={<BookOpen size={18} />} label={t('Knowledge Base', 'Base de Conocimiento')} to="/knowledge" collapsed={!isSidebarOpen} />
+            )}
+            <SidebarItem icon={<Users size={18} />} label={t('Contacts', 'Contactos')} to="/contacts" collapsed={!isSidebarOpen} />
           </nav>
 
           {/* User info + Logout */}
