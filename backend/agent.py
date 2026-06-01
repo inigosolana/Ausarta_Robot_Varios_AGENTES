@@ -850,6 +850,123 @@ class DynamicAgent(Agent):
         self._transfer_completed.set()
         logger.info(f"🔄 [{self.room_name}] Señal de transferencia completada emitida")
 
+    @function_tool(name="consultar_conocimiento")
+    async def _tool_consultar_conocimiento(
+        self,
+        context: RunContext,
+        consulta: str,
+        limite: int = 3,
+        threshold: float = 0.70,
+    ) -> str:
+        """
+        Busca información relevante en la base de conocimiento de la empresa de esta llamada.
+        Úsala para responder preguntas del cliente con contexto documental interno.
+        """
+        try:
+            empresa_id_int = int(str(getattr(self, "empresa_id", "0") or "0"))
+        except (TypeError, ValueError):
+            empresa_id_int = 0
+
+        if not empresa_id_int:
+            logger.warning(f"⚠️ [{self.room_name}] consultar_conocimiento sin empresa_id válido")
+            return ""
+
+        if not consulta or not consulta.strip():
+            return ""
+
+        try:
+            from services.embedding_service import search_knowledge
+
+            rows = await asyncio.wait_for(
+                search_knowledge(
+                    empresa_id=empresa_id_int,
+                    query=consulta.strip(),
+                    limit=max(1, min(int(limite), 8)),
+                    threshold=float(threshold),
+                ),
+                timeout=5,
+            )
+            if not rows:
+                return ""
+
+            lines: list[str] = []
+            for row in rows[:3]:
+                titulo = str(row.get("titulo") or "").strip()
+                contenido = str(row.get("contenido") or "").strip()
+                if titulo:
+                    lines.append(f"Título: {titulo}")
+                if contenido:
+                    lines.append(f"Contenido: {contenido}")
+            return "\n".join(lines).strip()
+        except Exception as e:
+            logger.warning(f"⚠️ [{self.room_name}] Error en consultar_conocimiento: {e}")
+            return ""
+
+    @function_tool(name="consultar_cliente")
+    async def _tool_consultar_cliente(
+        self,
+        context: RunContext,
+        query_name: str,
+        params: str = "[]",
+    ) -> str:
+        """
+        Consulta datos del cliente en la BD externa usando solo queries predefinidos y permitidos.
+        No acepta SQL libre.
+        """
+        try:
+            empresa_id_int = int(str(getattr(self, "empresa_id", "0") or "0"))
+        except (TypeError, ValueError):
+            empresa_id_int = 0
+
+        if not empresa_id_int:
+            logger.warning(f"⚠️ [{self.room_name}] consultar_cliente sin empresa_id válido")
+            return ""
+
+        qname = (query_name or "").strip()
+        if not qname:
+            return ""
+
+        allowed_queries_cfg = self.agent_config.get("external_db_allowed_queries")
+        if isinstance(allowed_queries_cfg, list) and allowed_queries_cfg:
+            allowed_queries = {str(x).strip() for x in allowed_queries_cfg if str(x).strip()}
+        else:
+            allowed_queries = {"cliente_por_telefono", "cliente_por_id", "cliente_por_email"}
+
+        if qname not in allowed_queries:
+            logger.warning(
+                f"⚠️ [{self.room_name}] Query externa no permitida en tool: {qname}"
+            )
+            return ""
+
+        parsed_params: list[Any] = []
+        if params and params.strip():
+            try:
+                loaded = json.loads(params)
+                if isinstance(loaded, list):
+                    parsed_params = loaded
+                else:
+                    parsed_params = [loaded]
+            except Exception:
+                parsed_params = [params]
+
+        try:
+            from services.external_db_service import query_external_db, format_customer_context
+
+            rows = await asyncio.wait_for(
+                query_external_db(
+                    empresa_id=empresa_id_int,
+                    query_name=qname,
+                    params=parsed_params,
+                ),
+                timeout=5,
+            )
+            if not rows:
+                return ""
+            return format_customer_context(rows) or ""
+        except Exception as e:
+            logger.warning(f"⚠️ [{self.room_name}] Error en consultar_cliente: {e}")
+            return ""
+
     @function_tool(name="transferir_a_agente_humano")
     async def _http_tool_transferir_humano(
         self,
