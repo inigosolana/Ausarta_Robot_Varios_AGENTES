@@ -1,8 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { Database, Link as LinkIcon, Save, Zap, Building2, Webhook, CheckCircle2, ExternalLink } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import {
+    Building2,
+    CheckCircle2,
+    Database,
+    ExternalLink,
+    Link as LinkIcon,
+    Save,
+    Webhook,
+    Zap,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
-import { supabase } from '../lib/supabase';
+import { apiFetch } from '../lib/apiFetch';
 import { useAuth } from '../contexts/AuthContext';
 import type { Empresa } from '../types';
 
@@ -12,8 +21,8 @@ const ZAPIER_TEST_PAYLOAD = {
     phone: '+34600000000',
     status: 'completed',
     date: new Date().toISOString(),
-    campaign_name: 'Campaña de Prueba',
-    transcription: 'Hola, prueba de integración Zapier/Make exitosa.',
+    campaign_name: 'Campana de Prueba',
+    transcription: 'Hola, prueba de integracion Zapier/Make exitosa.',
     datos_extra: {
         interesado: true,
         nota_satisfaccion: 8,
@@ -24,69 +33,173 @@ const ZAPIER_TEST_PAYLOAD = {
     motivo: 'Precio muy competitivo',
 };
 
+type CrmOption = {
+    id: string;
+    name: string;
+    subtitle: string;
+    logoUrl: string;
+    docsUrl: string;
+    accent: string;
+};
+
+const CRM_OPTIONS: CrmOption[] = [
+    {
+        id: 'hubspot',
+        name: 'HubSpot',
+        subtitle: 'Contacts, deals y activity timeline',
+        logoUrl: 'https://cdn.simpleicons.org/hubspot/ff7a59',
+        docsUrl: 'https://developers.hubspot.com/docs/api/overview',
+        accent: 'from-orange-50 to-amber-50 border-orange-200',
+    },
+    {
+        id: 'salesforce',
+        name: 'Salesforce',
+        subtitle: 'Leads, tasks y actividad comercial',
+        logoUrl: 'https://cdn.simpleicons.org/salesforce/00a1e0',
+        docsUrl: 'https://developer.salesforce.com/docs/apis',
+        accent: 'from-sky-50 to-cyan-50 border-sky-200',
+    },
+    {
+        id: 'pipedrive',
+        name: 'Pipedrive',
+        subtitle: 'Persons, deals y activities',
+        logoUrl: 'https://cdn.simpleicons.org/pipedrive/139e4a',
+        docsUrl: 'https://developers.pipedrive.com/docs/api/v1',
+        accent: 'from-emerald-50 to-lime-50 border-emerald-200',
+    },
+    {
+        id: 'zohocrm',
+        name: 'Zoho CRM',
+        subtitle: 'Modulos CRM y workflows',
+        logoUrl: 'https://cdn.simpleicons.org/zohocrm/d81b60',
+        docsUrl: 'https://www.zoho.com/crm/developer/docs/api/v8/overview.html',
+        accent: 'from-rose-50 to-pink-50 border-rose-200',
+    },
+    {
+        id: 'dynamics365',
+        name: 'Dynamics 365',
+        subtitle: 'Dataverse, leads y opportunities',
+        logoUrl: 'https://cdn.simpleicons.org/microsoftdynamics365/0b53ce',
+        docsUrl: 'https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/overview',
+        accent: 'from-blue-50 to-indigo-50 border-blue-200',
+    },
+    {
+        id: 'freshsales',
+        name: 'Freshsales',
+        subtitle: 'Contacts y deals para ventas',
+        logoUrl: 'https://cdn.simpleicons.org/freshworks/1d9bd1',
+        docsUrl: 'https://developers.freshworks.com/crm/api/',
+        accent: 'from-cyan-50 to-teal-50 border-cyan-200',
+    },
+    {
+        id: 'custom',
+        name: 'Webhook propio',
+        subtitle: 'n8n, middleware o CRM generico',
+        logoUrl: 'https://cdn.simpleicons.org/webhooks/4f46e5',
+        docsUrl: 'https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/',
+        accent: 'from-slate-50 to-gray-50 border-slate-200',
+    },
+];
+
+const CrmCard: React.FC<{
+    option: CrmOption;
+    selected: boolean;
+    onSelect: (id: string) => void;
+}> = ({ option, selected, onSelect }) => {
+    return (
+        <button
+            type="button"
+            onClick={() => onSelect(option.id)}
+            className={`rounded-2xl border bg-gradient-to-br p-4 text-left transition-all ${option.accent} ${
+                selected ? 'border-blue-400 ring-2 ring-blue-500 shadow-md' : 'hover:border-gray-300'
+            }`}
+        >
+            <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/80 bg-white shadow-sm">
+                        <img src={option.logoUrl} alt={option.name} className="h-6 w-6 object-contain" />
+                    </div>
+                    <div className="min-w-0">
+                        <div className="font-semibold text-gray-900">{option.name}</div>
+                        <div className="mt-1 text-xs text-gray-600">{option.subtitle}</div>
+                    </div>
+                </div>
+                <a
+                    href={option.docsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-gray-500 transition-colors hover:text-blue-600"
+                    title="Open API docs"
+                >
+                    <ExternalLink size={14} />
+                </a>
+            </div>
+        </button>
+    );
+};
+
 const CrmIntegrationView: React.FC = () => {
     const { profile, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
 
     const [empresas, setEmpresas] = useState<Empresa[]>([]);
     const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | null>(null);
-
-    // CRM Section
     const [webhookUrl, setWebhookUrl] = useState('');
     const [crmType, setCrmType] = useState('hubspot');
-    const [isSavingCrm, setIsSavingCrm] = useState(false);
-
-    // Automation (Zapier / Make) Section
     const [automationWebhookUrl, setAutomationWebhookUrl] = useState('');
+    const [isSavingCrm, setIsSavingCrm] = useState(false);
     const [isSavingAutomation, setIsSavingAutomation] = useState(false);
-
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
         if (isPlatformOwner) {
-            loadEmpresas();
-        } else if (profile?.empresa_id) {
-            setSelectedEmpresaId(profile.empresa_id);
-            loadIntegrationConfig(profile.empresa_id);
-        } else {
-            setIsLoading(false);
+            void loadEmpresas();
+            return;
         }
-    }, [profile, isPlatformOwner]);
+        if (profile?.empresa_id) {
+            setSelectedEmpresaId(profile.empresa_id);
+            void loadIntegrationConfig(profile.empresa_id);
+            return;
+        }
+        setIsLoading(false);
+    }, [profile?.empresa_id, isPlatformOwner]);
 
     useEffect(() => {
-        if (selectedEmpresaId) {
-            loadIntegrationConfig(selectedEmpresaId);
-        }
+        if (!selectedEmpresaId) return;
+        void loadIntegrationConfig(selectedEmpresaId);
     }, [selectedEmpresaId]);
 
     const loadEmpresas = async () => {
-        const { data, error } = await supabase.from('empresas').select('*').order('nombre');
-        if (error) {
-            toast.error(t('Error loading companies', 'Error al cargar empresas'));
-        } else if (data) {
-            setEmpresas(data);
-            if (data.length > 0 && !selectedEmpresaId) {
-                setSelectedEmpresaId(data[0].id);
+        try {
+            const res = await apiFetch('/api/empresas');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data: Empresa[] = await res.json();
+            setEmpresas(data || []);
+            if (data?.length && !selectedEmpresaId) {
+                const ausarta = data.find((emp) => emp.nombre?.toLowerCase() === 'ausarta');
+                setSelectedEmpresaId(ausarta?.id ?? data[0].id);
             }
+        } catch (error) {
+            console.error('Error loading companies:', error);
+            toast.error(t('Error loading companies', 'Error al cargar empresas'));
+        } finally {
+            setIsLoading(false);
         }
-        setIsLoading(false);
     };
 
     const loadIntegrationConfig = async (empresaId: number) => {
+        setIsLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('empresas')
-                .select('crm_type, crm_webhook_url, webhook_url')
-                .eq('id', empresaId)
-                .single();
-
-            if (error) {
-                console.error('Error loading integration config:', error);
-            } else if (data) {
-                setCrmType(data.crm_type || 'hubspot');
-                setWebhookUrl(data.crm_webhook_url || '');
-                setAutomationWebhookUrl(data.webhook_url || '');
-            }
+            const res = await apiFetch(`/api/admin/empresas/${empresaId}/crm-config`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            setCrmType(data.crm_type || 'hubspot');
+            setWebhookUrl(data.crm_webhook_url || '');
+            setAutomationWebhookUrl(data.webhook_url || '');
+        } catch (error) {
+            console.error('Error loading integration config:', error);
+            toast.error(t('Error loading configuration', 'Error al cargar configuración'));
         } finally {
             setIsLoading(false);
         }
@@ -96,14 +209,15 @@ const CrmIntegrationView: React.FC = () => {
         if (!selectedEmpresaId) return;
         setIsSavingCrm(true);
         try {
-            const { error } = await supabase
-                .from('empresas')
-                .update({ crm_type: crmType, crm_webhook_url: webhookUrl })
-                .eq('id', selectedEmpresaId);
-            if (error) throw error;
-            toast.success(t('CRM configuration saved', 'Configuración CRM guardada'));
-        } catch (err) {
-            toast.error(t('Error saving CRM config', 'Error al guardar configuración CRM'));
+            const res = await apiFetch(`/api/admin/empresas/${selectedEmpresaId}/crm-config`, {
+                method: 'PUT',
+                body: JSON.stringify({ crm_type: crmType, crm_webhook_url: webhookUrl }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            toast.success(t('CRM configuration saved', 'Configuracion CRM guardada'));
+        } catch (error) {
+            console.error('Error saving CRM config:', error);
+            toast.error(t('Error saving CRM config', 'Error al guardar configuracion CRM'));
         } finally {
             setIsSavingCrm(false);
         }
@@ -113,13 +227,14 @@ const CrmIntegrationView: React.FC = () => {
         if (!selectedEmpresaId) return;
         setIsSavingAutomation(true);
         try {
-            const { error } = await supabase
-                .from('empresas')
-                .update({ webhook_url: automationWebhookUrl || null })
-                .eq('id', selectedEmpresaId);
-            if (error) throw error;
-            toast.success(t('Automation webhook saved', 'Webhook de automatización guardado'));
-        } catch (err) {
+            const res = await apiFetch(`/api/admin/empresas/${selectedEmpresaId}/crm-config`, {
+                method: 'PUT',
+                body: JSON.stringify({ webhook_url: automationWebhookUrl || null }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            toast.success(t('Automation webhook saved', 'Webhook de automatizacion guardado'));
+        } catch (error) {
+            console.error('Error saving automation webhook:', error);
             toast.error(t('Error saving webhook', 'Error al guardar webhook'));
         } finally {
             setIsSavingAutomation(false);
@@ -137,14 +252,17 @@ const CrmIntegrationView: React.FC = () => {
                     event: 'call_completed',
                     lead: { phone: '+34123456789', name: 'Test User' },
                     scores: { comercial: 8, instalador: 9, rapidez: 10 },
-                    transcription: 'Hola, prueba de integración CRM exitosa.'
-                })
-            }).then(res => { if (!res.ok) throw new Error(); }),
+                    transcription: 'Hola, prueba de integracion CRM exitosa.',
+                    crm_type: crmType,
+                }),
+            }).then((res) => {
+                if (!res.ok) throw new Error();
+            }),
             {
                 loading: t('Sending test to CRM...', 'Enviando prueba al CRM...'),
-                success: t('CRM webhook responded correctly', 'El webhook CRM respondió correctamente'),
-                error: t('Webhook rejected the request', 'El webhook rechazó la petición'),
-            }
+                success: t('CRM webhook responded correctly', 'El webhook CRM respondio correctamente'),
+                error: t('Webhook rejected the request', 'El webhook rechazo la peticion'),
+            },
         );
     };
 
@@ -155,12 +273,14 @@ const CrmIntegrationView: React.FC = () => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(ZAPIER_TEST_PAYLOAD),
-            }).then(res => { if (!res.ok) throw new Error(); }),
+            }).then((res) => {
+                if (!res.ok) throw new Error();
+            }),
             {
                 loading: t('Sending test to Zapier/Make...', 'Enviando prueba a Zapier/Make...'),
-                success: t('Zapier/Make webhook responded correctly', 'El webhook respondió correctamente'),
-                error: t('Webhook rejected the request', 'El webhook rechazó la petición'),
-            }
+                success: t('Zapier/Make webhook responded correctly', 'El webhook respondio correctamente'),
+                error: t('Webhook rejected the request', 'El webhook rechazo la peticion'),
+            },
         );
     };
 
@@ -168,59 +288,69 @@ const CrmIntegrationView: React.FC = () => {
         return <div className="p-8 text-center text-gray-500">{t('Loading configuration...', 'Cargando configuración...')}</div>;
     }
 
-    const empresaSelector = isPlatformOwner && (
-        <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-                <Building2 size={15} />
-                {t('Company to configure', 'Empresa a configurar')}
-            </label>
-            <select
-                value={selectedEmpresaId || ''}
-                onChange={(e) => setSelectedEmpresaId(Number(e.target.value))}
-                className="w-full h-10 px-3 rounded-lg border border-gray-200 bg-white text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-            >
-                <option value="" disabled>{t('Select a company', 'Selecciona una empresa')}</option>
-                {empresas.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                ))}
-            </select>
-        </div>
-    );
-
     return (
-        <div className="space-y-8 animate-fade-in max-w-4xl">
+        <div className="max-w-5xl space-y-8 animate-fade-in">
             <div>
-                <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <h2 className="flex items-center gap-2 text-2xl font-bold text-gray-900">
                     <Database size={24} className="text-blue-500" />
                     {t('Integrations & Webhooks', 'Integraciones y Webhooks')}
                 </h2>
-                <p className="text-gray-500 mt-1">
-                    {t('Connect call results to your CRM or automation tools automatically after each call.', 'Conecta los resultados de las llamadas a tu CRM o herramientas de automatización automáticamente tras cada llamada.')}
+                <p className="mt-1 text-gray-500">
+                    {t(
+                        'Connect call results to your CRM or automation tools automatically after each call.',
+                        'Conecta los resultados de las llamadas a tu CRM o herramientas de automatización automáticamente tras cada llamada.',
+                    )}
                 </p>
             </div>
 
-            {empresaSelector}
+            {isPlatformOwner && (
+                <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                    <label className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <Building2 size={15} />
+                        {t('Company to configure', 'Empresa a configurar')}
+                    </label>
+                    <select
+                        value={selectedEmpresaId || ''}
+                        onChange={(e) => setSelectedEmpresaId(Number(e.target.value))}
+                        className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    >
+                        <option value="" disabled>
+                            {t('Select a company', 'Selecciona una empresa')}
+                        </option>
+                        {empresas.map((emp) => (
+                            <option key={emp.id} value={emp.id}>
+                                {emp.nombre}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+            )}
 
             {selectedEmpresaId ? (
                 <>
-                    {/* ── Section 1: Automation Webhook (Zapier / Make) ── */}
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                        <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-orange-50 to-amber-50 flex items-center gap-3">
-                            <div className="bg-orange-100 p-2 rounded-xl">
+                    <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+                        <div className="flex items-center gap-3 border-b border-gray-100 bg-gradient-to-r from-orange-50 to-amber-50 px-6 py-4">
+                            <div className="rounded-xl bg-orange-100 p-2">
                                 <Webhook size={18} className="text-orange-600" />
                             </div>
                             <div>
-                                <h3 className="font-bold text-gray-900">{t('Automation Webhook (Zapier / Make)', 'Webhook de Automatización (Zapier / Make)')}</h3>
-                                <p className="text-xs text-gray-500 mt-0.5">
-                                    {t('Receive a clean POST after every completed or failed call. Connect to Zapier, Make, n8n, or any custom endpoint.', 'Recibe un POST limpio tras cada llamada completada o fallida. Conecta con Zapier, Make, n8n o cualquier endpoint propio.')}
+                                <h3 className="font-bold text-gray-900">
+                                    {t('Automation Webhook (Zapier / Make)', 'Webhook de Automatización (Zapier / Make)')}
+                                </h3>
+                                <p className="mt-0.5 text-xs text-gray-500">
+                                    {t(
+                                        'Receive a clean POST after every completed or failed call. Connect to Zapier, Make, n8n, or any custom endpoint.',
+                                        'Recibe un POST limpio tras cada llamada completada o fallida. Conecta con Zapier, Make, n8n o cualquier endpoint propio.',
+                                    )}
                                 </p>
                             </div>
                         </div>
-                        <div className="p-6 space-y-5">
-                            {/* Payload preview */}
-                            <div className="bg-gray-50 rounded-xl border border-gray-200 p-4">
-                                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">{t('Example payload (POST JSON)', 'Ejemplo de payload (POST JSON)')}</p>
-                                <pre className="text-[11px] text-gray-700 font-mono overflow-x-auto leading-relaxed whitespace-pre-wrap">
+                        <div className="space-y-5 p-6">
+                            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                                    {t('Example payload (POST JSON)', 'Ejemplo de payload (POST JSON)')}
+                                </p>
+                                <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-gray-700">
 {`{
   "event": "call.completed",
   "call_id": 123,
@@ -229,31 +359,31 @@ const CrmIntegrationView: React.FC = () => {
   "date": "2026-04-08T...",
   "campaign_name": "...",
   "datos_extra": { "interesado": true, "nota": 8 },
-  "interesado": true,   // flattened for easy Zapier mapping
+  "interesado": true,
   "nota": 8
 }`}
                                 </pre>
                             </div>
 
                             <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-gray-500">
                                     {t('Webhook URL', 'URL del Webhook')}
                                 </label>
                                 <div className="flex gap-2">
                                     <div className="relative flex-1">
-                                        <LinkIcon size={15} className="absolute left-3 top-2.5 text-gray-400" />
+                                        <LinkIcon size={15} className="absolute left-3 top-3 text-gray-400" />
                                         <input
                                             type="url"
                                             value={automationWebhookUrl}
                                             onChange={(e) => setAutomationWebhookUrl(e.target.value)}
                                             placeholder="https://hooks.zapier.com/hooks/catch/..."
-                                            className="w-full pl-9 pr-3 h-10 rounded-xl border border-gray-200 text-sm focus:border-orange-400 focus:ring-2 focus:ring-orange-400/20 outline-none transition-all"
+                                            className="h-11 w-full rounded-xl border border-gray-200 pl-9 pr-3 text-sm outline-none transition-all focus:border-orange-400 focus:ring-2 focus:ring-orange-400/20"
                                         />
                                     </div>
                                     <button
                                         onClick={handleTestAutomation}
                                         disabled={!automationWebhookUrl}
-                                        className="flex items-center gap-1.5 px-4 h-10 bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 rounded-xl text-sm font-medium transition-colors disabled:opacity-40"
+                                        className="flex h-11 items-center gap-1.5 rounded-xl border border-orange-200 bg-orange-50 px-4 text-sm font-medium text-orange-700 transition-colors hover:bg-orange-100 disabled:opacity-40"
                                     >
                                         <Zap size={15} /> {t('Test')}
                                     </button>
@@ -284,73 +414,84 @@ const CrmIntegrationView: React.FC = () => {
                                 <button
                                     onClick={handleSaveAutomation}
                                     disabled={isSavingAutomation}
-                                    className="flex items-center gap-2 px-5 h-10 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                                    className="flex h-10 items-center gap-2 rounded-xl bg-orange-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-orange-700 disabled:opacity-50"
                                 >
-                                    {isSavingAutomation ? <>{t('Saving...', 'Guardando...')}</> : <><Save size={15} /> {t('Save Webhook', 'Guardar Webhook')}</>}
+                                    {isSavingAutomation ? t('Saving...', 'Guardando...') : <><Save size={15} /> {t('Save Webhook', 'Guardar Webhook')}</>}
                                 </button>
                             </div>
                         </div>
                     </div>
 
-                    {/* ── Section 2: CRM (HubSpot / Salesforce / n8n) ── */}
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                        <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50 flex items-center gap-3">
-                            <div className="bg-blue-100 p-2 rounded-xl">
+                    <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+                        <div className="flex items-center gap-3 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50 px-6 py-4">
+                            <div className="rounded-xl bg-blue-100 p-2">
                                 <Database size={18} className="text-blue-600" />
                             </div>
                             <div>
-                                <h3 className="font-bold text-gray-900">{t('CRM Integration (HubSpot / Salesforce / n8n)', 'Integración CRM (HubSpot / Salesforce / n8n)')}</h3>
-                                <p className="text-xs text-gray-500 mt-0.5">
-                                    {t('Advanced CRM sync with type-specific payloads.', 'Sincronización CRM avanzada con payloads específicos por tipo.')}
+                                <h3 className="font-bold text-gray-900">
+                                    {t('CRM Integration', 'Integración CRM')}
+                                </h3>
+                                <p className="mt-0.5 text-xs text-gray-500">
+                                    {t(
+                                        'Choose a well-known CRM with API and connect your own webhook or middleware.',
+                                        'Elige un CRM conocido con API y conecta tu propio webhook o middleware.',
+                                    )}
                                 </p>
                             </div>
                         </div>
-                        <div className="p-6 space-y-5">
-                            <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+
+                        <div className="space-y-5 p-6">
+                            <div className="space-y-3">
+                                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">
                                     {t('CRM Type', 'Tipo de CRM')}
                                 </label>
-                                <select
-                                    value={crmType}
-                                    onChange={(e) => setCrmType(e.target.value)}
-                                    className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-                                >
-                                    <option value="hubspot">HubSpot</option>
-                                    <option value="salesforce">Salesforce</option>
-                                    <option value="custom">{t('Other / n8n / Generic', 'Otro / n8n / Genérico')}</option>
-                                </select>
+                                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                    {CRM_OPTIONS.map((option) => (
+                                        <CrmCard
+                                            key={option.id}
+                                            option={option}
+                                            selected={crmType === option.id}
+                                            onSelect={setCrmType}
+                                        />
+                                    ))}
+                                </div>
                             </div>
 
                             <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex justify-between">
+                                <label className="mb-2 flex justify-between text-xs font-semibold uppercase tracking-wider text-gray-500">
                                     <span>{t('Webhook URL', 'Webhook URL')}</span>
-                                    <span className="text-[10px] text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full normal-case font-medium">{t('POST JSON', 'POST JSON')}</span>
+                                    <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium normal-case text-blue-500">
+                                        {t('POST JSON', 'POST JSON')}
+                                    </span>
                                 </label>
                                 <div className="flex gap-2">
                                     <div className="relative flex-1">
-                                        <LinkIcon size={15} className="absolute left-3 top-2.5 text-gray-400" />
+                                        <LinkIcon size={15} className="absolute left-3 top-3 text-gray-400" />
                                         <input
                                             type="url"
                                             value={webhookUrl}
                                             onChange={(e) => setWebhookUrl(e.target.value)}
                                             placeholder="https://n8n.ausarta.net/webhook/crm-sync"
-                                            className="w-full pl-9 pr-3 h-10 rounded-xl border border-gray-200 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 outline-none transition-all"
+                                            className="h-11 w-full rounded-xl border border-gray-200 pl-9 pr-3 text-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20"
                                         />
                                     </div>
                                     <button
                                         onClick={handleTestCrm}
                                         disabled={!webhookUrl}
-                                        className="flex items-center gap-1.5 px-4 h-10 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200 rounded-xl text-sm font-medium transition-colors disabled:opacity-40"
+                                        className="flex h-11 items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-100 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 disabled:opacity-40"
                                     >
                                         <Zap size={15} /> {t('Test')}
                                     </button>
                                 </div>
                             </div>
 
-                            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3 text-sm text-blue-800">
-                                <CheckCircle2 size={16} className="text-blue-500 shrink-0 mt-0.5" />
+                            <div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
+                                <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-blue-500" />
                                 <span>
-                                    {t('When a call completes, the backend sends lead data, scores, datos_extra and transcript to this URL. Use n8n to route it into HubSpot/Salesforce contact timelines.', 'Al completar una llamada, el backend envía datos del lead, puntuaciones, datos_extra y transcripción a esta URL. Usa n8n para enrutarlo en las líneas de tiempo de HubSpot/Salesforce.')}
+                                    {t(
+                                        'When a call completes, the backend sends lead data, scores, datos_extra and transcript to this URL. You can route it into HubSpot, Salesforce, Pipedrive, Zoho, Dynamics, Freshsales or your own middleware.',
+                                        'Al completar una llamada, el backend envía datos del lead, puntuaciones, datos_extra y transcripción a esta URL. Puedes enrutarlo a HubSpot, Salesforce, Pipedrive, Zoho, Dynamics, Freshsales o a tu propio middleware.',
+                                    )}
                                 </span>
                             </div>
 
@@ -358,7 +499,7 @@ const CrmIntegrationView: React.FC = () => {
                                 <button
                                     onClick={handleSaveCrm}
                                     disabled={isSavingCrm}
-                                    className="flex items-center gap-2 px-5 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                                    className="flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
                                 >
                                     {isSavingCrm ? t('Saving...', 'Guardando...') : <><Save size={15} /> {t('Save CRM Config', 'Guardar CRM')}</>}
                                 </button>
@@ -367,7 +508,7 @@ const CrmIntegrationView: React.FC = () => {
                     </div>
                 </>
             ) : (
-                <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400">
+                <div className="rounded-2xl border border-gray-100 bg-white p-10 text-center text-gray-400">
                     {t('Select a company to configure integrations.', 'Selecciona una empresa para configurar las integraciones.')}
                 </div>
             )}

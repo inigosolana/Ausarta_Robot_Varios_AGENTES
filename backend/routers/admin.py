@@ -301,6 +301,77 @@ async def list_admin_users(
     return res.data or []
 
 
+@router.get("/empresas/{empresa_id}/crm-config")
+async def get_empresa_crm_config(
+    empresa_id: int,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """
+    Devuelve la configuración CRM y webhook de automatización de una empresa.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    if not has_global_access(current_user):
+        if not current_user.empresa_id or int(current_user.empresa_id) != int(empresa_id):
+            raise HTTPException(status_code=403, detail="No tienes permisos para ver esta empresa")
+
+    res = await sb_query(
+        lambda: supabase.table("empresas")
+        .select("id, nombre, crm_type, crm_webhook_url, webhook_url")
+        .eq("id", empresa_id)
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    return res.data[0]
+
+
+@router.put("/empresas/{empresa_id}/crm-config")
+async def update_empresa_crm_config(
+    empresa_id: int,
+    payload: dict,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """
+    Actualiza la configuración CRM y webhook de automatización de una empresa.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    if not has_global_access(current_user):
+        if not current_user.empresa_id or int(current_user.empresa_id) != int(empresa_id):
+            raise HTTPException(status_code=403, detail="No tienes permisos para editar esta empresa")
+
+    def _clean_url(value: object) -> str | None:
+        text = str(value or "").strip()
+        return text or None
+
+    updates: dict[str, object] = {}
+    if "crm_type" in payload:
+        updates["crm_type"] = str(payload.get("crm_type") or "custom").strip().lower() or "custom"
+    if "crm_webhook_url" in payload:
+        updates["crm_webhook_url"] = _clean_url(payload.get("crm_webhook_url"))
+    if "webhook_url" in payload:
+        updates["webhook_url"] = _clean_url(payload.get("webhook_url"))
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No se proporcionaron cambios")
+
+    res = await sb_query(
+        lambda: supabase.table("empresas")
+        .update(updates)
+        .eq("id", empresa_id)
+        .select("id, nombre, crm_type, crm_webhook_url, webhook_url")
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+    return {"status": "ok", "empresa": res.data[0]}
+
+
 @router.post("/empresas/{empresa_id}/reset-consumidas")
 async def reset_llamadas_consumidas(
     empresa_id: int,
