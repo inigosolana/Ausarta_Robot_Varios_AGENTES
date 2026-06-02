@@ -31,13 +31,19 @@ from services.livekit_service import (
     create_isolated_room,
     create_outbound_call,
     dispatch_agent_explicit,
+    list_sip_trunks,
     wait_for_agent_ready,
 )
 from services.yeastar_service import YeastarPSeriesClient
+from services.yeastar_webhook_service import (
+    normalize_yeastar_webhook_payload,
+    process_yeastar_webhook_payload,
+)
 from services.trunk_service import resolve_outbound_trunk_id
 from services.auth import get_current_user, CurrentUser, require_admin, require_outbound_auth
 from services.crypto_service import encrypt_data, decrypt_data
 from services.rate_limiter import limiter
+from services.queue_service import get_arq_pool
 from livekit import api
 from livekit.api import WebhookReceiver
 import aiohttp
@@ -235,6 +241,84 @@ async def get_telephony_platform_info(
 # Yeastar PBX — configuración multi-tenant (P-Series)
 # ──────────────────────────────────────────────────────────────────────────────
 
+@router.get("/api/telephony/trunks")
+async def get_telephony_trunks(
+    empresa_id: int | None = None,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """
+    Lista troncales SIP disponibles en LiveKit y troncales/integraciones Yeastar.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexiÃ³n con la base de datos")
+
+    target_empresa_id = empresa_id if empresa_id else current_user.empresa_id
+    if not target_empresa_id:
+        raise HTTPException(status_code=400, detail="empresa_id es obligatorio")
+
+    if target_empresa_id != current_user.empresa_id and not has_global_access(current_user):
+        raise HTTPException(status_code=403, detail="No tienes permisos para ver estas troncales")
+
+    livekit_trunks: list[dict] = []
+    yeastar_trunks: list[dict] = []
+    errors: dict[str, str] = {}
+
+    try:
+        livekit_trunks = await list_sip_trunks()
+    except Exception as exc:
+        logger.warning("[trunks] No se pudieron listar troncales LiveKit: %s", exc)
+        errors["livekit"] = str(exc)
+
+    emp_res = await sb_query(
+        lambda eid=target_empresa_id: supabase.table("empresas")
+        .select("id, nombre, yeastar_pbx_url, yeastar_client_id, yeastar_client_secret")
+        .eq("id", eid)
+        .limit(1)
+        .execute()
+    )
+
+    if not emp_res.data:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+    emp = emp_res.data[0]
+    if emp.get("yeastar_pbx_url") and emp.get("yeastar_client_id") and emp.get("yeastar_client_secret"):
+        try:
+            async with YeastarPSeriesClient(
+                pbx_url=emp["yeastar_pbx_url"],
+                client_id=emp["yeastar_client_id"],
+                client_secret=decrypt_data(emp["yeastar_client_secret"]),
+                tenant_id=emp["id"],
+            ) as client:
+                trunks = await client.list_trunks()
+            yeastar_trunks = [
+                {
+                    **trunk,
+                    "empresa_id": emp["id"],
+                    "empresa_nombre": emp.get("nombre"),
+                }
+                for trunk in trunks
+            ]
+        except Exception as exc:
+            logger.warning("[trunks] No se pudieron listar troncales Yeastar: %s", exc)
+            errors["yeastar"] = str(exc)
+            yeastar_trunks = [{
+                "provider": "yeastar",
+                "id": f"yeastar-config-{emp['id']}",
+                "name": emp.get("nombre") or "Yeastar PBX",
+                "phone_numbers": [],
+                "status": "configured",
+                "empresa_id": emp["id"],
+                "empresa_nombre": emp.get("nombre"),
+                "pbx_url": emp.get("yeastar_pbx_url"),
+            }]
+
+    return {
+        "livekit_trunks": livekit_trunks,
+        "yeastar_trunks": yeastar_trunks,
+        "errors": errors,
+    }
+
+
 @router.get("/api/telephony/yeastar", response_model=YeastarPSeriesConfigResponse | None)
 async def get_yeastar_config(
     empresa_id: int | None = None,
@@ -363,15 +447,13 @@ async def test_yeastar_connection(
         # If it's a new secret being tested, use it as is (will be encrypted on save)
         pass
 
-    client = YeastarPSeriesClient(
+    async with YeastarPSeriesClient(
         pbx_url=payload.yeastar_pbx_url,
         client_id=payload.yeastar_client_id,
         client_secret=client_secret,
         tenant_id=target_empresa_id,
-    )
-
-    ok, message = await client.test_connection()
-    await client.close()
+    ) as client:
+        ok, message = await client.test_connection()
     return {"ok": ok, "message": message}
 
 
@@ -489,24 +571,20 @@ async def _execute_yeastar_transfer(
     )
     resolved_extension = _resolve_target_extension(datos_extra, target_extension)
 
-    client_secret = decrypt_data(emp["yeastar_client_secret"])
-    client = YeastarPSeriesClient(
-        pbx_url=emp["yeastar_pbx_url"],
-        client_id=emp["yeastar_client_id"],
-        client_secret=client_secret,
-        tenant_id=empresa_id,
-    )
-
     try:
-        await client.transfer_call(str(resolved_call_id), resolved_extension)
+        async with YeastarPSeriesClient(
+            pbx_url=emp["yeastar_pbx_url"],
+            client_id=emp["yeastar_client_id"],
+            client_secret=decrypt_data(emp["yeastar_client_secret"]),
+            tenant_id=empresa_id,
+        ) as client:
+            await client.transfer_call(str(resolved_call_id), resolved_extension)
     except Exception as exc:
         logger.error(
             f"[transfer] Fallo Yeastar empresa={empresa_id} survey={survey_id} "
             f"room={room_name} call_id={resolved_call_id}: {exc}"
         )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    finally:
-        await client.close()
 
     motivo_text = (motivo or "Transferencia a agente humano").strip()
     merged_extra = {
@@ -587,17 +665,37 @@ async def transfer_call_to_human(payload: CallTransferRequest):
             detail="Centralita Yeastar no configurada para esta empresa",
         )
 
-    client_secret = decrypt_data(client_secret_enc)
-    yeastar_client = YeastarPSeriesClient(
-        pbx_url=pbx_url,
-        client_id=client_id,
-        client_secret=client_secret,
-        tenant_id=empresa_id,
-    )
-
     try:
-        ext_status = await yeastar_client.get_extension_status(extension)
-        if ext_status != "Idle":
+        async with YeastarPSeriesClient(
+            pbx_url=pbx_url,
+            client_id=client_id,
+            client_secret=decrypt_data(client_secret_enc),
+            tenant_id=empresa_id,
+        ) as yeastar_client:
+            ext_status = await yeastar_client.get_extension_status(extension)
+            if ext_status != "Idle":
+                logger.info(
+                    f"[transfer] ExtensiÃ³n {extension} no disponible (status={ext_status}) "
+                    f"empresa={empresa_id} room={room_name}"
+                )
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "message": f"ExtensiÃ³n ocupada ({ext_status})",
+                        "status": ext_status,
+                    },
+                )
+
+            await yeastar_client.transfer_call(call_id, extension)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            f"[transfer] Error Yeastar empresa={empresa_id} call_id={call_id}: {exc}"
+        )
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if False:
             logger.info(
                 f"[transfer] Extensión {extension} no disponible (status={ext_status}) "
                 f"empresa={empresa_id} room={room_name}"
@@ -609,17 +707,6 @@ async def transfer_call_to_human(payload: CallTransferRequest):
                     "status": ext_status,
                 },
             )
-
-        await yeastar_client.transfer_call(call_id, extension)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(
-            f"[transfer] Error Yeastar empresa={empresa_id} call_id={call_id}: {exc}"
-        )
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    finally:
-        await yeastar_client.close()
 
     survey_id = payload.survey_id
     if survey_id is None:
@@ -700,7 +787,6 @@ async def validate_yeastar_ip(request: Request):
 @router.post("/webhooks/yeastar")
 async def yeastar_webhook(
     request: Request,
-    background_tasks: BackgroundTasks,
     _=Depends(validate_yeastar_ip),  # Bloquea IPs no autorizadas si YEASTAR_IP_WHITELIST está configurado
 ):
     """
@@ -710,10 +796,14 @@ async def yeastar_webhook(
     try:
         payload = await request.json()
 
-        # Rendimiento: Responder inmediatamente y procesar en segundo plano
-        background_tasks.add_task(_process_yeastar_event, payload)
+        arq_pool = await get_arq_pool()
+        job = await arq_pool.enqueue_job("process_yeastar_webhook", payload)
 
-        return {"status": "ok", "message": "Event queued"}
+        return {
+            "status": "ok",
+            "message": "Event queued",
+            "job_id": getattr(job, "job_id", None),
+        }
     except Exception as e:
         logger.error(f"❌ Error recibiendo webhook de Yeastar: {e}")
         return JSONResponse(status_code=400, content={"error": "Invalid payload"})
@@ -723,6 +813,7 @@ def _normalize_yeastar_webhook_payload(payload: dict) -> tuple[str | None, list[
     Unifica payloads legacy (action/callid) y P-Series Cloud (type + msg con call_id).
     Evento recomendado en Yeastar: 30011 Call State Changed.
     """
+    return normalize_yeastar_webhook_payload(payload)
     import json as _json
 
     msg = payload.get("msg")
@@ -776,6 +867,8 @@ def _normalize_yeastar_webhook_payload(payload: dict) -> tuple[str | None, list[
 
 async def _process_yeastar_event(payload: dict):
     """Lógica pesada de procesamiento de eventos en segundo plano."""
+    await process_yeastar_webhook_payload(payload)
+    return
     try:
         event_label = payload.get("action") or payload.get("type")
         call_id, phone_candidates = _normalize_yeastar_webhook_payload(payload)

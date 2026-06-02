@@ -116,3 +116,33 @@ export async function apiFetch(
 
     return response;
 }
+
+export type TelephonyTrunk = {
+    provider: 'livekit' | 'yeastar' | string;
+    direction?: 'inbound' | 'outbound' | string;
+    id: string;
+    name?: string;
+    phone_numbers?: string[];
+    status?: string;
+    address?: string | null;
+    pbx_url?: string | null;
+    empresa_id?: number;
+    empresa_nombre?: string | null;
+    type?: string | null;
+};
+
+export type TelephonyTrunksResponse = {
+    livekit_trunks: TelephonyTrunk[];
+    yeastar_trunks: TelephonyTrunk[];
+    errors?: Record<string, string>;
+};
+
+export async function fetchTrunks(empresaId?: number | null): Promise<TelephonyTrunksResponse> {
+    const qs = empresaId ? `?empresa_id=${encodeURIComponent(String(empresaId))}` : '';
+    const res = await apiFetch(`/api/telephony/trunks${qs}`);
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || err.error || `HTTP ${res.status}`);
+    }
+    return res.json();
+}

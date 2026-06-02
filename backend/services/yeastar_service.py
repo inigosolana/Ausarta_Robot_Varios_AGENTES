@@ -56,6 +56,12 @@ class YeastarPSeriesClient:
         self.tenant_id = tenant_id
         self._session: aiohttp.ClientSession | None = None
 
+    async def __aenter__(self) -> "YeastarPSeriesClient":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.close()
+
     @property
     def tenant_label(self) -> str:
         """Identificador legible para logs (PBX + tenant opcional)."""
@@ -184,6 +190,46 @@ class YeastarPSeriesClient:
         except Exception as exc:
             logger.error(f"[Yeastar] [{self.tenant_label}] Unexpected error during test: {exc}")
             return False, f"Error inesperado: {exc}"
+
+    async def list_trunks(self) -> list[dict[str, Any]]:
+        """
+        Lista troncales SIP configuradas en Yeastar P-Series y normaliza la respuesta.
+        """
+        token = await self.get_access_token()
+        response = await self._get("/api/v2.0/trunk/list", token)
+
+        if response.get("errcode") not in (None, 0):
+            raise YeastarConnectionError(
+                f"[{self.tenant_label}] Error listando troncales Yeastar: {response}"
+            )
+
+        data = response.get("data") or response.get("trunks") or []
+        if isinstance(data, dict):
+            data = data.get("trunks") or data.get("list") or data.get("items") or []
+
+        trunks: list[dict[str, Any]] = []
+        for item in data or []:
+            if not isinstance(item, dict):
+                continue
+
+            trunk_id = (
+                item.get("id")
+                or item.get("trunk_id")
+                or item.get("name")
+                or item.get("trunk_name")
+                or ""
+            )
+            trunks.append({
+                "provider": "yeastar",
+                "id": str(trunk_id),
+                "name": item.get("name") or item.get("trunk_name") or str(trunk_id),
+                "phone_numbers": item.get("numbers") or item.get("did_numbers") or [],
+                "status": item.get("status") or item.get("state") or "configured",
+                "type": item.get("type") or item.get("trunk_type"),
+                "raw": item,
+            })
+
+        return trunks
 
     async def get_extension_status(self, extension: str) -> str:
         """

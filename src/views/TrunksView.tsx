@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Building2, Route, Save, RefreshCw, Plus, Pencil, Trash2, X, Phone } from 'lucide-react';
-import { apiFetch } from '../lib/apiFetch';
+import { Building2, Route, Save, RefreshCw, Plus, Pencil, Trash2, X, Phone, Server, AlertTriangle } from 'lucide-react';
+import { apiFetch, fetchTrunks, type TelephonyTrunk } from '../lib/apiFetch';
 import { useAuth } from '../contexts/AuthContext';
 
 type EmpresaRow = {
@@ -32,6 +32,11 @@ const TrunksView: React.FC = () => {
   const [inbound, setInbound] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [livekitTrunks, setLivekitTrunks] = useState<TelephonyTrunk[]>([]);
+  const [yeastarTrunks, setYeastarTrunks] = useState<TelephonyTrunk[]>([]);
+  const [trunksLoading, setTrunksLoading] = useState(false);
+  const [trunksMsg, setTrunksMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [trunkErrors, setTrunkErrors] = useState<Record<string, string>>({});
 
   // Extensions state
   const [extensions, setExtensions] = useState<Extension[]>([]);
@@ -87,6 +92,24 @@ const TrunksView: React.FC = () => {
     }
   }, []);
 
+  const loadAvailableTrunks = useCallback(async (empresaId: number) => {
+    setTrunksLoading(true);
+    setTrunksMsg(null);
+    try {
+      const data = await fetchTrunks(empresaId);
+      setLivekitTrunks(data.livekit_trunks || []);
+      setYeastarTrunks(data.yeastar_trunks || []);
+      setTrunkErrors(data.errors || {});
+    } catch (err: any) {
+      setLivekitTrunks([]);
+      setYeastarTrunks([]);
+      setTrunkErrors({});
+      setTrunksMsg({ ok: false, text: err?.message || 'No se pudieron cargar las troncales disponibles' });
+    } finally {
+      setTrunksLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadEmpresas();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -97,7 +120,76 @@ const TrunksView: React.FC = () => {
     setOutbound(selected.sip_outbound_trunk_id || '');
     setInbound(selected.sip_inbound_trunk_id || '');
     loadExtensions(selected.id);
-  }, [selected, loadExtensions]);
+    loadAvailableTrunks(selected.id);
+  }, [selected, loadExtensions, loadAvailableTrunks]);
+
+  const phoneText = (trunk: TelephonyTrunk) => {
+    const numbers = trunk.phone_numbers || [];
+    return numbers.length ? numbers.join(', ') : 'Sin números';
+  };
+
+  const renderTrunksTable = (
+    title: string,
+    trunks: TelephonyTrunk[],
+    accentClass: string,
+    emptyText: string,
+  ) => (
+    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Server size={16} className={accentClass} />
+          <h2 className="text-sm font-bold text-gray-800">{title}</h2>
+          <span className="px-2 py-0.5 bg-gray-100 rounded-full text-[11px] text-gray-500 font-medium">
+            {trunks.length}
+          </span>
+        </div>
+      </div>
+
+      {trunksLoading ? (
+        <div className="flex items-center gap-2 text-gray-400 text-sm p-5">
+          <RefreshCw size={14} className="animate-spin" /> Cargando troncales...
+        </div>
+      ) : trunks.length === 0 ? (
+        <div className="text-sm text-gray-400 p-5">{emptyText}</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+              <tr>
+                <th className="text-left font-semibold px-4 py-3">ID</th>
+                <th className="text-left font-semibold px-4 py-3">Nombre</th>
+                <th className="text-left font-semibold px-4 py-3">Números</th>
+                <th className="text-left font-semibold px-4 py-3">Estado</th>
+                <th className="text-left font-semibold px-4 py-3">Proveedor</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {trunks.map((trunk, index) => (
+                <tr key={`${trunk.provider}-${trunk.id}-${index}`} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 font-mono text-xs text-gray-700">{trunk.id || '-'}</td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {trunk.name || '-'}
+                    {trunk.direction && (
+                      <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] uppercase text-gray-500">
+                        {trunk.direction}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-gray-600">{phoneText(trunk)}</td>
+                  <td className="px-4 py-3">
+                    <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                      {trunk.status || 'available'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-500">{trunk.provider}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 
   const save = async () => {
     if (!selectedEmpresaId) return;
@@ -306,6 +398,54 @@ const TrunksView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {selectedEmpresaId && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-bold text-gray-900">Troncales disponibles</h2>
+              <p className="text-xs text-gray-500">Consulta directa de LiveKit y Yeastar para la empresa seleccionada.</p>
+            </div>
+            <button
+              onClick={() => loadAvailableTrunks(selectedEmpresaId)}
+              disabled={trunksLoading}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              title="Refrescar troncales disponibles"
+            >
+              <RefreshCw size={13} className={trunksLoading ? 'animate-spin' : ''} />
+              Refrescar
+            </button>
+          </div>
+
+          {trunksMsg && (
+            <div className={`text-sm px-3 py-2 rounded-lg border ${trunksMsg.ok ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+              {trunksMsg.text}
+            </div>
+          )}
+
+          {Object.keys(trunkErrors).length > 0 && (
+            <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>
+                Algunas fuentes no respondieron: {Object.entries(trunkErrors).map(([key, value]) => `${key}: ${value}`).join(' | ')}
+              </span>
+            </div>
+          )}
+
+          {renderTrunksTable(
+            'Troncales LiveKit Disponibles',
+            livekitTrunks,
+            'text-indigo-600',
+            'No hay troncales LiveKit disponibles o no se pudieron consultar.',
+          )}
+          {renderTrunksTable(
+            'Troncales Yeastar',
+            yeastarTrunks,
+            'text-emerald-600',
+            'No hay troncales Yeastar configuradas para esta empresa.',
+          )}
+        </section>
+      )}
 
       {/* ── Extensiones Yeastar ─────────────────────────────────────────── */}
       {selectedEmpresaId && (

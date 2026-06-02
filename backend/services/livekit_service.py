@@ -138,3 +138,41 @@ async def wait_for_agent_ready(room_name: str, timeout: float = 15.0) -> bool:
         timeout, room_name,
     )
     return False
+
+
+def _livekit_sip_trunk_to_dict(trunk, direction: str) -> dict:
+    """Normaliza una troncal SIP de LiveKit para consumo del frontend."""
+    return {
+        "provider": "livekit",
+        "direction": direction,
+        "id": getattr(trunk, "sip_trunk_id", ""),
+        "name": getattr(trunk, "name", "") or getattr(trunk, "sip_trunk_id", ""),
+        "phone_numbers": list(getattr(trunk, "numbers", []) or []),
+        "status": "available",
+        "address": getattr(trunk, "address", None),
+        "allowed_addresses": list(getattr(trunk, "allowed_addresses", []) or []),
+        "allowed_numbers": list(getattr(trunk, "allowed_numbers", []) or []),
+        "metadata": getattr(trunk, "metadata", "") or "",
+    }
+
+
+async def list_sip_trunks() -> list[dict]:
+    """
+    Lista las troncales SIP inbound/outbound configuradas en LiveKit.
+    """
+    inbound_response = await lkapi.sip.list_sip_inbound_trunk(
+        api.ListSIPInboundTrunkRequest()
+    )
+    outbound_response = await lkapi.sip.list_sip_outbound_trunk(
+        api.ListSIPOutboundTrunkRequest()
+    )
+
+    inbound = [
+        _livekit_sip_trunk_to_dict(item, "inbound")
+        for item in (getattr(inbound_response, "items", []) or [])
+    ]
+    outbound = [
+        _livekit_sip_trunk_to_dict(item, "outbound")
+        for item in (getattr(outbound_response, "items", []) or [])
+    ]
+    return inbound + outbound

@@ -288,6 +288,16 @@ async def process_system_alert(ctx: dict[str, Any], message: str, details: dict 
 # PARTE 2: Orquestador nativo de campañas (Cron ARQ — cada minuto)
 # ──────────────────────────────────────────────────────────────────────────────
 
+async def process_yeastar_webhook(ctx: dict[str, Any], payload: dict) -> None:
+    """
+    Procesa webhooks de Yeastar desde ARQ para que sobrevivan a reinicios HTTP.
+    """
+    from services.yeastar_webhook_service import process_yeastar_webhook_payload
+
+    _ = ctx
+    await process_yeastar_webhook_payload(payload)
+
+
 async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
     """
     Cron ARQ: se ejecuta cada minuto.
@@ -843,6 +853,7 @@ class WorkerSettings:
         process_transcription_ai,
         process_n8n_webhook,
         process_system_alert,
+        process_yeastar_webhook,
         campaign_orchestrator,
         agent_post_guardar_encuesta,
         agent_post_colgar,
