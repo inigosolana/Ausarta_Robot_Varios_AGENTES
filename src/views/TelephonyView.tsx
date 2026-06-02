@@ -7,7 +7,6 @@ import {
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/apiFetch';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
 import type { Empresa } from '../types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -86,11 +85,13 @@ const TelephonyView: React.FC = () => {
   useEffect(() => {
     if (isPlatformOwner) {
       loadEmpresas();
-    } else if (profile?.empresa_id) {
-      setSelectedEmpresaId(profile.empresa_id);
-    } else {
-      setLoadingConfig(false);
+      return;
     }
+    if (profile?.empresa_id) {
+      setSelectedEmpresaId(profile.empresa_id);
+      return;
+    }
+    setLoadingConfig(false);
   }, [profile, isPlatformOwner]);
 
   useEffect(() => {
@@ -103,12 +104,19 @@ const TelephonyView: React.FC = () => {
   }, [selectedEmpresaId]);
 
   const loadEmpresas = async () => {
-    const { data, error } = await supabase.from('empresas').select('*').order('nombre');
-    if (!error && data) {
-      setEmpresas(data);
-      if (data.length > 0 && !selectedEmpresaId) {
-        setSelectedEmpresaId(data[0].id);
+    try {
+      const res = await apiFetch('/api/admin/empresas');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: Empresa[] = await res.json();
+      setEmpresas(data || []);
+      if (data?.length) {
+        const ausarta = data.find(emp => emp.nombre?.toLowerCase() === 'ausarta');
+        setSelectedEmpresaId(prev => prev ?? (ausarta?.id ?? data[0].id ?? null));
       }
+    } catch (err) {
+      console.error('[Telephony] Error loading empresas:', err);
+      setEmpresas([]);
+      setLoadingConfig(false);
     }
   };
 
