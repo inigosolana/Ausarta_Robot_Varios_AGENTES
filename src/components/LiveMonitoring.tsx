@@ -24,7 +24,6 @@ import {
     Database,
     Zap,
     Plug,
-    LayoutPanelRight,
 } from 'lucide-react';
 import { LiveCallPanel } from './LiveCallPanel';
 import type { LiveCallsMetricsResponse, RedisMetricsResponse } from '../types';
@@ -629,7 +628,7 @@ export const LiveMonitoring: React.FC = () => {
                                                     className="flex items-center gap-1 px-2 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:bg-blue-700 hover:scale-105 active:scale-95"
                                                     title={t('Live panel', 'Panel en vivo')}
                                                 >
-                                                    <LayoutPanelRight size={12} />
+                                                    <Eye size={12} />
                                                     {t('Panel', 'Panel')}
                                                 </button>
                                                 <button
@@ -798,7 +797,6 @@ export const LiveMonitoring: React.FC = () => {
                 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
             `}</style>
         </div>
-        </div>
 
         {/* Panel en vivo flotante */}
         {livePanelRoom && (
@@ -809,7 +807,7 @@ export const LiveMonitoring: React.FC = () => {
                 />
             </div>
         )}
-    </div>
+        </div>
     );
 };
 
