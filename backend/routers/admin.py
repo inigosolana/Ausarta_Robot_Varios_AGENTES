@@ -273,6 +273,34 @@ async def update_empresa_trunks(
     return {"status": "ok", "empresa": res.data[0] if res.data else {}}
 
 
+@router.get("/users")
+async def list_admin_users(
+    empresa_id: int | None = None,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """
+    Lista usuarios con sus empresas asociadas para el panel de administración.
+
+    - Superadmin / admin global: puede ver todos los usuarios o filtrar por empresa_id.
+    - Admin de cliente: solo ve los usuarios de su propia empresa.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    query = supabase.table("user_profiles").select("*, empresas(*)").order("created_at", desc=True)
+
+    if has_global_access(current_user) or is_ausarta_platform_admin(current_user):
+        if empresa_id is not None:
+            query = query.eq("empresa_id", empresa_id)
+    else:
+        if not current_user.empresa_id:
+            raise HTTPException(status_code=400, detail="Usuario sin empresa asignada")
+        query = query.eq("empresa_id", current_user.empresa_id)
+
+    res = await sb_query(lambda: query.execute())
+    return res.data or []
+
+
 @router.post("/empresas/{empresa_id}/reset-consumidas")
 async def reset_llamadas_consumidas(
     empresa_id: int,

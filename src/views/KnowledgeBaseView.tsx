@@ -12,6 +12,8 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+import type { Empresa } from '../types';
 
 interface KBDoc {
   titulo: string;
@@ -38,9 +40,11 @@ const SOURCE_LABELS: Record<string, string> = {
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 
 export function KnowledgeBaseView() {
-  const { session, profile } = useAuth();
+  const { session, profile, isPlatformOwner } = useAuth();
   const token = session?.access_token ?? '';
-  const empresa_id = profile?.empresa_id ?? null;
+  const [empresas, setEmpresas] = useState<Empresa[]>([]);
+  const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | null>(profile?.empresa_id ?? null);
+  const empresa_id = isPlatformOwner ? selectedEmpresaId : profile?.empresa_id ?? null;
 
   const [docs, setDocs] = useState<KBDoc[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,6 +68,26 @@ export function KnowledgeBaseView() {
   const [deletingTitle, setDeletingTitle] = useState<string | null>(null);
 
   const headers = { Authorization: `Bearer ${token}` };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadEmpresas = async () => {
+      if (isPlatformOwner) {
+        const { data } = await supabase.from('empresas').select('id, nombre').order('nombre');
+        if (cancelled) return;
+        setEmpresas((data || []) as Empresa[]);
+        setSelectedEmpresaId(prev => prev ?? (data?.length ? Number(data[0].id) : null));
+      } else {
+        setSelectedEmpresaId(profile?.empresa_id ?? null);
+      }
+    };
+
+    loadEmpresas();
+    return () => {
+      cancelled = true;
+    };
+  }, [isPlatformOwner, profile?.empresa_id]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -197,9 +221,23 @@ export function KnowledgeBaseView() {
             <p className="text-sm text-gray-500">Documentos indexados para búsqueda semántica RAG</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 rounded-full">
-          <Layers size={16} className="text-indigo-600" />
-          <span className="text-sm font-medium text-indigo-700">{docs.length} documentos</span>
+        <div className="flex items-center gap-3">
+          {isPlatformOwner && (
+            <select
+              value={selectedEmpresaId || ''}
+              onChange={(e) => setSelectedEmpresaId(e.target.value ? Number(e.target.value) : null)}
+              className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700"
+            >
+              <option value="">Selecciona empresa</option>
+              {empresas.map(emp => (
+                <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+              ))}
+            </select>
+          )}
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 rounded-full">
+            <Layers size={16} className="text-indigo-600" />
+            <span className="text-sm font-medium text-indigo-700">{docs.length} documentos</span>
+          </div>
         </div>
       </div>
 

@@ -44,19 +44,18 @@ const UserManagementView: React.FC = () => {
     const [inviteSuccess, setInviteSuccess] = useState(false);
 
     useEffect(() => {
+        if (!currentProfile) return;
         loadUsersAndEmpresas();
-    }, []);
+    }, [currentProfile?.id, currentProfile?.empresa_id, isPlatformOwner]);
 
     const loadUsersAndEmpresas = async () => {
         setLoading(true);
-        const API_URL = ((import.meta as any).env.VITE_API_URL as string) || '';
-
         // Safety: never stay in skeleton more than 10 seconds
         const safetyTimer = setTimeout(() => setLoading(false), 10_000);
 
         try {
             // 1. Load empresas
-            const empRes = await fetch(`${API_URL}/api/empresas`);
+            const empRes = await apiFetch('/api/admin/empresas');
             if (empRes.ok) {
                 const empData = await empRes.json();
                 if (Array.isArray(empData)) {
@@ -69,9 +68,9 @@ const UserManagementView: React.FC = () => {
             }
 
             // 2. Load user profiles
-            const userRes = await fetch(`${API_URL}/api/users`);
+            const userRes = await apiFetch('/api/admin/users');
             if (!userRes.ok) {
-                console.error('[Users] GET /api/users returned', userRes.status);
+                console.error('[Users] GET /api/admin/users returned', userRes.status);
                 return;
             }
             const usersData = await userRes.json();
