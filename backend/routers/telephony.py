@@ -35,7 +35,7 @@ from services.livekit_service import (
     list_sip_trunks,
     wait_for_agent_ready,
 )
-from services.yeastar_service import YeastarPSeriesClient
+from services.yeastar_service import YeastarClient
 from services.yeastar_webhook_service import (
     normalize_yeastar_webhook_payload,
     process_yeastar_webhook_payload,
@@ -242,10 +242,16 @@ def _split_yeastar_api_url(raw_url: str) -> tuple[str, int]:
         return url, 8088
 
 
+def _normalize_yeastar_pbx_url(raw_url: str, api_mode: str) -> tuple[str, int]:
+    api_url, parsed_port = _split_yeastar_api_url(raw_url)
+    default_port = 443 if api_mode == "cloud_pbx" else 8088
+    return api_url, parsed_port or default_port
+
+
 async def _get_yeastar_config(empresa_id: int) -> dict | None:
     res = await sb_query(
         lambda eid=empresa_id: supabase.table("company_yeastar_configs")
-        .select("id, empresa_id, api_url, api_port, api_username, api_password, is_active, created_at, updated_at")
+        .select("id, empresa_id, api_url, api_port, api_mode, api_username, api_password, is_active, enabled_capabilities, created_at, updated_at")
         .eq("empresa_id", eid)
         .eq("is_active", True)
         .limit(1)
@@ -256,25 +262,41 @@ async def _get_yeastar_config(empresa_id: int) -> dict | None:
 
 def _yeastar_config_to_response(row: dict) -> dict:
     api_url = str(row.get("api_url") or "").rstrip("/")
-    api_port = int(row.get("api_port") or 8088)
+    api_mode = str(row.get("api_mode") or "pseries")
+    default_port = 443 if api_mode == "cloud_pbx" else 8088
+    api_port = int(row.get("api_port") or default_port)
     tail = api_url.rsplit("/", 1)[-1]
     yeastar_pbx_url = f"{api_url}:{api_port}" if api_url and f":{api_port}" not in tail else api_url
     return {
         "empresa_id": int(row["empresa_id"]),
         "yeastar_pbx_url": yeastar_pbx_url,
+        "yeastar_api_mode": api_mode,
         "yeastar_client_id": row.get("api_username") or "",
         "yeastar_client_secret": "********" if row.get("api_password") else "",
         "enabled_capabilities": list(row.get("enabled_capabilities") or []),
     }
 
 
-def _yeastar_client_from_config(row: dict) -> YeastarPSeriesClient:
+def _infer_yeastar_api_mode(raw_url: str, explicit_mode: str | None = None) -> str:
+    mode = (explicit_mode or "").strip().lower()
+    if mode in {"pseries", "cloud_pbx"}:
+        return mode
+    url = (raw_url or "").strip().lower()
+    if ".cloud." in url or "yeastarcloud" in url:
+        return "cloud_pbx"
+    return "pseries"
+
+
+def _yeastar_client_from_config(row: dict) -> YeastarClient:
     api_url = str(row.get("api_url") or "").rstrip("/")
-    api_port = int(row.get("api_port") or 8088)
+    api_mode = _infer_yeastar_api_mode(api_url, row.get("api_mode"))
+    default_port = 443 if api_mode == "cloud_pbx" else 8088
+    api_port = int(row.get("api_port") or default_port)
     tail = api_url.rsplit("/", 1)[-1]
     pbx_url = f"{api_url}:{api_port}" if api_url and f":{api_port}" not in tail else api_url
-    return YeastarPSeriesClient(
+    return YeastarClient(
         pbx_url=pbx_url,
+        api_mode=api_mode,
         client_id=str(row.get("api_username") or ""),
         client_secret=decrypt_data(row.get("api_password") or ""),
         tenant_id=row.get("empresa_id"),
@@ -606,11 +628,13 @@ async def save_yeastar_config(
         raise HTTPException(status_code=403, detail="Usuario sin empresa asignada")
 
     existing_config = await _get_yeastar_config(int(target_empresa_id))
-    api_url, api_port = _split_yeastar_api_url(payload.yeastar_pbx_url)
+    api_mode = _infer_yeastar_api_mode(payload.yeastar_pbx_url, payload.yeastar_api_mode)
+    api_url, api_port = _normalize_yeastar_pbx_url(payload.yeastar_pbx_url, api_mode)
     update_data = {
         "empresa_id": target_empresa_id,
         "api_url": api_url,
         "api_port": api_port,
+        "api_mode": api_mode,
         "api_username": payload.yeastar_client_id.strip(),
         "is_active": True,
         "enabled_capabilities": payload.enabled_capabilities or [],
@@ -626,7 +650,7 @@ async def save_yeastar_config(
     res = await sb_query(
         lambda d=update_data: supabase.table("company_yeastar_configs")
         .upsert(d, on_conflict="empresa_id")
-        .select("id, empresa_id, api_url, api_port, api_username, api_password, is_active")
+        .select("id, empresa_id, api_url, api_port, api_mode, api_username, api_password, is_active, enabled_capabilities")
         .execute()
     )
 
@@ -672,8 +696,10 @@ async def test_yeastar_connection(
         # If it's a new secret being tested, use it as is (will be encrypted on save)
         pass
 
-    async with YeastarPSeriesClient(
+    api_mode = _infer_yeastar_api_mode(payload.yeastar_pbx_url, payload.yeastar_api_mode)
+    async with YeastarClient(
         pbx_url=payload.yeastar_pbx_url,
+        api_mode=api_mode,
         client_id=payload.yeastar_client_id,
         client_secret=client_secret,
         tenant_id=target_empresa_id,

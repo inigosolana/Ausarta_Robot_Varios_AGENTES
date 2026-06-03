@@ -14,6 +14,7 @@ import type { Empresa } from '../types';
 interface YeastarConfig {
   empresa_id?: number;
   yeastar_pbx_url: string;
+  yeastar_api_mode: 'pseries' | 'cloud_pbx';
   yeastar_client_id: string;
   yeastar_client_secret?: string; // only for form input or '********'
   enabled_capabilities?: string[];
@@ -31,6 +32,7 @@ interface YeastarCapability {
 
 const EMPTY_FORM: YeastarConfig = {
   yeastar_pbx_url: '',
+  yeastar_api_mode: 'pseries',
   yeastar_client_id: '',
   yeastar_client_secret: '',
   enabled_capabilities: [],
@@ -63,6 +65,10 @@ const TelephonyView: React.FC = () => {
   );
   const [yeastarWebhookUrl, setYeastarWebhookUrl] = useState('');
   const [webhookCopied, setWebhookCopied] = useState(false);
+  const isCloudMode = form.yeastar_api_mode === 'cloud_pbx';
+  const currentModeLabel = isCloudMode ? 'Cloud PBX' : 'P-Series';
+  const currentCredentialLabel = isCloudMode ? 'API Username' : 'Client ID';
+  const currentSecretLabel = isCloudMode ? 'API Password' : 'Client Secret';
 
   useEffect(() => {
     apiFetch('/api/telephony/platform-info')
@@ -162,6 +168,7 @@ const TelephonyView: React.FC = () => {
         setSavedConfig(data);
         setForm({
           yeastar_pbx_url: data.yeastar_pbx_url || '',
+          yeastar_api_mode: data.yeastar_api_mode || 'pseries',
           yeastar_client_id: data.yeastar_client_id || '',
           yeastar_client_secret: '',   // handled dynamically on save
           enabled_capabilities: data.enabled_capabilities || [],
@@ -202,6 +209,7 @@ const TelephonyView: React.FC = () => {
       const payload = {
         empresa_id: selectedEmpresaId,
         yeastar_pbx_url: form.yeastar_pbx_url,
+        yeastar_api_mode: form.yeastar_api_mode,
         yeastar_client_id: form.yeastar_client_id,
         yeastar_client_secret: form.yeastar_client_secret || '********',
       };
@@ -228,6 +236,7 @@ const TelephonyView: React.FC = () => {
       const payload: any = {
         empresa_id: selectedEmpresaId,
         yeastar_pbx_url: form.yeastar_pbx_url,
+        yeastar_api_mode: form.yeastar_api_mode,
         yeastar_client_id: form.yeastar_client_id,
         enabled_capabilities: form.enabled_capabilities || [],
       };
@@ -303,12 +312,12 @@ const TelephonyView: React.FC = () => {
             </div>
             <div>
               <h2 className="font-bold text-gray-900">
-                {t('Yeastar P-Series Integration', 'Integración Yeastar P-Series')}
+                {t('Yeastar Integration', 'Integracion Yeastar')} {currentModeLabel}
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
                 {t(
-                  'Connect your Yeastar P-Series PBX via REST API v2.0.',
-                  'Conecta tu centralita Yeastar P-Series mediante la API REST v2.0.'
+                  'Connect your Yeastar PBX using the correct API mode for this tenant.',
+                  'Conecta la centralita Yeastar usando el modo de API correcto para esta empresa.'
                 )}
               </p>
             </div>
@@ -336,8 +345,11 @@ const TelephonyView: React.FC = () => {
           </h3>
           <div className="text-sm text-blue-900/90 space-y-3 leading-relaxed">
             <p>
-              Entra al panel de administración de Yeastar P-Series y ve a{' '}
-              <strong>Integraciones → API</strong>. Crea una nueva conexión con esta configuración:
+              {isCloudMode ? (
+                <>En Yeastar Cloud PBX usa las credenciales de API y el endpoint <strong>/api/v2.0.0/login</strong>. Ausarta enviara la contrasena con hash MD5 como pide la API oficial.</>
+              ) : (
+                <>Entra al panel de administracion de Yeastar P-Series y ve a <strong>Integraciones / API</strong>. Crea una nueva conexion con esta configuracion:</>
+              )}
             </p>
             <ol className="list-decimal list-inside space-y-3 pl-0.5">
               <li>
@@ -491,6 +503,29 @@ const TelephonyView: React.FC = () => {
             </div>
           ) : (
             <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                    {t('API Mode', 'Modo de API')} *
+                  </label>
+                  <select
+                    value={form.yeastar_api_mode}
+                    onChange={e => handleChange('yeastar_api_mode', e.target.value)}
+                    className="w-full h-10 px-4 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
+                  >
+                    <option value="pseries">Yeastar P-Series</option>
+                    <option value="cloud_pbx">Yeastar Cloud PBX</option>
+                  </select>
+                </div>
+                <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-xs text-blue-900">
+                  {isCloudMode ? (
+                    <>Cloud PBX usa <code>/api/v2.0.0/login</code> y <code>/api/v2.0.0/extension/list</code>.</>
+                  ) : (
+                    <>P-Series usa <code>/api/v2.0/token</code> y endpoints <code>/api/v2.0</code> con Bearer token.</>
+                  )}
+                </div>
+              </div>
+
               {/* Row 1: Host URL */}
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
@@ -501,11 +536,11 @@ const TelephonyView: React.FC = () => {
                   required
                   value={form.yeastar_pbx_url}
                   onChange={e => handleChange('yeastar_pbx_url', e.target.value)}
-                  placeholder="https://pbx.empresa.com:8088"
+                  placeholder={isCloudMode ? "https://pbx.empresa.cloud:443" : "https://pbx.empresa.com:8088"}
                   className="w-full h-10 px-4 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
                 />
                 <p className="text-[11px] text-gray-400 mt-1">
-                  {t('Full URL including protocol and port.', 'URL completa incluyendo protocolo (http/https) y puerto.')}
+                  {isCloudMode ? 'URL completa de la instancia Cloud PBX. Si no indicas puerto, se usara 443.' : t('Full URL including protocol and port.', 'URL completa incluyendo protocolo (http/https) y puerto.')}
                 </p>
               </div>
 
@@ -513,7 +548,7 @@ const TelephonyView: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                    {t('Client ID', 'Client ID')} *
+                    {currentCredentialLabel} *
                   </label>
                   <input
                     type="text"
@@ -521,14 +556,14 @@ const TelephonyView: React.FC = () => {
                     autoComplete="off"
                     value={form.yeastar_client_id}
                     onChange={e => handleChange('yeastar_client_id', e.target.value)}
-                    placeholder="xxxxxxxxxxxxxxxx"
+                    placeholder={isCloudMode ? "api" : "xxxxxxxxxxxxxxxx"}
                     className="w-full h-10 px-4 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                    {t('Client Secret', 'Client Secret')}
+                    {currentSecretLabel}
                     {savedConfig?.yeastar_pbx_url && (
                       <span className="ml-2 text-gray-400 normal-case font-normal">
                         ({t('leave blank to keep current', 'déjala vacía para conservar el actual')})
@@ -541,7 +576,7 @@ const TelephonyView: React.FC = () => {
                       autoComplete="new-password"
                       value={form.yeastar_client_secret}
                       onChange={e => handleChange('yeastar_client_secret', e.target.value)}
-                      placeholder={savedConfig?.yeastar_pbx_url ? '••••••••' : t('Enter client secret', 'Introduce el secreto')}
+                      placeholder={savedConfig?.yeastar_pbx_url ? '********' : isCloudMode ? 'Introduce la API Password' : t('Enter client secret', 'Introduce el secreto')}
                       required={!savedConfig?.yeastar_pbx_url}
                       className="w-full h-10 pl-4 pr-11 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
                     />

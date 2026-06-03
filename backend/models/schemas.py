@@ -115,9 +115,13 @@ class AssistantToolResponse(BaseModel):
 
 # ── Yeastar PBX integration (P-Series) ─────────────────────────────────────────
 
+YeastarApiMode = Literal["pseries", "cloud_pbx"]
+
+
 class YeastarPSeriesConfigBase(BaseModel):
     """Fields shared between create and update."""
     yeastar_pbx_url: str
+    yeastar_api_mode: YeastarApiMode = "pseries"
     yeastar_client_id: str
     enabled_capabilities: Optional[list[str]] = None
 
