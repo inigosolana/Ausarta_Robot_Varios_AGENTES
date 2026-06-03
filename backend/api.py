@@ -98,12 +98,37 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS — orígenes explícitos en lugar de wildcard
-ALLOWED_ORIGINS = [
+def _expand_dev_cors_origins(raw_origins: list[str]) -> list[str]:
+    expanded: list[str] = []
+    seen: set[str] = set()
+
+    def _add(origin: str) -> None:
+        if origin and origin not in seen:
+            seen.add(origin)
+            expanded.append(origin)
+
+    for origin in raw_origins:
+        value = origin.strip()
+        if not value:
+            continue
+        _add(value)
+
+        if value.startswith("http://localhost:"):
+            port = value.rsplit(":", 1)[-1]
+            _add(f"http://127.0.0.1:{port}")
+        elif value.startswith("http://127.0.0.1:"):
+            port = value.rsplit(":", 1)[-1]
+            _add(f"http://localhost:{port}")
+
+    return expanded
+
+
+ALLOWED_ORIGINS = _expand_dev_cors_origins([
     o.strip() for o in os.getenv(
         "CORS_ALLOWED_ORIGINS",
-        "http://localhost:5173,https://app.ausarta.net,https://www.ausarta.net"
+        "http://localhost:5173,http://localhost:3000,https://app.ausarta.net,https://www.ausarta.net"
     ).split(",") if o.strip()
-]
+])
 
 # Protección: wildcard + allow_credentials es un error de configuración grave
 if "*" in ALLOWED_ORIGINS:
