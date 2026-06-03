@@ -135,6 +135,7 @@ class YeastarPSeriesConfigCreate(YeastarPSeriesConfigBase):
 class YeastarPSeriesConfigTest(BaseModel):
     """Payload for the /test endpoint — never persisted."""
     yeastar_pbx_url: str
+    yeastar_api_mode: YeastarApiMode = "pseries"
     yeastar_client_id: str
     yeastar_client_secret: str
     empresa_id: Optional[int] = None
