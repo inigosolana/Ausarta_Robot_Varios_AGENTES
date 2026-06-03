@@ -119,6 +119,7 @@ class YeastarPSeriesConfigBase(BaseModel):
     """Fields shared between create and update."""
     yeastar_pbx_url: str
     yeastar_client_id: str
+    enabled_capabilities: Optional[list[str]] = None
 
 
 class YeastarPSeriesConfigCreate(YeastarPSeriesConfigBase):
@@ -139,6 +140,7 @@ class YeastarPSeriesConfigResponse(YeastarPSeriesConfigBase):
     """Returned by GET — secret is masked."""
     empresa_id: int
     yeastar_client_secret: str # Will return '********' if set
+    enabled_capabilities: list[str] = []
 
     class Config:
         from_attributes = True

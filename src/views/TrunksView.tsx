@@ -24,13 +24,15 @@ type ExtModalState = {
 };
 
 const TrunksView: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, isPlatformOwner } = useAuth();
   const [rows, setRows] = useState<EmpresaRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | null>(null);
   const [outbound, setOutbound] = useState('');
   const [inbound, setInbound] = useState('');
   const [saving, setSaving] = useState(false);
+  const [citeliaDdi, setCiteliaDdi] = useState('');
+  const [creatingCitelia, setCreatingCitelia] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [livekitTrunks, setLivekitTrunks] = useState<TelephonyTrunk[]>([]);
   const [yeastarTrunks, setYeastarTrunks] = useState<TelephonyTrunk[]>([]);
@@ -42,6 +44,9 @@ const TrunksView: React.FC = () => {
   const [extensions, setExtensions] = useState<Extension[]>([]);
   const [extLoading, setExtLoading] = useState(false);
   const [extMsg, setExtMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [extStatuses, setExtStatuses] = useState<Record<string, string>>({});
+  const [syncingExt, setSyncingExt] = useState(false);
+  const [statusLoading, setStatusLoading] = useState(false);
   const [extModal, setExtModal] = useState<ExtModalState>({
     open: false,
     mode: 'add',
@@ -50,7 +55,7 @@ const TrunksView: React.FC = () => {
   const [extSaving, setExtSaving] = useState(false);
   const [deletingExtId, setDeletingExtId] = useState<string | null>(null);
 
-  const isSuperadmin = profile?.role === 'superadmin';
+  const canManageTrunks = isPlatformOwner || profile?.role === 'superadmin';
 
   const selected = useMemo(
     () => rows.find(r => r.id === selectedEmpresaId) || null,
@@ -109,6 +114,47 @@ const TrunksView: React.FC = () => {
       setTrunksLoading(false);
     }
   }, []);
+
+  const syncExtensionsFromYeastar = async () => {
+    if (!selectedEmpresaId) return;
+    setSyncingExt(true);
+    setExtMsg(null);
+    try {
+      const res = await apiFetch(`/api/empresas/${selectedEmpresaId}/extensions/sync`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setExtensions(data.extensions || []);
+      setExtMsg({ ok: true, text: `${data.synced || 0} extensiones sincronizadas desde Yeastar` });
+    } catch (err: any) {
+      setExtMsg({ ok: false, text: err?.message || 'No se pudo sincronizar con Yeastar' });
+    } finally {
+      setSyncingExt(false);
+    }
+  };
+
+  const refreshExtensionStatuses = async () => {
+    if (!selectedEmpresaId) return;
+    setStatusLoading(true);
+    setExtMsg(null);
+    try {
+      const res = await apiFetch(`/api/empresas/${selectedEmpresaId}/extensions/statuses`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setExtStatuses(data.statuses || {});
+    } catch (err: any) {
+      setExtMsg({ ok: false, text: err?.message || 'No se pudieron consultar estados Yeastar' });
+    } finally {
+      setStatusLoading(false);
+    }
+  };
 
   useEffect(() => {
     loadEmpresas();
@@ -226,6 +272,48 @@ const TrunksView: React.FC = () => {
     }
   };
 
+  const createCiteliaTrunk = async () => {
+    if (!selectedEmpresaId || !citeliaDdi.trim()) return;
+    setCreatingCitelia(true);
+    setMsg(null);
+    try {
+      const res = await apiFetch(`/api/empresas/${selectedEmpresaId}/outbound-trunks/citelia`, {
+        method: 'POST',
+        body: JSON.stringify({ ddi: citeliaDdi.trim() }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      const trunk = json?.trunk || {};
+      const updated = json?.empresa || {};
+      if (trunk?.id) {
+        setOutbound(trunk.id);
+        setRows(prev => prev.map(r => (
+          r.id === selectedEmpresaId
+            ? {
+              ...r,
+              sip_outbound_trunk_id: updated.sip_outbound_trunk_id ?? trunk.id,
+              sip_inbound_trunk_id: updated.sip_inbound_trunk_id ?? r.sip_inbound_trunk_id ?? null,
+            }
+            : r
+        )));
+      }
+      setMsg({
+        ok: true,
+        text: trunk?.created
+          ? `Troncal CITELIA creada correctamente (${trunk.id})`
+          : `Troncal CITELIA reutilizada (${trunk.id})`,
+      });
+      await loadAvailableTrunks(selectedEmpresaId);
+    } catch (err: any) {
+      setMsg({ ok: false, text: err?.message || 'No se pudo crear la troncal CITELIA' });
+    } finally {
+      setCreatingCitelia(false);
+    }
+  };
+
   const openAddExt = () => {
     setExtModal({ open: true, mode: 'add', ext: {} });
   };
@@ -301,10 +389,10 @@ const TrunksView: React.FC = () => {
     }
   };
 
-  if (!isSuperadmin) {
+  if (!canManageTrunks) {
     return (
       <div className="max-w-4xl mx-auto bg-white rounded-2xl border border-amber-200 p-6 text-amber-800">
-        Solo superadmin puede editar troncales SIP desde este panel.
+        Solo superadmin o admin de Ausarta puede editar troncales SIP desde este panel.
       </div>
     );
   }
@@ -363,6 +451,37 @@ const TrunksView: React.FC = () => {
           <p className="text-[11px] text-gray-400 mt-1">
             Se usa para llamadas salientes de esta empresa (pruebas, campañas y llamadas manuales).
           </p>
+        </div>
+
+        <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 space-y-3">
+          <div>
+            <h3 className="text-sm font-bold text-blue-900">Crear troncal saliente CITELIA_SBC</h3>
+            <p className="text-xs text-blue-700 mt-1">
+              Host, puerto, dominio y transporte son fijos. Solo necesitas indicar el DDI de esta empresa.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex-1">
+              <label className="block text-xs font-semibold text-blue-800 uppercase tracking-wider mb-1.5">
+                DDI
+              </label>
+              <input
+                type="text"
+                value={citeliaDdi}
+                onChange={(e) => setCiteliaDdi(e.target.value)}
+                placeholder="842840650"
+                className="w-full h-10 px-4 border border-blue-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/20 focus:border-blue-400 transition-all"
+              />
+            </div>
+            <button
+              onClick={createCiteliaTrunk}
+              disabled={creatingCitelia || !selectedEmpresaId || !citeliaDdi.trim()}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {creatingCitelia ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
+              Crear CITELIA
+            </button>
+          </div>
         </div>
 
         <div>
@@ -458,13 +577,31 @@ const TrunksView: React.FC = () => {
                 {extensions.length}
               </span>
             </div>
-            <button
-              onClick={openAddExt}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                onClick={refreshExtensionStatuses}
+                disabled={statusLoading || extensions.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 text-xs font-semibold hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw size={13} className={statusLoading ? 'animate-spin' : ''} />
+                Estados
+              </button>
+              <button
+                onClick={syncExtensionsFromYeastar}
+                disabled={syncingExt}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw size={13} className={syncingExt ? 'animate-spin' : ''} />
+                Sincronizar PBX
+              </button>
+              <button
+                onClick={openAddExt}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors"
             >
               <Plus size={13} />
               Añadir extensión
-            </button>
+              </button>
+            </div>
           </div>
 
           {extMsg && (
@@ -503,6 +640,17 @@ const TrunksView: React.FC = () => {
                       </p>
                       {ext.departamento && (
                         <p className="text-[11px] text-gray-400">{ext.departamento}</p>
+                      )}
+                      {extStatuses[ext.extension_number] && (
+                        <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          extStatuses[ext.extension_number] === 'Idle'
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : extStatuses[ext.extension_number] === 'Busy'
+                              ? 'bg-amber-50 text-amber-700'
+                              : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {extStatuses[ext.extension_number]}
+                        </span>
                       )}
                     </div>
                   </div>

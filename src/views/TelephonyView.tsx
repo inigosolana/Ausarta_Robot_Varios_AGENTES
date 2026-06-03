@@ -16,12 +16,24 @@ interface YeastarConfig {
   yeastar_pbx_url: string;
   yeastar_client_id: string;
   yeastar_client_secret?: string; // only for form input or '********'
+  enabled_capabilities?: string[];
+}
+
+interface YeastarCapability {
+  id: string;
+  group: string;
+  label: string;
+  description: string;
+  permission: string;
+  endpoints: string[];
+  status: 'implemented' | 'available' | 'planned' | string;
 }
 
 const EMPTY_FORM: YeastarConfig = {
   yeastar_pbx_url: '',
   yeastar_client_id: '',
   yeastar_client_secret: '',
+  enabled_capabilities: [],
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -39,6 +51,8 @@ const TelephonyView: React.FC = () => {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [capabilities, setCapabilities] = useState<YeastarCapability[]>([]);
+  const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
 
   // ── Multi-tenant state ─────────────────────────────────────────────────────
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
@@ -69,6 +83,18 @@ const TelephonyView: React.FC = () => {
           setYeastarWebhookUrl(`${window.location.origin}/webhooks/yeastar`);
         }
       });
+  }, []);
+
+  useEffect(() => {
+    setCapabilitiesLoading(true);
+    apiFetch('/api/telephony/yeastar/capabilities')
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = await res.json();
+        setCapabilities(data.capabilities || []);
+      })
+      .catch(() => setCapabilities([]))
+      .finally(() => setCapabilitiesLoading(false));
   }, []);
 
   const copyWebhookUrl = async () => {
@@ -138,6 +164,7 @@ const TelephonyView: React.FC = () => {
           yeastar_pbx_url: data.yeastar_pbx_url || '',
           yeastar_client_id: data.yeastar_client_id || '',
           yeastar_client_secret: '',   // handled dynamically on save
+          enabled_capabilities: data.enabled_capabilities || [],
         });
       }
     } catch (err) {
@@ -150,6 +177,19 @@ const TelephonyView: React.FC = () => {
   const handleChange = (field: keyof YeastarConfig, value: string) => {
     setForm(prev => ({ ...prev, [field]: value }));
     setTestResult(null);
+    setSaveSuccess(false);
+  };
+
+  const toggleCapability = (capabilityId: string) => {
+    setForm(prev => {
+      const current = prev.enabled_capabilities || [];
+      return {
+        ...prev,
+        enabled_capabilities: current.includes(capabilityId)
+          ? current.filter(id => id !== capabilityId)
+          : [...current, capabilityId],
+      };
+    });
     setSaveSuccess(false);
   };
 
@@ -189,6 +229,7 @@ const TelephonyView: React.FC = () => {
         empresa_id: selectedEmpresaId,
         yeastar_pbx_url: form.yeastar_pbx_url,
         yeastar_client_id: form.yeastar_client_id,
+        enabled_capabilities: form.enabled_capabilities || [],
       };
 
       // UX: Only send the secret if it's not empty and not the masked placeholder
@@ -203,7 +244,7 @@ const TelephonyView: React.FC = () => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const saved: YeastarConfig = await res.json();
       setSavedConfig(saved);
-      setForm(prev => ({ ...prev, yeastar_client_secret: '' }));
+      setForm(prev => ({ ...prev, yeastar_client_secret: '', enabled_capabilities: saved.enabled_capabilities || [] }));
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
     } catch (err) {
@@ -537,6 +578,77 @@ const TelephonyView: React.FC = () => {
                   {t('Configuration saved successfully.', 'Configuración guardada correctamente.')}
                 </div>
               )}
+
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900">Funciones API Yeastar</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Selecciona las capacidades que quieres habilitar para esta empresa.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-semibold text-gray-500">
+                    {(form.enabled_capabilities || []).length} activas
+                  </span>
+                </div>
+
+                {capabilitiesLoading ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-400">
+                    <Loader2 size={15} className="animate-spin" />
+                    Cargando funciones API...
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    {capabilities.map(cap => {
+                      const checked = (form.enabled_capabilities || []).includes(cap.id);
+                      const badgeClass = cap.status === 'implemented'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : cap.status === 'planned'
+                          ? 'bg-amber-50 text-amber-700 border-amber-200'
+                          : 'bg-blue-50 text-blue-700 border-blue-200';
+                      return (
+                        <label
+                          key={cap.id}
+                          className={`block rounded-xl border p-4 cursor-pointer transition-colors ${
+                            checked ? 'border-indigo-300 bg-indigo-50' : 'border-gray-100 hover:border-gray-200 bg-white'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleCapability(cap.id)}
+                              className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-bold text-gray-900">{cap.label}</span>
+                                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${badgeClass}`}>
+                                  {cap.status === 'implemented' ? 'listo' : cap.status === 'planned' ? 'plan' : 'disponible'}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-gray-500">{cap.description}</p>
+                              <p className="mt-2 text-[11px] font-semibold text-gray-500">
+                                Permiso Yeastar: <span className="font-mono">{cap.permission}</span>
+                              </p>
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {cap.endpoints.slice(0, 3).map(endpoint => (
+                                  <code key={endpoint} className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">
+                                    {endpoint}
+                                  </code>
+                                ))}
+                                {cap.endpoints.length > 3 && (
+                                  <span className="text-[10px] text-gray-400">+{cap.endpoints.length - 3}</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
               {/* Action buttons */}
               <div className="flex items-center justify-between pt-2 border-t border-gray-100">

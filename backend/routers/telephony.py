@@ -31,6 +31,7 @@ from services.livekit_service import (
     create_isolated_room,
     create_outbound_call,
     dispatch_agent_explicit,
+    ensure_citelia_outbound_trunk,
     list_sip_trunks,
     wait_for_agent_ready,
 )
@@ -58,6 +59,117 @@ _LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "")
 _LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
 
 logger = logging.getLogger("api-backend")
+
+YEASTAR_API_CAPABILITIES = [
+    {
+        "id": "system.read",
+        "group": "Sistema",
+        "label": "Informacion y capacidad PBX",
+        "description": "Consultar informacion, capacidad y opciones de menu de la centralita.",
+        "permission": "System GET",
+        "endpoints": ["GET system/information", "GET system/capacity", "GET system/get_menuoptions"],
+        "status": "available",
+    },
+    {
+        "id": "extensions.read",
+        "group": "Extensiones",
+        "label": "Leer extensiones",
+        "description": "Listar, buscar y consultar extensiones para transferencias y directorio.",
+        "permission": "Extension GET",
+        "endpoints": ["GET extension/list", "GET extension/search", "GET extension/get", "GET extension/query"],
+        "status": "implemented",
+    },
+    {
+        "id": "extensions.write",
+        "group": "Extensiones",
+        "label": "Gestionar extensiones",
+        "description": "Crear, editar o eliminar extensiones desde Ausarta.",
+        "permission": "Extension POST/GET delete",
+        "endpoints": ["POST extension/create", "POST extension/update", "GET extension/delete"],
+        "status": "planned",
+    },
+    {
+        "id": "trunks.read",
+        "group": "Troncales",
+        "label": "Leer troncales",
+        "description": "Listar y consultar troncales SIP de Yeastar.",
+        "permission": "Trunk GET",
+        "endpoints": ["GET trunk/list", "GET trunk/search", "GET trunk/get", "GET trunk/query"],
+        "status": "implemented",
+    },
+    {
+        "id": "trunks.write",
+        "group": "Troncales",
+        "label": "Gestionar troncales SIP",
+        "description": "Crear, actualizar o eliminar troncales SIP Yeastar.",
+        "permission": "Trunk POST/GET delete",
+        "endpoints": ["POST trunk/create", "POST trunk/update", "GET trunk/delete"],
+        "status": "planned",
+    },
+    {
+        "id": "routes.read",
+        "group": "Rutas",
+        "label": "Leer rutas entrantes/salientes",
+        "description": "Consultar rutas para auditar enrutamiento de llamadas.",
+        "permission": "Inbound Route GET, Outbound Route GET",
+        "endpoints": ["GET inbound_route/list", "GET outbound_route/list"],
+        "status": "available",
+    },
+    {
+        "id": "routes.write",
+        "group": "Rutas",
+        "label": "Gestionar rutas",
+        "description": "Crear o editar rutas entrantes y salientes.",
+        "permission": "Inbound/Outbound Route POST",
+        "endpoints": ["POST inbound_route/create", "POST outbound_route/create", "POST outbound_route/update"],
+        "status": "planned",
+    },
+    {
+        "id": "contacts.manage",
+        "group": "Contactos",
+        "label": "Gestionar contactos PBX",
+        "description": "Sincronizar contactos de empresa o phonebooks con Yeastar.",
+        "permission": "Contacts/Phonebook GET+POST",
+        "endpoints": ["GET company_contact/list", "POST company_contact/create", "POST company_contact/update"],
+        "status": "available",
+    },
+    {
+        "id": "queues.manage",
+        "group": "Colas",
+        "label": "Gestionar colas y agentes",
+        "description": "Consultar colas, estado de agentes y pausar/reanudar agentes dinamicos.",
+        "permission": "Queue GET+POST",
+        "endpoints": ["GET queue/query", "GET queue/query_status", "POST queue/pause_agent", "POST queue/unpause_agent"],
+        "status": "available",
+    },
+    {
+        "id": "calls.control",
+        "group": "Control de llamadas",
+        "label": "Controlar llamadas",
+        "description": "Transferir, colgar, aparcar, poner en espera, silenciar o reproducir prompts.",
+        "permission": "Call Control POST",
+        "endpoints": ["POST call/dial", "POST call/transfer", "POST call/hold", "POST call/park", "POST call/play_prompt"],
+        "status": "implemented",
+    },
+    {
+        "id": "cdr.recordings",
+        "group": "Registros",
+        "label": "CDR y grabaciones",
+        "description": "Consultar CDR y obtener enlaces de descarga de grabaciones.",
+        "permission": "CDR/Recording GET",
+        "endpoints": ["GET cdr/list", "GET cdr/search", "GET cdr/download"],
+        "status": "available",
+    },
+    {
+        "id": "events.webhooks",
+        "group": "Eventos",
+        "label": "Webhooks de eventos",
+        "description": "Recibir cambios de estado de llamadas, extensiones, CDR y transferencias.",
+        "permission": "Event Push / Advanced Settings",
+        "endpoints": ["30008 Extension Call State Changed", "30011 Call State Changed", "NewCdr", "CallTransfer"],
+        "status": "implemented",
+    },
+]
 
 # FIX 6 — comprobación de arranque: aviso temprano si falta la variable canónica del trunk
 if not os.getenv("SIP_OUTBOUND_TRUNK_ID"):
@@ -112,6 +224,61 @@ def _normalize_test_outbound_phone(raw: str) -> str:
     if len(digits) == 11 and digits.startswith("34"):
         return f"+{digits}"
     return s
+
+
+def _split_yeastar_api_url(raw_url: str) -> tuple[str, int]:
+    url = (raw_url or "").strip().rstrip("/")
+    if not url:
+        return "", 8088
+
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url if "://" in url else f"https://{url}")
+        port = parsed.port or 8088
+        netloc = parsed.hostname or parsed.netloc or url
+        scheme = parsed.scheme or "https"
+        return f"{scheme}://{netloc}", int(port)
+    except Exception:
+        return url, 8088
+
+
+async def _get_yeastar_config(empresa_id: int) -> dict | None:
+    res = await sb_query(
+        lambda eid=empresa_id: supabase.table("company_yeastar_configs")
+        .select("id, empresa_id, api_url, api_port, api_username, api_password, is_active, created_at, updated_at")
+        .eq("empresa_id", eid)
+        .eq("is_active", True)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+def _yeastar_config_to_response(row: dict) -> dict:
+    api_url = str(row.get("api_url") or "").rstrip("/")
+    api_port = int(row.get("api_port") or 8088)
+    tail = api_url.rsplit("/", 1)[-1]
+    yeastar_pbx_url = f"{api_url}:{api_port}" if api_url and f":{api_port}" not in tail else api_url
+    return {
+        "empresa_id": int(row["empresa_id"]),
+        "yeastar_pbx_url": yeastar_pbx_url,
+        "yeastar_client_id": row.get("api_username") or "",
+        "yeastar_client_secret": "********" if row.get("api_password") else "",
+        "enabled_capabilities": list(row.get("enabled_capabilities") or []),
+    }
+
+
+def _yeastar_client_from_config(row: dict) -> YeastarPSeriesClient:
+    api_url = str(row.get("api_url") or "").rstrip("/")
+    api_port = int(row.get("api_port") or 8088)
+    tail = api_url.rsplit("/", 1)[-1]
+    pbx_url = f"{api_url}:{api_port}" if api_url and f":{api_port}" not in tail else api_url
+    return YeastarPSeriesClient(
+        pbx_url=pbx_url,
+        client_id=str(row.get("api_username") or ""),
+        client_secret=decrypt_data(row.get("api_password") or ""),
+        tenant_id=row.get("empresa_id"),
+    )
 
 
 async def _resolve_test_outbound_context(payload: TestOutboundCallRequest) -> tuple[str, str, int]:
@@ -237,6 +404,15 @@ async def get_telephony_platform_info(
     }
 
 
+@router.get("/api/telephony/yeastar/capabilities")
+async def get_yeastar_api_capabilities(
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Catalogo visible de funciones API Yeastar soportadas/planificadas."""
+    _ = current_user
+    return {"capabilities": YEASTAR_API_CAPABILITIES}
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Yeastar PBX — configuración multi-tenant (P-Series)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -271,7 +447,7 @@ async def get_telephony_trunks(
 
     emp_res = await sb_query(
         lambda eid=target_empresa_id: supabase.table("empresas")
-        .select("id, nombre, yeastar_pbx_url, yeastar_client_id, yeastar_client_secret")
+        .select("id, nombre")
         .eq("id", eid)
         .limit(1)
         .execute()
@@ -281,14 +457,10 @@ async def get_telephony_trunks(
         raise HTTPException(status_code=404, detail="Empresa no encontrada")
 
     emp = emp_res.data[0]
-    if emp.get("yeastar_pbx_url") and emp.get("yeastar_client_id") and emp.get("yeastar_client_secret"):
+    yeastar_config = await _get_yeastar_config(int(emp["id"]))
+    if yeastar_config:
         try:
-            async with YeastarPSeriesClient(
-                pbx_url=emp["yeastar_pbx_url"],
-                client_id=emp["yeastar_client_id"],
-                client_secret=decrypt_data(emp["yeastar_client_secret"]),
-                tenant_id=emp["id"],
-            ) as client:
+            async with _yeastar_client_from_config(yeastar_config) as client:
                 trunks = await client.list_trunks()
             yeastar_trunks = [
                 {
@@ -309,13 +481,81 @@ async def get_telephony_trunks(
                 "status": "configured",
                 "empresa_id": emp["id"],
                 "empresa_nombre": emp.get("nombre"),
-                "pbx_url": emp.get("yeastar_pbx_url"),
+                "pbx_url": _yeastar_config_to_response(yeastar_config)["yeastar_pbx_url"],
             }]
 
     return {
         "livekit_trunks": livekit_trunks,
         "yeastar_trunks": yeastar_trunks,
         "errors": errors,
+    }
+
+
+@router.post("/api/empresas/{empresa_id}/outbound-trunks/citelia")
+async def create_citelia_outbound_trunk(
+    empresa_id: int,
+    payload: dict,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """
+    Crea una troncal saliente LiveKit basada en la plantilla fija CITELIA_SBC.
+    Solo superadmin o admin de Ausarta pueden usar este atajo.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    if not has_global_access(current_user):
+        raise HTTPException(status_code=403, detail="Solo Ausarta puede provisionar esta troncal")
+
+    ddi = str(payload.get("ddi") or "").strip()
+    if not ddi:
+        raise HTTPException(status_code=400, detail="ddi es obligatorio")
+
+    emp_res = await sb_query(
+        lambda eid=empresa_id: supabase.table("empresas")
+        .select("id, nombre")
+        .eq("id", eid)
+        .limit(1)
+        .execute()
+    )
+    if not emp_res.data:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+    empresa = emp_res.data[0]
+    trunk = await ensure_citelia_outbound_trunk(
+        empresa_id=int(empresa["id"]),
+        empresa_nombre=str(empresa.get("nombre") or empresa["id"]),
+        ddi=ddi,
+    )
+
+    trunk_record = {
+        "empresa_id": empresa_id,
+        "provider": "CITELIA_SBC",
+        "livekit_trunk_id": trunk["id"],
+        "ddi": ddi,
+        "host": "212.63.112.35:38932",
+        "transport": "UDP",
+        "domain": "212.63.112.35",
+        "is_active": True,
+    }
+    await sb_query(
+        lambda d=trunk_record: supabase.table("empresa_sip_outbound_trunks")
+        .upsert(d, on_conflict="empresa_id,provider")
+        .execute()
+    )
+
+    update_res = await sb_query(
+        lambda tid=trunk["id"], eid=empresa_id: supabase.table("empresas")
+        .update({"sip_outbound_trunk_id": tid})
+        .eq("id", eid)
+        .select("id, nombre, sip_outbound_trunk_id, sip_inbound_trunk_id")
+        .execute()
+    )
+
+    return {
+        "status": "ok",
+        "trunk": trunk,
+        "empresa": update_res.data[0] if update_res.data else None,
     }
 
 
@@ -339,33 +579,11 @@ async def get_yeastar_config(
     if not target_empresa_id:
         raise HTTPException(status_code=403, detail="Usuario sin empresa asignada")
 
-    res = await sb_query(
-        lambda: supabase.table("empresas")
-        .select("id, yeastar_pbx_url, yeastar_client_id, yeastar_client_secret")
-        .eq("id", target_empresa_id)
-        .limit(1)
-        .execute()
-    )
-
-    if not res.data:
+    row = await _get_yeastar_config(int(target_empresa_id))
+    if not row:
         return JSONResponse(status_code=204, content=None)
 
-    row = res.data[0]
-    
-    # Check if we have Yeastar configured at all
-    if not row.get("yeastar_pbx_url") or not row.get("yeastar_client_id"):
-        return JSONResponse(status_code=204, content=None)
-
-    # Mask the secret
-    secret = row.get("yeastar_client_secret")
-    masked_secret = "********" if secret else ""
-
-    return {
-        "empresa_id": row["id"],
-        "yeastar_pbx_url": row["yeastar_pbx_url"],
-        "yeastar_client_id": row["yeastar_client_id"],
-        "yeastar_client_secret": masked_secret,
-    }
+    return _yeastar_config_to_response(row)
 
 
 @router.post("/api/telephony/yeastar", response_model=YeastarPSeriesConfigResponse)
@@ -387,20 +605,28 @@ async def save_yeastar_config(
     if not target_empresa_id:
         raise HTTPException(status_code=403, detail="Usuario sin empresa asignada")
 
+    existing_config = await _get_yeastar_config(int(target_empresa_id))
+    api_url, api_port = _split_yeastar_api_url(payload.yeastar_pbx_url)
     update_data = {
-        "yeastar_pbx_url": payload.yeastar_pbx_url.strip(),
-        "yeastar_client_id": payload.yeastar_client_id.strip(),
+        "empresa_id": target_empresa_id,
+        "api_url": api_url,
+        "api_port": api_port,
+        "api_username": payload.yeastar_client_id.strip(),
+        "is_active": True,
+        "enabled_capabilities": payload.enabled_capabilities or [],
     }
-    
-    # Only update secret if it's not the masked string
+
     if payload.yeastar_client_secret and payload.yeastar_client_secret != "********":
-        # Hardening: Encrypt secret before saving
-        update_data["yeastar_client_secret"] = encrypt_data(payload.yeastar_client_secret.strip())
+        update_data["api_password"] = encrypt_data(payload.yeastar_client_secret.strip())
+    elif existing_config and existing_config.get("api_password"):
+        update_data["api_password"] = existing_config["api_password"]
+    else:
+        raise HTTPException(status_code=400, detail="Client Secret es obligatorio para una configuraciÃ³n nueva")
 
     res = await sb_query(
-        lambda: supabase.table("empresas")
-        .update(update_data)
-        .eq("id", target_empresa_id)
+        lambda d=update_data: supabase.table("company_yeastar_configs")
+        .upsert(d, on_conflict="empresa_id")
+        .select("id, empresa_id, api_url, api_port, api_username, api_password, is_active")
         .execute()
     )
 
@@ -409,12 +635,7 @@ async def save_yeastar_config(
 
     row = res.data[0]
     
-    return {
-        "empresa_id": row["id"],
-        "yeastar_pbx_url": row["yeastar_pbx_url"],
-        "yeastar_client_id": row["yeastar_client_id"],
-        "yeastar_client_secret": "********" if row.get("yeastar_client_secret") else "",
-    }
+    return _yeastar_config_to_response(row)
 
 
 @router.post("/api/telephony/yeastar/test")
@@ -428,19 +649,23 @@ async def test_yeastar_connection(
     """
     client_secret = payload.yeastar_client_secret
     target_empresa_id = payload.empresa_id if payload.empresa_id else current_user.empresa_id
+    if not target_empresa_id:
+        raise HTTPException(status_code=403, detail="Usuario sin empresa asignada")
+    if target_empresa_id != current_user.empresa_id and not has_global_access(current_user):
+        raise HTTPException(status_code=403, detail="No tienes permisos para probar esta centralita")
 
     # If masked, we need to fetch the real secret from DB
     if client_secret == "********":
         res = await sb_query(
-            lambda: supabase.table("empresas")
-            .select("yeastar_client_secret")
-            .eq("id", target_empresa_id)
+            lambda: supabase.table("company_yeastar_configs")
+            .select("api_password")
+            .eq("empresa_id", target_empresa_id)
             .limit(1)
             .execute()
         )
-        if res.data and res.data[0].get("yeastar_client_secret"):
+        if res.data and res.data[0].get("api_password"):
             # Hardening: Decrypt secret from DB for testing
-            client_secret = decrypt_data(res.data[0]["yeastar_client_secret"])
+            client_secret = decrypt_data(res.data[0]["api_password"])
         else:
             return {"ok": False, "message": "No se encontró el secreto original en la base de datos."}
     else:
@@ -485,29 +710,29 @@ async def _resolve_survey_id(room_name: str, survey_id: int | None) -> int:
 
 async def _load_yeastar_tenant_config(empresa_id: int) -> dict:
     """
-    Credenciales Yeastar del tenant (tabla empresas).
+    Credenciales Yeastar del tenant (tabla company_yeastar_configs).
     target_extension: variable de entorno global o datos_extra de la encuesta.
     """
     emp_res = await sb_query(
-        lambda: supabase.table("empresas")
-        .select("id, yeastar_pbx_url, yeastar_client_id, yeastar_client_secret")
-        .eq("id", empresa_id)
+        lambda eid=empresa_id: supabase.table("empresas")
+        .select("id")
+        .eq("id", eid)
         .limit(1)
         .execute()
     )
     if not emp_res.data:
         raise HTTPException(status_code=404, detail="Empresa no encontrada")
 
-    emp = emp_res.data[0]
-    if not emp.get("yeastar_pbx_url") or not emp.get("yeastar_client_id"):
+    config = await _get_yeastar_config(int(empresa_id))
+    if not config:
         raise HTTPException(
             status_code=400,
             detail="Centralita Yeastar no configurada para esta empresa",
         )
-    if not emp.get("yeastar_client_secret"):
+    if not config.get("api_password"):
         raise HTTPException(status_code=400, detail="Credenciales Yeastar incompletas")
 
-    return emp
+    return config
 
 
 def _resolve_target_extension(
@@ -572,12 +797,7 @@ async def _execute_yeastar_transfer(
     resolved_extension = _resolve_target_extension(datos_extra, target_extension)
 
     try:
-        async with YeastarPSeriesClient(
-            pbx_url=emp["yeastar_pbx_url"],
-            client_id=emp["yeastar_client_id"],
-            client_secret=decrypt_data(emp["yeastar_client_secret"]),
-            tenant_id=empresa_id,
-        ) as client:
+        async with _yeastar_client_from_config(emp) as client:
             await client.transfer_call(str(resolved_call_id), resolved_extension)
     except Exception as exc:
         logger.error(
@@ -643,35 +863,10 @@ async def transfer_call_to_human(payload: CallTransferRequest):
     extension = (payload.extension or "1000").strip()
     empresa_id = int(payload.empresa_id)
 
-    emp_res = await sb_query(
-        lambda eid=empresa_id: supabase.table("empresas")
-        .select("id, yeastar_pbx_url, yeastar_client_id, yeastar_client_secret")
-        .eq("id", eid)
-        .limit(1)
-        .execute()
-    )
-    if not emp_res.data:
-        raise HTTPException(status_code=404, detail="Empresa no encontrada")
-
-    emp = emp_res.data[0]
-    pbx_url = emp.get("yeastar_pbx_url") or emp.get("yeastar_url")
-    client_id = emp.get("yeastar_client_id")
-    client_secret_enc = emp.get("yeastar_client_secret") or emp.get("yeastar_secret")
-
-    if not pbx_url or not client_id or not client_secret_enc:
-        logger.warning(f"[transfer] Yeastar no configurado para empresa_id={empresa_id}")
-        raise HTTPException(
-            status_code=404,
-            detail="Centralita Yeastar no configurada para esta empresa",
-        )
+    config = await _load_yeastar_tenant_config(empresa_id)
 
     try:
-        async with YeastarPSeriesClient(
-            pbx_url=pbx_url,
-            client_id=client_id,
-            client_secret=decrypt_data(client_secret_enc),
-            tenant_id=empresa_id,
-        ) as yeastar_client:
+        async with _yeastar_client_from_config(config) as yeastar_client:
             ext_status = await yeastar_client.get_extension_status(extension)
             if ext_status != "Idle":
                 logger.info(
@@ -1733,18 +1928,96 @@ async def list_extensions(
     if not supabase:
         raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
 
-    is_global = current_user.role in ("superadmin",)
+    is_global = has_global_access(current_user)
     if not is_global and str(current_user.empresa_id) != str(empresa_id):
         raise HTTPException(status_code=403, detail="Acceso denegado")
 
     res = await sb_query(
         lambda eid=empresa_id: supabase.table("yeastar_extensions")
-        .select("id, extension_number, extension_name, departamento, created_at")
+        .select("id, extension_number, extension_name, departamento, created_at, updated_at")
         .eq("empresa_id", eid)
         .order("extension_number")
         .execute()
     )
     return res.data or []
+
+
+@router.post("/api/empresas/{empresa_id}/extensions/sync")
+async def sync_yeastar_extensions(
+    empresa_id: int,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Sincroniza extensiones desde Yeastar P-Series hacia la tabla local."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexiÃ³n con la base de datos")
+
+    if not has_global_access(current_user) and str(current_user.empresa_id) != str(empresa_id):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+
+    config = await _load_yeastar_tenant_config(empresa_id)
+    async with _yeastar_client_from_config(config) as client:
+        remote_extensions = await client.list_extensions()
+
+    rows = [
+        {
+            "empresa_id": empresa_id,
+            "extension_number": ext["extension_number"],
+            "extension_name": ext.get("extension_name"),
+            "departamento": ext.get("departamento"),
+        }
+        for ext in remote_extensions
+        if ext.get("extension_number")
+    ]
+
+    if rows:
+        await sb_query(
+            lambda d=rows: supabase.table("yeastar_extensions")
+            .upsert(d, on_conflict="empresa_id,extension_number")
+            .execute()
+        )
+
+    res = await sb_query(
+        lambda eid=empresa_id: supabase.table("yeastar_extensions")
+        .select("id, extension_number, extension_name, departamento, created_at, updated_at")
+        .eq("empresa_id", eid)
+        .order("extension_number")
+        .execute()
+    )
+    return {
+        "status": "ok",
+        "synced": len(rows),
+        "extensions": res.data or [],
+    }
+
+
+@router.get("/api/empresas/{empresa_id}/extensions/statuses")
+async def get_yeastar_extension_statuses(
+    empresa_id: int,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Consulta estado real en Yeastar para las extensiones locales."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexiÃ³n con la base de datos")
+
+    if not has_global_access(current_user) and str(current_user.empresa_id) != str(empresa_id):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+
+    ext_res = await sb_query(
+        lambda eid=empresa_id: supabase.table("yeastar_extensions")
+        .select("extension_number")
+        .eq("empresa_id", eid)
+        .order("extension_number")
+        .execute()
+    )
+    extensions = [str(row.get("extension_number")) for row in (ext_res.data or []) if row.get("extension_number")]
+    config = await _load_yeastar_tenant_config(empresa_id)
+
+    statuses: dict[str, str] = {}
+    async with _yeastar_client_from_config(config) as client:
+        for extension in extensions:
+            statuses[extension] = await client.get_extension_status(extension)
+
+    return {"statuses": statuses}
 
 
 @router.post("/api/empresas/{empresa_id}/extensions", status_code=201)
@@ -1757,7 +2030,7 @@ async def create_extension(
     if not supabase:
         raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
 
-    is_global = current_user.role in ("superadmin",)
+    is_global = has_global_access(current_user)
     if not is_global and str(current_user.empresa_id) != str(empresa_id):
         raise HTTPException(status_code=403, detail="Acceso denegado")
 
@@ -1791,7 +2064,7 @@ async def update_extension(
     if not supabase:
         raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
 
-    is_global = current_user.role in ("superadmin",)
+    is_global = has_global_access(current_user)
     if not is_global and str(current_user.empresa_id) != str(empresa_id):
         raise HTTPException(status_code=403, detail="Acceso denegado")
 
@@ -1837,7 +2110,7 @@ async def delete_extension(
     if not supabase:
         raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
 
-    is_global = current_user.role in ("superadmin",)
+    is_global = has_global_access(current_user)
     if not is_global and str(current_user.empresa_id) != str(empresa_id):
         raise HTTPException(status_code=403, detail="Acceso denegado")
 

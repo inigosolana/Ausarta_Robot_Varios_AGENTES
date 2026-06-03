@@ -231,6 +231,47 @@ class YeastarPSeriesClient:
 
         return trunks
 
+    async def list_extensions(self) -> list[dict[str, Any]]:
+        """
+        Lista extensiones Yeastar y normaliza campos para sincronizacion local.
+        """
+        token = await self.get_access_token()
+        response = await self._get("/api/v2.0/extension/list", token)
+
+        if response.get("errcode") not in (None, 0):
+            raise YeastarConnectionError(
+                f"[{self.tenant_label}] Error listando extensiones Yeastar: {response}"
+            )
+
+        data = response.get("data") or response.get("extensions") or []
+        if isinstance(data, dict):
+            data = data.get("extensions") or data.get("list") or data.get("items") or []
+
+        extensions: list[dict[str, Any]] = []
+        for item in data or []:
+            if not isinstance(item, dict):
+                continue
+
+            number = (
+                item.get("number")
+                or item.get("extension")
+                or item.get("extension_number")
+                or item.get("ext_number")
+                or item.get("id")
+            )
+            if number is None:
+                continue
+
+            extensions.append({
+                "extension_number": str(number),
+                "extension_name": item.get("name") or item.get("caller_id_name") or item.get("display_name"),
+                "departamento": item.get("department") or item.get("department_name"),
+                "status": item.get("status") or item.get("presence") or item.get("state"),
+                "raw": item,
+            })
+
+        return extensions
+
     async def get_extension_status(self, extension: str) -> str:
         """
         Consulta el estado de una extensión en la PBX (Idle, Busy, etc.).

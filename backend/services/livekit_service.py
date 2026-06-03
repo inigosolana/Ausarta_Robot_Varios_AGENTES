@@ -176,3 +176,79 @@ async def list_sip_trunks() -> list[dict]:
         for item in (getattr(outbound_response, "items", []) or [])
     ]
     return inbound + outbound
+
+
+async def ensure_citelia_outbound_trunk(
+    *,
+    empresa_id: int,
+    empresa_nombre: str,
+    ddi: str,
+) -> dict:
+    """
+    Crea o reutiliza una troncal saliente CITELIA_SBC para una empresa.
+
+    Plantilla fija:
+    - address: 212.63.112.35:38932
+    - transport: UDP
+    - from_host: 212.63.112.35
+    - numbers: [ddi]
+    """
+    ddi_clean = str(ddi or "").strip()
+    if not ddi_clean:
+        raise ValueError("DDI obligatorio para crear troncal CITELIA")
+
+    trunk_name = f"CITELIA_SBC_{empresa_id}_{ddi_clean}"
+    trunk_address = "212.63.112.35:38932"
+    from_host = "212.63.112.35"
+
+    existing = await lkapi.sip.list_outbound_trunk(api.ListSIPOutboundTrunkRequest())
+    items = getattr(existing, "items", []) or []
+    for item in items:
+        existing_name = getattr(item, "name", "") or ""
+        existing_address = getattr(item, "address", "") or ""
+        existing_numbers = list(getattr(item, "numbers", []) or [])
+        if existing_name == trunk_name or (
+            existing_address == trunk_address and ddi_clean in existing_numbers
+        ):
+            return {
+                "provider": "livekit",
+                "id": getattr(item, "sip_trunk_id", ""),
+                "name": existing_name,
+                "phone_numbers": existing_numbers,
+                "status": "available",
+                "address": existing_address,
+                "metadata": getattr(item, "metadata", "") or "",
+                "created": False,
+            }
+
+    metadata = json.dumps(
+        {
+            "provider_template": "citelia_sbc",
+            "empresa_id": empresa_id,
+            "empresa_nombre": empresa_nombre,
+            "ddi": ddi_clean,
+        },
+        ensure_ascii=True,
+    )
+
+    trunk = api.SIPOutboundTrunkInfo(
+        name=trunk_name,
+        metadata=metadata,
+        address=trunk_address,
+        transport=api.SIP_TRANSPORT_UDP,
+        numbers=[ddi_clean],
+        from_host=from_host,
+    )
+    created = await lkapi.sip.create_outbound_trunk(
+        api.CreateSIPOutboundTrunkRequest(trunk=trunk)
+    )
+    return {
+        "provider": "livekit",
+        "id": getattr(created, "sip_trunk_id", ""),
+        "name": getattr(created, "name", trunk_name),
+        "phone_numbers": list(getattr(created, "numbers", []) or [ddi_clean]),
+        "status": "available",
+        "address": getattr(created, "address", trunk_address),
+        "metadata": getattr(created, "metadata", metadata),
+        "created": True,
+    }
