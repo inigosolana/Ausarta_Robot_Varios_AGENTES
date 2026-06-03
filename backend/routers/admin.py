@@ -316,16 +316,20 @@ async def get_empresa_crm_config(
         if not current_user.empresa_id or int(current_user.empresa_id) != int(empresa_id):
             raise HTTPException(status_code=403, detail="No tienes permisos para ver esta empresa")
 
+    # `webhook_url` is being rolled out gradually. Keep the view working even
+    # if the column is not yet present in the target database.
     res = await sb_query(
         lambda: supabase.table("empresas")
-        .select("id, nombre, crm_type, crm_webhook_url, webhook_url")
+        .select("id, nombre, crm_type, crm_webhook_url")
         .eq("id", empresa_id)
         .limit(1)
         .execute()
     )
     if not res.data:
         raise HTTPException(status_code=404, detail="Empresa no encontrada")
-    return res.data[0]
+    row = dict(res.data[0])
+    row.setdefault("webhook_url", None)
+    return row
 
 
 @router.put("/empresas/{empresa_id}/crm-config")
@@ -359,13 +363,21 @@ async def update_empresa_crm_config(
     if not updates:
         raise HTTPException(status_code=400, detail="No se proporcionaron cambios")
 
-    res = await sb_query(
-        lambda: supabase.table("empresas")
-        .update(updates)
-        .eq("id", empresa_id)
-        .select("id, nombre, crm_type, crm_webhook_url, webhook_url")
-        .execute()
-    )
+    try:
+        res = await sb_query(
+            lambda: supabase.table("empresas")
+            .update(updates)
+            .eq("id", empresa_id)
+            .select("id, nombre, crm_type, crm_webhook_url, webhook_url")
+            .execute()
+        )
+    except Exception as e:
+        if "webhook_url" in str(e) and "does not exist" in str(e):
+            raise HTTPException(
+                status_code=409,
+                detail="La columna empresas.webhook_url aun no existe en esta base de datos. Aplica la migracion 20260603_add_empresas_webhook_url.sql y vuelve a intentarlo.",
+            ) from e
+        raise
     if not res.data:
         raise HTTPException(status_code=404, detail="Empresa no encontrada")
 
