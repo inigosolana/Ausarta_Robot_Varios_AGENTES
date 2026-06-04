@@ -13,7 +13,7 @@ Responsabilidades:
   - /api/telephony/transfer: alias legacy del endpoint de transferencia.
 """
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from models.schemas import (
     CallEndRequest,
     CallTransferRequest,
@@ -603,7 +603,7 @@ async def get_yeastar_config(
 
     row = await _get_yeastar_config(int(target_empresa_id))
     if not row:
-        return JSONResponse(status_code=204, content=None)
+        return Response(status_code=204)
 
     return _yeastar_config_to_response(row)
 
