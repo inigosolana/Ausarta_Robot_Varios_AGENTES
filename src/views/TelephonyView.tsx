@@ -53,6 +53,7 @@ const TelephonyView: React.FC = () => {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [capabilities, setCapabilities] = useState<YeastarCapability[]>([]);
   const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
 
@@ -232,6 +233,7 @@ const TelephonyView: React.FC = () => {
     if (!form.yeastar_pbx_url || !form.yeastar_client_id || !selectedEmpresaId) return;
     setSaving(true);
     setSaveSuccess(false);
+    setSaveError('');
     try {
       const payload: any = {
         empresa_id: selectedEmpresaId,
@@ -250,7 +252,10 @@ const TelephonyView: React.FC = () => {
         method: 'POST',
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData?.detail || `HTTP ${res.status}`);
+      }
       const saved: YeastarConfig = await res.json();
       setSavedConfig(saved);
       setForm(prev => ({ ...prev, yeastar_client_secret: '', enabled_capabilities: saved.enabled_capabilities || [] }));
@@ -258,6 +263,7 @@ const TelephonyView: React.FC = () => {
       setTimeout(() => setSaveSuccess(false), 4000);
     } catch (err) {
       console.error('[Yeastar] Save error:', err);
+      setSaveError(err instanceof Error ? err.message : t('Save error', 'Error al guardar la configuracion'));
     } finally {
       setSaving(false);
     }
@@ -686,6 +692,13 @@ const TelephonyView: React.FC = () => {
               </div>
 
               {/* Action buttons */}
+              {saveError && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <XCircle size={16} className="mt-0.5 shrink-0" />
+                  <span>{saveError}</span>
+                </div>
+              )}
+
               <div className="flex items-center justify-between pt-2 border-t border-gray-100">
                 <button
                   type="button"

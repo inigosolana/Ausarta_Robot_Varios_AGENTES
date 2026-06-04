@@ -641,7 +641,13 @@ async def save_yeastar_config(
     }
 
     if payload.yeastar_client_secret and payload.yeastar_client_secret != "********":
-        update_data["api_password"] = encrypt_data(payload.yeastar_client_secret.strip())
+        try:
+            update_data["api_password"] = encrypt_data(payload.yeastar_client_secret.strip())
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="No se puede guardar el Client Secret: ENCRYPTION_KEY no esta configurada en el backend.",
+            ) from exc
     elif existing_config and existing_config.get("api_password"):
         update_data["api_password"] = existing_config["api_password"]
     else:
