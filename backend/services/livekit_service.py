@@ -178,6 +178,111 @@ async def list_sip_trunks() -> list[dict]:
     return inbound + outbound
 
 
+async def ensure_yeastar_inbound_trunk(
+    *,
+    empresa_id: int,
+    empresa_nombre: str,
+    allowed_addresses: list[str],
+    numbers: list[str],
+) -> dict:
+    """Crea/reutiliza inbound LiveKit y su regla de despacho al agente."""
+    clean_addresses = sorted({
+        str(address).strip().split(":", 1)[0]
+        for address in allowed_addresses
+        if str(address).strip()
+    })
+    clean_numbers = sorted({str(number).strip() for number in numbers if str(number).strip()})
+    if not clean_addresses:
+        raise ValueError("La troncal Yeastar no proporciona una IP/host permitido")
+    if not clean_numbers:
+        raise ValueError("La troncal Yeastar no proporciona ningun DDI")
+
+    trunk_name = f"YEASTAR_INBOUND_{empresa_id}"
+    metadata = json.dumps(
+        {
+            "provider": "yeastar",
+            "empresa_id": empresa_id,
+            "empresa_nombre": empresa_nombre,
+        },
+        ensure_ascii=True,
+    )
+
+    response = await lkapi.sip.list_sip_inbound_trunk(api.ListSIPInboundTrunkRequest())
+    existing = next(
+        (
+            item
+            for item in (getattr(response, "items", []) or [])
+            if getattr(item, "name", "") == trunk_name
+        ),
+        None,
+    )
+    if existing:
+        trunk = await lkapi.sip.update_sip_inbound_trunk(
+            api.UpdateSIPInboundTrunkRequest(
+                sip_trunk_id=existing.sip_trunk_id,
+                update=api.SIPInboundTrunkUpdate(
+                    name=trunk_name,
+                    metadata=metadata,
+                    numbers=api.ListUpdate(set=clean_numbers),
+                    allowed_addresses=api.ListUpdate(set=clean_addresses),
+                ),
+            )
+        )
+        created = False
+    else:
+        trunk = await lkapi.sip.create_sip_inbound_trunk(
+            api.CreateSIPInboundTrunkRequest(
+                trunk=api.SIPInboundTrunkInfo(
+                    name=trunk_name,
+                    metadata=metadata,
+                    numbers=clean_numbers,
+                    allowed_addresses=clean_addresses,
+                )
+            )
+        )
+        created = True
+
+    trunk_id = getattr(trunk, "sip_trunk_id", "")
+    rules = await lkapi.sip.list_sip_dispatch_rule(api.ListSIPDispatchRuleRequest())
+    rule_name = f"YEASTAR_DISPATCH_{empresa_id}"
+    dispatch_rule = next(
+        (
+            item
+            for item in (getattr(rules, "items", []) or [])
+            if getattr(item, "name", "") == rule_name
+        ),
+        None,
+    )
+    if not dispatch_rule:
+        dispatch_rule = await lkapi.sip.create_sip_dispatch_rule(
+            api.CreateSIPDispatchRuleRequest(
+                dispatch_rule=api.SIPDispatchRuleInfo(
+                    name=rule_name,
+                    metadata=metadata,
+                    trunk_ids=[trunk_id],
+                    rule=api.SIPDispatchRule(
+                        dispatch_rule_individual=api.SIPDispatchRuleIndividual(
+                            room_prefix=f"yeastar_{empresa_id}_"
+                        )
+                    ),
+                    room_config=api.RoomConfiguration(
+                        max_participants=3,
+                        agents=[api.RoomAgentDispatch(agent_name=DEFAULT_AGENT_NAME)],
+                    ),
+                )
+            )
+        )
+
+    return {
+        "id": trunk_id,
+        "name": getattr(trunk, "name", trunk_name),
+        "numbers": list(getattr(trunk, "numbers", []) or clean_numbers),
+        "allowed_addresses": list(getattr(trunk, "allowed_addresses", []) or clean_addresses),
+        "dispatch_rule_id": getattr(dispatch_rule, "sip_dispatch_rule_id", ""),
+        "created": created,
+    }
+
+
 async def ensure_citelia_outbound_trunk(
     *,
     empresa_id: int,

@@ -292,9 +292,12 @@ class YeastarClient:
                 "provider": "yeastar",
                 "id": str(trunk_id),
                 "name": item.get("name") or item.get("trunk_name") or item.get("trunkname") or str(trunk_id),
-                "phone_numbers": item.get("numbers") or item.get("did_numbers") or item.get("dids") or [],
+                "phone_numbers": item.get("numbers") or item.get("did_numbers") or item.get("dids") or (
+                    [item.get("def_outbound_cid")] if item.get("def_outbound_cid") else []
+                ),
                 "status": item.get("status") or item.get("state") or "configured",
                 "type": item.get("type") or item.get("trunk_type"),
+                "address": item.get("host_port") or item.get("host") or item.get("address"),
                 "raw": item,
             })
         return trunks

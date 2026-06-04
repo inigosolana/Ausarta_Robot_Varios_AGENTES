@@ -32,6 +32,7 @@ from services.livekit_service import (
     create_outbound_call,
     dispatch_agent_explicit,
     ensure_citelia_outbound_trunk,
+    ensure_yeastar_inbound_trunk,
     list_sip_trunks,
     wait_for_agent_ready,
 )
@@ -581,6 +582,19 @@ async def create_citelia_outbound_trunk(
     }
 
 
+@router.post("/api/empresas/{empresa_id}/inbound-trunks/sync-yeastar")
+async def sync_yeastar_inbound_trunk(
+    empresa_id: int,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Crea/reutiliza inbound LiveKit desde la troncal leida por API Yeastar."""
+    if not has_global_access(current_user):
+        if not current_user.empresa_id or int(current_user.empresa_id) != int(empresa_id):
+            raise HTTPException(status_code=403, detail="No tienes permisos para esta empresa")
+    inbound = await _sync_yeastar_inbound_to_livekit(empresa_id)
+    return {"status": "ok", "inbound": inbound}
+
+
 @router.get("/api/telephony/yeastar", response_model=YeastarPSeriesConfigResponse | None)
 async def get_yeastar_config(
     empresa_id: int | None = None,
@@ -662,6 +676,15 @@ async def save_yeastar_config(
     row = await _get_yeastar_config(int(target_empresa_id))
     if not row:
         raise HTTPException(status_code=500, detail="Error al guardar la configuración Yeastar")
+
+    try:
+        await _sync_yeastar_inbound_to_livekit(int(target_empresa_id))
+    except Exception as exc:
+        logger.warning(
+            "[yeastar-inbound] Config guardada, pero no se pudo sincronizar inbound empresa=%s: %s",
+            target_empresa_id,
+            exc,
+        )
 
     return _yeastar_config_to_response(row)
 
@@ -763,6 +786,64 @@ async def _load_yeastar_tenant_config(empresa_id: int) -> dict:
         raise HTTPException(status_code=400, detail="Credenciales Yeastar incompletas")
 
     return config
+
+
+async def _sync_yeastar_inbound_to_livekit(empresa_id: int) -> dict:
+    """Provisiona inbound LiveKit y guarda su ID usando la troncal Yeastar."""
+    emp_res = await sb_query(
+        lambda eid=empresa_id: supabase.table("empresas")
+        .select("id,nombre")
+        .eq("id", eid)
+        .limit(1)
+        .execute()
+    )
+    if not emp_res.data:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+    config = await _load_yeastar_tenant_config(empresa_id)
+    async with _yeastar_client_from_config(config) as client:
+        trunks = await client.list_trunks()
+    if not trunks:
+        raise HTTPException(status_code=409, detail="Yeastar no tiene ninguna troncal disponible")
+
+    trunk = next(
+        (item for item in trunks if str(item.get("status")) in {"1", "available", "active"}),
+        trunks[0],
+    )
+    addresses = [str(trunk.get("address") or "").strip()]
+    try:
+        import socket
+        from urllib.parse import urlparse
+
+        hostname = urlparse(str(config.get("api_url") or "")).hostname
+        if hostname:
+            addresses.append(socket.gethostbyname(hostname))
+    except Exception as exc:
+        logger.warning("[yeastar-inbound] No se pudo resolver IP PBX: %s", exc)
+
+    outbound_res = await sb_query(
+        lambda eid=empresa_id: supabase.table("empresa_sip_outbound_trunks")
+        .select("ddi")
+        .eq("empresa_id", eid)
+        .eq("is_active", True)
+        .execute()
+    )
+    numbers = list(trunk.get("phone_numbers") or [])
+    numbers.extend(row.get("ddi") for row in (outbound_res.data or []) if row.get("ddi"))
+
+    inbound = await ensure_yeastar_inbound_trunk(
+        empresa_id=empresa_id,
+        empresa_nombre=str(emp_res.data[0].get("nombre") or empresa_id),
+        allowed_addresses=addresses,
+        numbers=numbers,
+    )
+    await sb_query(
+        lambda tid=inbound["id"], eid=empresa_id: supabase.table("empresas")
+        .update({"sip_inbound_trunk_id": tid})
+        .eq("id", eid)
+        .execute()
+    )
+    return {**inbound, "source_trunk": trunk, "candidate_addresses": addresses}
 
 
 def _resolve_target_extension(
