@@ -249,7 +249,7 @@ def _normalize_yeastar_pbx_url(raw_url: str, api_mode: str) -> tuple[str, int]:
 
 
 async def _get_yeastar_config(empresa_id: int) -> dict | None:
-    await sb_query(
+    res = await sb_query(
         lambda eid=empresa_id: supabase.table("company_yeastar_configs")
         .select("id, empresa_id, api_url, api_port, api_mode, api_username, api_password, is_active, enabled_capabilities, created_at, updated_at")
         .eq("empresa_id", eid)
@@ -653,7 +653,7 @@ async def save_yeastar_config(
     else:
         raise HTTPException(status_code=400, detail="Client Secret es obligatorio para una configuraciÃ³n nueva")
 
-    res = await sb_query(
+    await sb_query(
         lambda d=update_data: supabase.table("company_yeastar_configs")
         .upsert(d, on_conflict="empresa_id")
         .execute()

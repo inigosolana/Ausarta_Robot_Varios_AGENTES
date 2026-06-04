@@ -197,3 +197,10 @@ async def cache_set(
         ttl_seconds,
         empresa_id=empresa_id,
     )
+
+
+async def cache_delete(key: str, *, empresa_id: Optional[int] = None) -> None:
+    """Elimina una entrada de cache respetando el aislamiento por tenant."""
+    r = await get_redis()
+    full_key = build_tenant_redis_key(f"{CACHE_PREFIX}{key}", empresa_id)
+    await r.delete(full_key)

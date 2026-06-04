@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 
 import aiohttp
 
-from services.redis_service import cache_get, cache_set
+from services.redis_service import cache_delete, cache_get, cache_set
 
 logger = logging.getLogger("api-backend")
 
@@ -172,17 +172,21 @@ class YeastarClient:
         query = f"?{urlencode({'token': token})}" if token else ""
         return await self._request("POST", f"/api/v2.0.0/{path}{query}", json_payload=payload)
 
-    async def get_access_token(self) -> str:
+    async def get_access_token(self, *, force_refresh: bool = False) -> str:
         cache_key = _token_cache_key(self.base_url, self.api_mode, self.client_id)
-        try:
-            cached = await cache_get(
-                cache_key,
-                empresa_id=int(self.tenant_id) if self.tenant_id is not None else None,
-            )
-            if cached:
-                return cached
-        except Exception as cache_err:
-            logger.warning("[Yeastar] [%s] Cache no disponible: %s", self.tenant_label, cache_err)
+        tenant_id = int(self.tenant_id) if self.tenant_id is not None else None
+        if force_refresh:
+            try:
+                await cache_delete(cache_key, empresa_id=tenant_id)
+            except Exception as cache_err:
+                logger.warning("[Yeastar] [%s] No se pudo invalidar token: %s", self.tenant_label, cache_err)
+        else:
+            try:
+                cached = await cache_get(cache_key, empresa_id=tenant_id)
+                if cached:
+                    return cached
+            except Exception as cache_err:
+                logger.warning("[Yeastar] [%s] Cache no disponible: %s", self.tenant_label, cache_err)
 
         try:
             if self.api_mode == "cloud_pbx":
@@ -221,7 +225,7 @@ class YeastarClient:
                     cache_key,
                     token,
                     _TOKEN_TTL_SECONDS,
-                    empresa_id=int(self.tenant_id) if self.tenant_id is not None else None,
+                    empresa_id=tenant_id,
                 )
             except Exception as cache_err:
                 logger.warning("[Yeastar] [%s] No se pudo cachear token: %s", self.tenant_label, cache_err)
@@ -229,6 +233,24 @@ class YeastarClient:
             return token
         except YeastarConnectionError as exc:
             raise YeastarAuthError(f"[{self.tenant_label}] Fallo al conectar para auth: {exc}") from exc
+
+    @staticmethod
+    def _token_expired(response: dict[str, Any]) -> bool:
+        return response.get("errcode") == 10004 or str(response.get("errmsg") or "").upper() == "TOKEN EXPIRED"
+
+    async def _authenticated_pseries_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        token = await self.get_access_token()
+        response = await self._pseries_request(method, path, payload=payload, token=token)
+        if self._token_expired(response):
+            token = await self.get_access_token(force_refresh=True)
+            response = await self._pseries_request(method, path, payload=payload, token=token)
+        return response
 
     async def test_connection(self) -> tuple[bool, str]:
         try:
@@ -243,8 +265,8 @@ class YeastarClient:
             return False, f"Error inesperado: {exc}"
 
     async def list_trunks(self) -> list[dict[str, Any]]:
-        token = await self.get_access_token()
         if self.api_mode == "cloud_pbx":
+            token = await self.get_access_token()
             response = await self._cloud_request("trunk/list", token=token)
             if str(response.get("status") or "").lower() != "success":
                 raise YeastarConnectionError(
@@ -252,7 +274,7 @@ class YeastarClient:
                 )
             data = response.get("trunklist") or []
         else:
-            response = await self._pseries_request("GET", "trunk/list", token=token)
+            response = await self._authenticated_pseries_request("GET", "trunk/list")
             if response.get("errcode") not in (None, 0):
                 raise YeastarConnectionError(
                     f"[{self.tenant_label}] {_format_yeastar_error(response, api_mode=self.api_mode)}"
@@ -278,8 +300,8 @@ class YeastarClient:
         return trunks
 
     async def list_extensions(self) -> list[dict[str, Any]]:
-        token = await self.get_access_token()
         if self.api_mode == "cloud_pbx":
+            token = await self.get_access_token()
             response = await self._cloud_request("extension/list", token=token)
             if str(response.get("status") or "").lower() != "success":
                 raise YeastarConnectionError(
@@ -287,7 +309,7 @@ class YeastarClient:
                 )
             data = response.get("extlist") or []
         else:
-            response = await self._pseries_request("GET", "extension/list", token=token)
+            response = await self._authenticated_pseries_request("GET", "extension/list")
             if response.get("errcode") not in (None, 0):
                 raise YeastarConnectionError(
                     f"[{self.tenant_label}] {_format_yeastar_error(response, api_mode=self.api_mode)}"
@@ -331,9 +353,9 @@ class YeastarClient:
             return "Error"
 
     async def transfer_call(self, call_id: str, target_extension: str) -> dict[str, Any]:
-        token = await self.get_access_token()
         try:
             if self.api_mode == "cloud_pbx":
+                token = await self.get_access_token()
                 response = await self._cloud_request(
                     "call/transfer",
                     token=token,
@@ -349,10 +371,9 @@ class YeastarClient:
                     )
                 return response
 
-            response = await self._pseries_request(
+            response = await self._authenticated_pseries_request(
                 "POST",
                 "call/transfer",
-                token=token,
                 payload={"channelid": call_id, "number": target_extension},
             )
             if response.get("errcode") != 0:
