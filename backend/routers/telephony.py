@@ -249,7 +249,7 @@ def _normalize_yeastar_pbx_url(raw_url: str, api_mode: str) -> tuple[str, int]:
 
 
 async def _get_yeastar_config(empresa_id: int) -> dict | None:
-    res = await sb_query(
+    await sb_query(
         lambda eid=empresa_id: supabase.table("company_yeastar_configs")
         .select("id, empresa_id, api_url, api_port, api_mode, api_username, api_password, is_active, enabled_capabilities, created_at, updated_at")
         .eq("empresa_id", eid)
@@ -656,15 +656,13 @@ async def save_yeastar_config(
     res = await sb_query(
         lambda d=update_data: supabase.table("company_yeastar_configs")
         .upsert(d, on_conflict="empresa_id")
-        .select("id, empresa_id, api_url, api_port, api_mode, api_username, api_password, is_active, enabled_capabilities")
         .execute()
     )
 
-    if not res.data:
+    row = await _get_yeastar_config(int(target_empresa_id))
+    if not row:
         raise HTTPException(status_code=500, detail="Error al guardar la configuración Yeastar")
 
-    row = res.data[0]
-    
     return _yeastar_config_to_response(row)
 
 
