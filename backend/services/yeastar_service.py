@@ -2,8 +2,8 @@
 Async client for Yeastar APIs.
 
 Supported modes:
-  - pseries: OAuth2 client_credentials on /api/v2.0/token
-  - cloud_pbx: login/token flow on /api/v2.0.0/login
+  - pseries: P-Series OpenAPI on /openapi/v1.0
+  - cloud_pbx: legacy Cloud PBX login/token flow on /api/v2.0.0
 """
 from __future__ import annotations
 
@@ -102,7 +102,10 @@ class YeastarClient:
 
     def get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(timeout=_TIMEOUT)
+            self._session = aiohttp.ClientSession(
+                timeout=_TIMEOUT,
+                headers={"User-Agent": "OpenAPI"},
+            )
         return self._session
 
     async def close(self) -> None:
@@ -156,13 +159,8 @@ class YeastarClient:
         payload: dict[str, Any] | None = None,
         token: str | None = None,
     ) -> dict[str, Any]:
-        return await self._request(
-            method,
-            path,
-            json_payload=payload,
-            token=token,
-            auth_header=bool(token),
-        )
+        query = f"?{urlencode({'access_token': token})}" if token else ""
+        return await self._request(method, f"/openapi/v1.0/{path}{query}", json_payload=payload)
 
     async def _cloud_request(
         self,
@@ -204,16 +202,15 @@ class YeastarClient:
                     )
                 token = str(data["token"])
             else:
-                data = await self._request(
+                data = await self._pseries_request(
                     "POST",
-                    "/api/v2.0/token",
-                    json_payload={
-                        "grant_type": "client_credentials",
-                        "client_id": self.client_id,
-                        "client_secret": self.client_secret,
+                    "get_token",
+                    payload={
+                        "username": self.client_id,
+                        "password": self.client_secret,
                     },
                 )
-                if data.get("errcode") not in (None, 0) and "access_token" not in data:
+                if data.get("errcode") not in (None, 0) or "access_token" not in data:
                     raise YeastarAuthError(
                         f"[{self.tenant_label}] {_format_yeastar_error(data, api_mode=self.api_mode)}"
                     )
@@ -255,7 +252,7 @@ class YeastarClient:
                 )
             data = response.get("trunklist") or []
         else:
-            response = await self._pseries_request("GET", "/api/v2.0/trunk/list", token=token)
+            response = await self._pseries_request("GET", "trunk/list", token=token)
             if response.get("errcode") not in (None, 0):
                 raise YeastarConnectionError(
                     f"[{self.tenant_label}] {_format_yeastar_error(response, api_mode=self.api_mode)}"
@@ -290,7 +287,7 @@ class YeastarClient:
                 )
             data = response.get("extlist") or []
         else:
-            response = await self._pseries_request("GET", "/api/v2.0/extension/list", token=token)
+            response = await self._pseries_request("GET", "extension/list", token=token)
             if response.get("errcode") not in (None, 0):
                 raise YeastarConnectionError(
                     f"[{self.tenant_label}] {_format_yeastar_error(response, api_mode=self.api_mode)}"
@@ -354,9 +351,9 @@ class YeastarClient:
 
             response = await self._pseries_request(
                 "POST",
-                "/api/v2.0/pbx/call/transfer",
+                "call/transfer",
                 token=token,
-                payload={"callid": call_id, "transfer_to": target_extension},
+                payload={"channelid": call_id, "number": target_extension},
             )
             if response.get("errcode") != 0:
                 raise YeastarConnectionError(

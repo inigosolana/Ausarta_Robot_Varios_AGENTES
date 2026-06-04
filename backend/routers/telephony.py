@@ -229,22 +229,22 @@ def _normalize_test_outbound_phone(raw: str) -> str:
 def _split_yeastar_api_url(raw_url: str) -> tuple[str, int]:
     url = (raw_url or "").strip().rstrip("/")
     if not url:
-        return "", 8088
+        return "", 0
 
     try:
         from urllib.parse import urlparse
         parsed = urlparse(url if "://" in url else f"https://{url}")
-        port = parsed.port or 8088
+        port = parsed.port or 0
         netloc = parsed.hostname or parsed.netloc or url
         scheme = parsed.scheme or "https"
         return f"{scheme}://{netloc}", int(port)
     except Exception:
-        return url, 8088
+        return url, 0
 
 
 def _normalize_yeastar_pbx_url(raw_url: str, api_mode: str) -> tuple[str, int]:
     api_url, parsed_port = _split_yeastar_api_url(raw_url)
-    default_port = 443 if api_mode == "cloud_pbx" else 8088
+    default_port = 443
     return api_url, parsed_port or default_port
 
 
@@ -263,7 +263,7 @@ async def _get_yeastar_config(empresa_id: int) -> dict | None:
 def _yeastar_config_to_response(row: dict) -> dict:
     api_url = str(row.get("api_url") or "").rstrip("/")
     api_mode = str(row.get("api_mode") or "pseries")
-    default_port = 443 if api_mode == "cloud_pbx" else 8088
+    default_port = 443
     api_port = int(row.get("api_port") or default_port)
     tail = api_url.rsplit("/", 1)[-1]
     yeastar_pbx_url = f"{api_url}:{api_port}" if api_url and f":{api_port}" not in tail else api_url
@@ -290,7 +290,7 @@ def _infer_yeastar_api_mode(raw_url: str, explicit_mode: str | None = None) -> s
 def _yeastar_client_from_config(row: dict) -> YeastarClient:
     api_url = str(row.get("api_url") or "").rstrip("/")
     api_mode = _infer_yeastar_api_mode(api_url, row.get("api_mode"))
-    default_port = 443 if api_mode == "cloud_pbx" else 8088
+    default_port = 443
     api_port = int(row.get("api_port") or default_port)
     tail = api_url.rsplit("/", 1)[-1]
     pbx_url = f"{api_url}:{api_port}" if api_url and f":{api_port}" not in tail else api_url

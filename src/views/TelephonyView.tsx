@@ -346,7 +346,7 @@ const TelephonyView: React.FC = () => {
           <div className="text-sm text-blue-900/90 space-y-3 leading-relaxed">
             <p>
               {isCloudMode ? (
-                <>En Yeastar Cloud PBX usa las credenciales de API y el endpoint <strong>/api/v2.0.0/login</strong>. Ausarta enviara la contrasena con hash MD5 como pide la API oficial.</>
+                <>Modo legacy Cloud PBX. Usa usuario y contrasena API para el endpoint <strong>/api/v2.0.0/login</strong>.</>
               ) : (
                 <>Entra al panel de administracion de Yeastar P-Series y ve a <strong>Integraciones / API</strong>. Crea una nueva conexion con esta configuracion:</>
               )}
@@ -513,15 +513,15 @@ const TelephonyView: React.FC = () => {
                     onChange={e => handleChange('yeastar_api_mode', e.target.value)}
                     className="w-full h-10 px-4 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
                   >
-                    <option value="pseries">Yeastar P-Series</option>
-                    <option value="cloud_pbx">Yeastar Cloud PBX</option>
+                    <option value="pseries">Yeastar P-Series OpenAPI</option>
+                    <option value="cloud_pbx">Yeastar Cloud PBX legacy</option>
                   </select>
                 </div>
                 <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-xs text-blue-900">
                   {isCloudMode ? (
-                    <>Cloud PBX usa <code>/api/v2.0.0/login</code> y <code>/api/v2.0.0/extension/list</code>.</>
+                    <>Cloud PBX legacy usa <code>/api/v2.0.0/login</code> y <code>/api/v2.0.0/extension/list</code>.</>
                   ) : (
-                    <>P-Series usa <code>/api/v2.0/token</code> y endpoints <code>/api/v2.0</code> con Bearer token.</>
+                    <>P-Series OpenAPI usa <code>/openapi/v1.0/get_token</code> y endpoints <code>/openapi/v1.0</code>.</>
                   )}
                 </div>
               </div>
