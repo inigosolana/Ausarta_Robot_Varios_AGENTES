@@ -824,11 +824,17 @@ async def _execute_yeastar_transfer(
         or datos_extra.get("yeastar_call_id")
         or room_name
     )
+    resolved_channel_id = str(datos_extra.get("yeastar_channel_id") or "").strip()
+    if not resolved_channel_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Falta yeastar_channel_id del webhook 30011 para transferir la llamada.",
+        )
     resolved_extension = _resolve_target_extension(datos_extra, target_extension)
 
     try:
         async with _yeastar_client_from_config(emp) as client:
-            await client.transfer_call(str(resolved_call_id), resolved_extension)
+            await client.transfer_call(resolved_channel_id, resolved_extension)
     except Exception as exc:
         logger.error(
             f"[transfer] Fallo Yeastar empresa={empresa_id} survey={survey_id} "
@@ -887,8 +893,44 @@ async def transfer_call_to_human(payload: CallTransferRequest):
         raise HTTPException(status_code=400, detail="empresa_id es obligatorio")
 
     call_id = (payload.call_id or "").strip()
+    survey_id = payload.survey_id or _extract_encuesta_id_from_room(room_name)
+    datos_extra: dict = {}
+    if survey_id:
+        enc_res = await sb_query(
+            lambda sid=survey_id: supabase.table("encuestas")
+            .select("datos_extra")
+            .eq("id", sid)
+            .limit(1)
+            .execute()
+        )
+        datos_extra = _parse_datos_extra(
+            enc_res.data[0].get("datos_extra") if enc_res.data else {}
+        )
+        call_id = str(
+            datos_extra.get("yeastar_callid")
+            or datos_extra.get("yeastar_call_id")
+            or call_id
+        ).strip()
+    channel_id = str(datos_extra.get("yeastar_channel_id") or "").strip()
     if not call_id:
         raise HTTPException(status_code=400, detail="call_id es obligatorio")
+    if call_id == room_name:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "La llamada no tiene call_id de Yeastar. Solo se puede transferir a una "
+                "extension interna si la llamada ha pasado por Yeastar y se ha recibido "
+                "el webhook 30011."
+            ),
+        )
+    if not channel_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "La llamada no tiene channel_id de Yeastar. Comprueba que el webhook "
+                "30011 Call State Changed esta activo antes de intentar transferir."
+            ),
+        )
 
     extension = (payload.extension or "1000").strip()
     empresa_id = int(payload.empresa_id)
@@ -898,7 +940,7 @@ async def transfer_call_to_human(payload: CallTransferRequest):
     try:
         async with _yeastar_client_from_config(config) as yeastar_client:
             ext_status = await yeastar_client.get_extension_status(extension)
-            if ext_status != "Idle":
+            if str(ext_status).strip().lower() not in {"idle", "available"}:
                 logger.info(
                     f"[transfer] ExtensiÃ³n {extension} no disponible (status={ext_status}) "
                     f"empresa={empresa_id} room={room_name}"
@@ -911,7 +953,7 @@ async def transfer_call_to_human(payload: CallTransferRequest):
                     },
                 )
 
-            await yeastar_client.transfer_call(call_id, extension)
+            await yeastar_client.transfer_call(channel_id, extension)
     except HTTPException:
         raise
     except Exception as exc:
@@ -932,10 +974,6 @@ async def transfer_call_to_human(payload: CallTransferRequest):
                     "status": ext_status,
                 },
             )
-
-    survey_id = payload.survey_id
-    if survey_id is None:
-        survey_id = _extract_encuesta_id_from_room(room_name)
 
     if survey_id:
         motivo_text = (payload.motivo or "Transferencia a agente humano").strip()

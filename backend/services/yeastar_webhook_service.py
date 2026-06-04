@@ -62,6 +62,35 @@ def normalize_yeastar_webhook_payload(payload: dict) -> tuple[str | None, list[s
     return call_id, phones
 
 
+def extract_yeastar_channel_id(payload: dict) -> str | None:
+    """Obtiene el canal de la parte externa a transferir desde el evento 30011."""
+    msg = payload.get("msg")
+    if isinstance(msg, str):
+        try:
+            msg = json.loads(msg)
+        except Exception:
+            msg = {}
+    if not isinstance(msg, dict):
+        return None
+
+    members = msg.get("members")
+    if isinstance(members, str):
+        try:
+            members = json.loads(members)
+        except Exception:
+            members = []
+    if not isinstance(members, list):
+        return None
+
+    for section in ("inbound", "outbound", "extension", "internal"):
+        for member in members:
+            block = member.get(section) if isinstance(member, dict) else None
+            channel_id = block.get("channel_id") if isinstance(block, dict) else None
+            if channel_id:
+                return str(channel_id)
+    return None
+
+
 def _phone_lookup_values(phone_candidates: list[str]) -> list[str]:
     values: set[str] = set()
     for raw_phone in phone_candidates:
@@ -105,6 +134,7 @@ async def process_yeastar_webhook_payload(payload: dict) -> None:
     try:
         event_label = payload.get("action") or payload.get("type")
         call_id, phone_candidates = normalize_yeastar_webhook_payload(payload)
+        channel_id = extract_yeastar_channel_id(payload)
         logger.info(
             "[Yeastar Worker] Evento %s - callid=%s, telefonos=%d",
             event_label,
@@ -142,6 +172,8 @@ async def process_yeastar_webhook_payload(payload: dict) -> None:
 
         extra = _parse_extra(row.get("datos_extra"))
         extra["yeastar_callid"] = str(call_id)
+        if channel_id:
+            extra["yeastar_channel_id"] = channel_id
         await sb_query(
             lambda eid=row["id"], ex=extra: supabase.table("encuestas")
             .update({"datos_extra": ex})

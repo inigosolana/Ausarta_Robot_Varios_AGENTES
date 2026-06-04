@@ -352,7 +352,7 @@ class YeastarClient:
             logger.warning("[Yeastar] [%s] get_extension_status(%s): %s", self.tenant_label, extension, exc)
             return "Error"
 
-    async def transfer_call(self, call_id: str, target_extension: str) -> dict[str, Any]:
+    async def transfer_call(self, channel_id: str, target_extension: str) -> dict[str, Any]:
         try:
             if self.api_mode == "cloud_pbx":
                 token = await self.get_access_token()
@@ -360,7 +360,7 @@ class YeastarClient:
                     "call/transfer",
                     token=token,
                     payload={
-                        "channelid": call_id,
+                        "channelid": channel_id,
                         "number": target_extension,
                     },
                 )
@@ -374,7 +374,11 @@ class YeastarClient:
             response = await self._authenticated_pseries_request(
                 "POST",
                 "call/transfer",
-                payload={"channelid": call_id, "number": target_extension},
+                payload={
+                    "type": "blind",
+                    "channel_id": channel_id,
+                    "number": target_extension,
+                },
             )
             if response.get("errcode") != 0:
                 raise YeastarConnectionError(
@@ -385,9 +389,9 @@ class YeastarClient:
             raise
         except Exception as exc:
             logger.error(
-                "[Yeastar] [%s] Excepcion durante transfer_call (call_id=%s, ext=%s): %s",
+                "[Yeastar] [%s] Excepcion durante transfer_call (channel_id=%s, ext=%s): %s",
                 self.tenant_label,
-                call_id,
+                channel_id,
                 target_extension,
                 exc,
             )
