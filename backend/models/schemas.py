@@ -128,7 +128,7 @@ class YeastarPSeriesConfigBase(BaseModel):
 
 class YeastarPSeriesConfigCreate(YeastarPSeriesConfigBase):
     """Used on POST — includes the secret (write-only)."""
-    yeastar_client_secret: str
+    yeastar_client_secret: Optional[str] = None
     empresa_id: Optional[int] = None
 
 

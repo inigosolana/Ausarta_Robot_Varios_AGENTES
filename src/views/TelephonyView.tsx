@@ -40,6 +40,25 @@ const EMPTY_FORM: YeastarConfig = {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+const formatApiError = (detail: unknown, fallback: string) => {
+  if (!detail) return fallback;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item: any) => {
+        const path = Array.isArray(item?.loc) ? item.loc.join('.') : '';
+        const msg = item?.msg || item?.message || JSON.stringify(item);
+        return path ? `${path}: ${msg}` : msg;
+      })
+      .join(' | ');
+  }
+  if (typeof detail === 'object') {
+    const data = detail as any;
+    return data.message || data.msg || data.error || JSON.stringify(data);
+  }
+  return String(detail);
+};
+
 const TelephonyView: React.FC = () => {
   const { t } = useTranslation();
   const { profile, isPlatformOwner } = useAuth();
@@ -254,7 +273,7 @@ const TelephonyView: React.FC = () => {
       });
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData?.detail || `HTTP ${res.status}`);
+        throw new Error(formatApiError(errorData?.detail, `HTTP ${res.status}`));
       }
       const saved: YeastarConfig = await res.json();
       setSavedConfig(saved);
