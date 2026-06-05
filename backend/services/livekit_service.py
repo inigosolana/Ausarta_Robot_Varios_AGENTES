@@ -192,6 +192,7 @@ async def ensure_yeastar_inbound_trunk(
     empresa_nombre: str,
     allowed_addresses: list[str],
     numbers: list[str],
+    inbound_agent_id: int | None = None,
 ) -> dict:
     """Crea/reutiliza inbound LiveKit y su regla de despacho al agente."""
     clean_addresses = sorted({
@@ -213,6 +214,18 @@ async def ensure_yeastar_inbound_trunk(
             "provider": "yeastar",
             "empresa_id": empresa_id,
             "empresa_nombre": empresa_nombre,
+            "inbound_agent_id": inbound_agent_id,
+        },
+        ensure_ascii=True,
+    )
+    inbound_room_metadata = json.dumps(
+        {
+            "call_direction": "inbound",
+            "empresa_id": empresa_id,
+            "agent_id": inbound_agent_id,
+            "campana_id": 0,
+            "client_id": 0,
+            "survey_id": f"inbound_{empresa_id}",
         },
         ensure_ascii=True,
     )
@@ -265,40 +278,40 @@ async def ensure_yeastar_inbound_trunk(
         None,
     )
     if dispatch_rule:
-        dispatch_rule = await lkapi.sip.update_sip_dispatch_rule(
-            api.UpdateSIPDispatchRuleRequest(
-                sip_dispatch_rule_id=dispatch_rule.sip_dispatch_rule_id,
-                update=api.SIPDispatchRuleUpdate(
-                    name=rule_name,
-                    metadata=metadata,
-                    trunk_ids=api.ListUpdate(set=[trunk_id]),
-                    rule=api.SIPDispatchRule(
-                        dispatch_rule_individual=api.SIPDispatchRuleIndividual(
-                            room_prefix=f"yeastar_{empresa_id}_"
+        await lkapi.sip.delete_sip_dispatch_rule(
+            api.DeleteSIPDispatchRuleRequest(
+                sip_dispatch_rule_id=dispatch_rule.sip_dispatch_rule_id
+            )
+        )
+    dispatch_rule = await lkapi.sip.create_sip_dispatch_rule(
+        api.CreateSIPDispatchRuleRequest(
+            dispatch_rule=api.SIPDispatchRuleInfo(
+                name=rule_name,
+                metadata=metadata,
+                trunk_ids=[trunk_id],
+                attributes={
+                    "call_direction": "inbound",
+                    "empresa_id": str(empresa_id),
+                    "agent_id": str(inbound_agent_id or ""),
+                },
+                rule=api.SIPDispatchRule(
+                    dispatch_rule_individual=api.SIPDispatchRuleIndividual(
+                        room_prefix=f"yeastar_{empresa_id}_"
+                    )
+                ),
+                room_config=api.RoomConfiguration(
+                    max_participants=3,
+                    metadata=inbound_room_metadata,
+                    agents=[
+                        api.RoomAgentDispatch(
+                            agent_name=DEFAULT_AGENT_NAME,
+                            metadata=inbound_room_metadata,
                         )
-                    ),
+                    ],
                 ),
             )
         )
-    else:
-        dispatch_rule = await lkapi.sip.create_sip_dispatch_rule(
-            api.CreateSIPDispatchRuleRequest(
-                dispatch_rule=api.SIPDispatchRuleInfo(
-                    name=rule_name,
-                    metadata=metadata,
-                    trunk_ids=[trunk_id],
-                    rule=api.SIPDispatchRule(
-                        dispatch_rule_individual=api.SIPDispatchRuleIndividual(
-                            room_prefix=f"yeastar_{empresa_id}_"
-                        )
-                    ),
-                    room_config=api.RoomConfiguration(
-                        max_participants=3,
-                        agents=[api.RoomAgentDispatch(agent_name=DEFAULT_AGENT_NAME)],
-                    ),
-                )
-            )
-        )
+    )
 
     return {
         "id": trunk_id,

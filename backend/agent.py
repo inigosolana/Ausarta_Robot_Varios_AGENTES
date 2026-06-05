@@ -2121,6 +2121,51 @@ async def fetch_agent_config(survey_id: str, expected_empresa_id: str = "0") -> 
     return {}
 
 
+async def fetch_agent_config_by_agent_id(agent_id: str, expected_empresa_id: str = "0") -> dict:
+    """Consulta config directa por agent_id para llamadas entrantes SIP sin encuesta previa."""
+    cache_key = f"ausarta:agent_config:agent_{agent_id}:empresa_{expected_empresa_id or '0'}"
+    try:
+        redis_client = aioredis.from_url(_REDIS_URL, decode_responses=True)
+        try:
+            cached_raw = await redis_client.get(cache_key)
+            if cached_raw:
+                config = json.loads(cached_raw)
+                _validate_agent_config_tenant(config, expected_empresa_id)
+                logger.info(f"Config inbound desde Redis para agent_id {agent_id}")
+                return config
+        finally:
+            await redis_client.close()
+    except Exception as cache_err:
+        logger.warning(f"Redis cache miss/error para agent_id {agent_id}: {cache_err}")
+
+    server_url = BRIDGE_SERVER_URL_INTERNAL
+    query_empresa = f"&empresa_id={expected_empresa_id}" if expected_empresa_id and expected_empresa_id != "0" else ""
+    url = f"{server_url}/api/agent_config_by_agent/{agent_id}?_ts={int(asyncio.get_running_loop().time() * 1000)}{query_empresa}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            url,
+            timeout=5,
+            headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+        ) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"No se pudo obtener config por agent_id={agent_id} (HTTP {resp.status})")
+            config = await resp.json()
+            _validate_agent_config_tenant(config, expected_empresa_id)
+            try:
+                redis_client = aioredis.from_url(_REDIS_URL, decode_responses=True)
+                try:
+                    await redis_client.set(
+                        cache_key,
+                        json.dumps(config, ensure_ascii=False),
+                        ex=_AGENT_CONFIG_CACHE_TTL,
+                    )
+                finally:
+                    await redis_client.close()
+            except Exception as write_err:
+                logger.warning(f"No se pudo cachear config inbound agent_id={agent_id}: {write_err}")
+            return config
+
+
 # ============================================================================
 # FUNCIÓN PARA ENVIAR ALERTAS AL SISTEMA (VÍA ARQ)
 # ============================================================================
@@ -2280,8 +2325,13 @@ async def entrypoint(ctx: JobContext):
         await _safe_reject(f"metadata no JSON válido: {e}")
         return
 
-    if "campana_id" not in meta_data and "client_id" not in meta_data:
+    is_inbound_call = str(meta_data.get("call_direction") or "").lower() == "inbound"
+    inbound_agent_id = str(meta_data.get("agent_id") or "").strip()
+    if not is_inbound_call and "campana_id" not in meta_data and "client_id" not in meta_data:
         await _safe_reject("metadata sin campana_id/client_id")
+        return
+    if is_inbound_call and not inbound_agent_id:
+        await _safe_reject("metadata inbound sin agent_id")
         return
 
     # --- PASO 2: Extraer survey_id y empresa_id (Sello Multi-Tenant) ---
@@ -2307,6 +2357,8 @@ async def entrypoint(ctx: JobContext):
 
     # 3. Validación de Identidad Temprana Crítica
     # Permite survey_ids numéricos Y alfanuméricos (UUIDs, slugs, etc.)
+    if (not survey_id or survey_id == "0") and is_inbound_call:
+        survey_id = f"inbound_{empresa_id or '0'}"
     if not survey_id or survey_id == "0":
         await _safe_reject(f"Identidad inválida o corrupta: survey_id='{survey_id}'")
         return
@@ -2314,7 +2366,14 @@ async def entrypoint(ctx: JobContext):
     # --- PASO 1.5: Validar Sello Multi-Tenant ANTES de conectar ---
     try:
         # Obtenemos config y validamos que la sala es del mismo tenant que el config
-        agent_config = await fetch_agent_config(survey_id, expected_empresa_id=empresa_id)
+        if is_inbound_call and inbound_agent_id:
+            agent_config = await fetch_agent_config_by_agent_id(
+                inbound_agent_id,
+                expected_empresa_id=empresa_id,
+            )
+            agent_config["call_direction"] = "inbound"
+        else:
+            agent_config = await fetch_agent_config(survey_id, expected_empresa_id=empresa_id)
     except Exception as e:
         if "Violación de seguridad" in str(e):
             await _safe_reject(str(e))

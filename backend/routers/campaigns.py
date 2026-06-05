@@ -562,6 +562,64 @@ async def stop_campaign(campaign_id: int):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+@router.get("/agent_config_by_agent/{agent_id}")
+async def get_agent_config_by_agent(agent_id: int, empresa_id: Optional[int] = None):
+    """Config interna para llamadas entrantes SIP, donde no existe encuesta previa."""
+    if not supabase:
+        return JSONResponse(status_code=500, content={"error": "Supabase not connected"})
+    try:
+        query = supabase.table("agent_config").select("*").eq("id", agent_id).limit(1)
+        if empresa_id:
+            query = query.eq("empresa_id", empresa_id)
+        res_agent = query.execute()
+        if not res_agent.data:
+            return JSONResponse(status_code=404, content={"error": "Agent not found"})
+
+        agent_data = res_agent.data[0]
+        res_ai = supabase.table("ai_config").select("*").eq("agent_id", agent_id).execute()
+        ai_data = res_ai.data[0] if res_ai.data else {}
+        resolved_agent_type = (
+            agent_data.get("agent_type")
+            or agent_data.get("tipo_resultados")
+            or "SOPORTE_CLIENTE"
+        )
+        payload = {
+            "name": agent_data.get("name", "Bot"),
+            "greeting": agent_data.get("greeting", "Hola, has llamado a Ausarta."),
+            "instructions": agent_data.get("instructions", "Eres un asistente."),
+            "critical_rules": agent_data.get("critical_rules", ""),
+            "voice_id": agent_data.get("voice_id") or ai_data.get("tts_voice") or DEFAULT_AUSARTA_VOICE_ID,
+            "tts_model": ai_data.get("tts_model") or "sonic-multilingual",
+            "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
+            "language": ai_data.get("language") or "es",
+            "stt_provider": ai_data.get("stt_provider") or "deepgram",
+            "stt_model": ai_data.get("stt_model") or "nova-3",
+            "extraction_schema": [],
+            "company_context": agent_data.get("company_context") or "",
+            "enthusiasm_level": agent_data.get("enthusiasm_level") or "Normal",
+            "speaking_speed": agent_data.get("speaking_speed") or 1.0,
+            "agent_type": resolved_agent_type,
+            "tipo_resultados": agent_data.get("tipo_resultados") or resolved_agent_type,
+            "empresa_id": agent_data.get("empresa_id"),
+            "agent_id": agent_id,
+            "call_direction": "inbound",
+            "config_updated_at": agent_data.get("updated_at") or ai_data.get("updated_at"),
+            "agent_mode": agent_data.get("agent_mode") or "prompt",
+            "workflow_definition": agent_data.get("workflow_definition"),
+            "workflow_variables": agent_data.get("workflow_variables") or {},
+        }
+        return JSONResponse(
+            status_code=200,
+            content=payload,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+            },
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 # ──────────────────────────────────────────────
 # MOTOR DE CAMPAÑAS — GOTEO CONTROLADO (DRIP)
 # ──────────────────────────────────────────────

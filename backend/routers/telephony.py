@@ -844,12 +844,14 @@ async def _sync_yeastar_inbound_to_livekit(empresa_id: int, source_trunk_id: str
     )
     numbers = list(trunk.get("phone_numbers") or [])
     numbers.extend(row.get("ddi") for row in (outbound_res.data or []) if row.get("ddi"))
+    inbound_agent_id = await _resolve_inbound_agent_id(empresa_id)
 
     inbound = await ensure_yeastar_inbound_trunk(
         empresa_id=empresa_id,
         empresa_nombre=str(emp_res.data[0].get("nombre") or empresa_id),
         allowed_addresses=addresses,
         numbers=numbers,
+        inbound_agent_id=inbound_agent_id,
     )
     await sb_query(
         lambda tid=inbound["id"], eid=empresa_id: supabase.table("empresas")
@@ -858,6 +860,30 @@ async def _sync_yeastar_inbound_to_livekit(empresa_id: int, source_trunk_id: str
         .execute()
     )
     return {**inbound, "source_trunk": trunk, "candidate_addresses": addresses}
+
+
+async def _resolve_inbound_agent_id(empresa_id: int) -> int | None:
+    """Devuelve el agente preferido para llamadas entrantes de una empresa."""
+    res = await sb_query(
+        lambda eid=empresa_id: supabase.table("agent_config")
+        .select("id,name,agent_type,tipo_resultados")
+        .eq("empresa_id", eid)
+        .order("id")
+        .execute()
+    )
+    agents = res.data or []
+    if not agents:
+        return None
+    preferred = next(
+        (
+            agent for agent in agents
+            if "inbound" in str(agent.get("name") or "").lower()
+            or "recepcion" in str(agent.get("name") or "").lower()
+            or str(agent.get("agent_type") or agent.get("tipo_resultados") or "").upper() == "SOPORTE_CLIENTE"
+        ),
+        agents[0],
+    )
+    return int(preferred["id"]) if preferred.get("id") is not None else None
 
 
 def _resolve_target_extension(
