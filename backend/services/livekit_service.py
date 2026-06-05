@@ -13,6 +13,14 @@ DEFAULT_AGENT_NAME = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip
 
 logger = logging.getLogger("api-backend")
 
+
+def _livekit_safe_name(value: str) -> str:
+    """Normaliza nombres visibles para recursos SIP de LiveKit."""
+    import re
+
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", str(value or "").strip()).strip("_")
+    return cleaned.upper()[:40] or "EMPRESA"
+
 class LazyLiveKitAPI:
     def __init__(self, url, api_key, api_secret):
         self._url = url
@@ -197,7 +205,9 @@ async def ensure_yeastar_inbound_trunk(
     if not clean_numbers:
         raise ValueError("La troncal Yeastar no proporciona ningun DDI")
 
-    trunk_name = f"YEASTAR_INBOUND_{empresa_id}"
+    empresa_slug = _livekit_safe_name(empresa_nombre)
+    trunk_name = f"YEASTAR_INBOUND_{empresa_slug}_ID_{empresa_id}"
+    legacy_trunk_name = f"YEASTAR_INBOUND_{empresa_id}"
     metadata = json.dumps(
         {
             "provider": "yeastar",
@@ -212,7 +222,7 @@ async def ensure_yeastar_inbound_trunk(
         (
             item
             for item in (getattr(response, "items", []) or [])
-            if getattr(item, "name", "") == trunk_name
+            if getattr(item, "name", "") in {trunk_name, legacy_trunk_name}
         ),
         None,
     )
@@ -244,16 +254,33 @@ async def ensure_yeastar_inbound_trunk(
 
     trunk_id = getattr(trunk, "sip_trunk_id", "")
     rules = await lkapi.sip.list_sip_dispatch_rule(api.ListSIPDispatchRuleRequest())
-    rule_name = f"YEASTAR_DISPATCH_{empresa_id}"
+    rule_name = f"YEASTAR_DISPATCH_{empresa_slug}_ID_{empresa_id}"
+    legacy_rule_name = f"YEASTAR_DISPATCH_{empresa_id}"
     dispatch_rule = next(
         (
             item
             for item in (getattr(rules, "items", []) or [])
-            if getattr(item, "name", "") == rule_name
+            if getattr(item, "name", "") in {rule_name, legacy_rule_name}
         ),
         None,
     )
-    if not dispatch_rule:
+    if dispatch_rule:
+        dispatch_rule = await lkapi.sip.update_sip_dispatch_rule(
+            api.UpdateSIPDispatchRuleRequest(
+                sip_dispatch_rule_id=dispatch_rule.sip_dispatch_rule_id,
+                update=api.SIPDispatchRuleUpdate(
+                    name=rule_name,
+                    metadata=metadata,
+                    trunk_ids=api.ListUpdate(set=[trunk_id]),
+                    rule=api.SIPDispatchRule(
+                        dispatch_rule_individual=api.SIPDispatchRuleIndividual(
+                            room_prefix=f"yeastar_{empresa_id}_"
+                        )
+                    ),
+                ),
+            )
+        )
+    else:
         dispatch_rule = await lkapi.sip.create_sip_dispatch_rule(
             api.CreateSIPDispatchRuleRequest(
                 dispatch_rule=api.SIPDispatchRuleInfo(
