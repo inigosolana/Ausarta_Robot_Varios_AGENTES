@@ -12,7 +12,7 @@ Responsabilidades:
   - /api/calls/transfer: transferencia multi-tenant a agente humano (Yeastar).
   - /api/telephony/transfer: alias legacy del endpoint de transferencia.
 """
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request, HTTPException
 from fastapi.responses import JSONResponse, Response
 from models.schemas import (
     CallEndRequest,
@@ -585,13 +585,15 @@ async def create_citelia_outbound_trunk(
 @router.post("/api/empresas/{empresa_id}/inbound-trunks/sync-yeastar")
 async def sync_yeastar_inbound_trunk(
     empresa_id: int,
+    payload: dict | None = Body(default=None),
     current_user: CurrentUser = Depends(require_admin),
 ):
     """Crea/reutiliza inbound LiveKit desde la troncal leida por API Yeastar."""
     if not has_global_access(current_user):
         if not current_user.empresa_id or int(current_user.empresa_id) != int(empresa_id):
             raise HTTPException(status_code=403, detail="No tienes permisos para esta empresa")
-    inbound = await _sync_yeastar_inbound_to_livekit(empresa_id)
+    source_trunk_id = str((payload or {}).get("source_trunk_id") or "").strip() or None
+    inbound = await _sync_yeastar_inbound_to_livekit(empresa_id, source_trunk_id=source_trunk_id)
     return {"status": "ok", "inbound": inbound}
 
 
@@ -788,7 +790,7 @@ async def _load_yeastar_tenant_config(empresa_id: int) -> dict:
     return config
 
 
-async def _sync_yeastar_inbound_to_livekit(empresa_id: int) -> dict:
+async def _sync_yeastar_inbound_to_livekit(empresa_id: int, source_trunk_id: str | None = None) -> dict:
     """Provisiona inbound LiveKit y guarda su ID usando la troncal Yeastar."""
     emp_res = await sb_query(
         lambda eid=empresa_id: supabase.table("empresas")
@@ -806,10 +808,22 @@ async def _sync_yeastar_inbound_to_livekit(empresa_id: int) -> dict:
     if not trunks:
         raise HTTPException(status_code=409, detail="Yeastar no tiene ninguna troncal disponible")
 
-    trunk = next(
-        (item for item in trunks if str(item.get("status")) in {"1", "available", "active"}),
-        trunks[0],
-    )
+    if source_trunk_id:
+        trunk = next(
+            (
+                item for item in trunks
+                if str(item.get("id") or "") == source_trunk_id
+                or str(item.get("name") or "") == source_trunk_id
+            ),
+            None,
+        )
+        if not trunk:
+            raise HTTPException(status_code=404, detail="La troncal Yeastar seleccionada no existe")
+    else:
+        trunk = next(
+            (item for item in trunks if str(item.get("status")) in {"1", "available", "active"}),
+            trunks[0],
+        )
     addresses = [str(trunk.get("address") or "").strip()]
     try:
         import socket

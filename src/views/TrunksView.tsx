@@ -33,6 +33,8 @@ const TrunksView: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [citeliaDdi, setCiteliaDdi] = useState('');
   const [creatingCitelia, setCreatingCitelia] = useState(false);
+  const [syncingInbound, setSyncingInbound] = useState(false);
+  const [selectedYeastarTrunkId, setSelectedYeastarTrunkId] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [livekitTrunks, setLivekitTrunks] = useState<TelephonyTrunk[]>([]);
   const [yeastarTrunks, setYeastarTrunks] = useState<TelephonyTrunk[]>([]);
@@ -102,8 +104,14 @@ const TrunksView: React.FC = () => {
     setTrunksMsg(null);
     try {
       const data = await fetchTrunks(empresaId);
+      const nextYeastarTrunks = data.yeastar_trunks || [];
       setLivekitTrunks(data.livekit_trunks || []);
-      setYeastarTrunks(data.yeastar_trunks || []);
+      setYeastarTrunks(nextYeastarTrunks);
+      setSelectedYeastarTrunkId(prev => (
+        nextYeastarTrunks.some((trunk) => trunk.id === prev || trunk.name === prev)
+          ? prev
+          : nextYeastarTrunks[0]?.id || nextYeastarTrunks[0]?.name || ''
+      ));
       setTrunkErrors(data.errors || {});
     } catch (err: any) {
       setLivekitTrunks([]);
@@ -314,6 +322,42 @@ const TrunksView: React.FC = () => {
     }
   };
 
+  const syncInboundFromYeastar = async () => {
+    if (!selectedEmpresaId) return;
+    setSyncingInbound(true);
+    setMsg(null);
+    try {
+      const res = await apiFetch(`/api/empresas/${selectedEmpresaId}/inbound-trunks/sync-yeastar`, {
+        method: 'POST',
+        body: JSON.stringify({ source_trunk_id: selectedYeastarTrunkId || undefined }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      const trunk = json?.inbound || {};
+      if (!trunk?.id) throw new Error('LiveKit no devolvio ID de troncal entrante');
+      setInbound(trunk.id);
+      setRows(prev => prev.map(r => (
+        r.id === selectedEmpresaId
+          ? { ...r, sip_inbound_trunk_id: trunk.id }
+          : r
+      )));
+      setMsg({
+        ok: true,
+        text: trunk.created
+          ? `Inbound LiveKit creada desde Yeastar (${trunk.id})`
+          : `Inbound LiveKit actualizada desde Yeastar (${trunk.id})`,
+      });
+      await loadAvailableTrunks(selectedEmpresaId);
+    } catch (err: any) {
+      setMsg({ ok: false, text: err?.message || 'No se pudo crear la inbound LiveKit desde Yeastar' });
+    } finally {
+      setSyncingInbound(false);
+    }
+  };
+
   const openAddExt = () => {
     setExtModal({ open: true, mode: 'add', ext: {} });
   };
@@ -497,6 +541,48 @@ const TrunksView: React.FC = () => {
           />
           <p className="text-[11px] text-gray-400 mt-1">
             Reservado para uso de llamadas entrantes por empresa.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 space-y-3">
+          <div>
+            <h3 className="text-sm font-bold text-emerald-900">Crear inbound LiveKit desde Yeastar</h3>
+            <p className="text-xs text-emerald-700 mt-1">
+              Selecciona la troncal Yeastar y Ausarta creara o actualizara automaticamente la troncal entrante y la regla de dispatch en LiveKit.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex-1">
+              <label className="block text-xs font-semibold text-emerald-800 uppercase tracking-wider mb-1.5">
+                Troncal Yeastar origen
+              </label>
+              <select
+                value={selectedYeastarTrunkId}
+                onChange={(e) => setSelectedYeastarTrunkId(e.target.value)}
+                className="w-full h-10 px-3 rounded-xl border border-emerald-200 bg-white text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
+              >
+                {yeastarTrunks.length === 0 ? (
+                  <option value="">Sin troncales Yeastar disponibles</option>
+                ) : (
+                  yeastarTrunks.map((trunk, index) => (
+                    <option key={`${trunk.id}-${index}`} value={trunk.id || trunk.name || ''}>
+                      {trunk.name || trunk.id} - {phoneText(trunk)}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+            <button
+              onClick={syncInboundFromYeastar}
+              disabled={syncingInbound || !selectedEmpresaId || yeastarTrunks.length === 0}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={syncingInbound ? 'animate-spin' : ''} />
+              Crear inbound LiveKit
+            </button>
+          </div>
+          <p className="text-[11px] text-emerald-700">
+            Despues, Yeastar/CITELIA debe enrutar el DDI al SIP de LiveKit/Kamailio para que la llamada llegue al agente.
           </p>
         </div>
 
