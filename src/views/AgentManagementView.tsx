@@ -154,6 +154,9 @@ const AgentManagementView: React.FC = () => {
                 <TestCallModal
                     agentId={testCallAgent.id!}
                     agentName={testCallAgent.name}
+                    agentType={testCallAgent.agent_type || testCallAgent.tipo_resultados}
+                    empresaId={testCallAgent.empresa_id}
+                    empresaName={(testCallAgent as any).empresas?.nombre}
                     onClose={() => setTestCallAgent(null)}
                 />
             )}

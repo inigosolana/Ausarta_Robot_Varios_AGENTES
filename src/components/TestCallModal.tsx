@@ -24,11 +24,14 @@ import {
 import { supabase } from '../lib/supabase';
 import { SurveyResult } from '../types';
 import { CallResultModal } from './CallResultModal';
-import { apiFetch } from '../lib/apiFetch';
+import { apiFetch, fetchTrunks } from '../lib/apiFetch';
 
 interface Props {
     agentId: number;
     agentName: string;
+    agentType?: string | null;
+    empresaId?: number | null;
+    empresaName?: string | null;
     onClose: () => void;
 }
 
@@ -70,10 +73,13 @@ const AGENT_STATE_CONFIG: Record<AgentState, { icon: typeof Mic; color: string; 
     speaking:   { icon: Volume2, color: 'text-blue-500', bg: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800', text: 'Hablando…',    pulse: false },
 };
 
-export const TestCallModal: React.FC<Props> = ({ agentId, agentName, onClose }) => {
+export const TestCallModal: React.FC<Props> = ({ agentId, agentName, agentType, empresaId, empresaName, onClose }) => {
     const { t } = useTranslation();
 
     const [phone, setPhone] = useState('');
+    const [inboundNumbers, setInboundNumbers] = useState<string[]>([]);
+    const [inboundLoading, setInboundLoading] = useState(false);
+    const [inboundError, setInboundError] = useState('');
     const [phase, setPhase] = useState<Phase>('idle');
     const [errorMsg, setErrorMsg] = useState('');
     const [callId, setCallId] = useState<number | null>(null);
@@ -95,6 +101,10 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, onClose }) 
     const thinkingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const transcriptsEndRef = useRef<HTMLDivElement>(null);
     const entryCounter = useRef(0);
+    const normalizedAgentType = String(agentType || '').toUpperCase();
+    const isInboundAgent =
+        normalizedAgentType === 'SOPORTE_CLIENTE' ||
+        /\b(inbound|entrante|recepcion|recepcionista)\b/i.test(agentName || '');
 
     const cleanup = useCallback(() => {
         if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null; }
@@ -110,6 +120,32 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, onClose }) 
     }, []);
 
     useEffect(() => () => cleanup(), [cleanup]);
+
+    useEffect(() => {
+        if (!isInboundAgent || !empresaId) return;
+        let cancelled = false;
+        setInboundLoading(true);
+        setInboundError('');
+        fetchTrunks(empresaId)
+            .then((data) => {
+                if (cancelled) return;
+                const numbers = [
+                    ...(data.yeastar_trunks || []),
+                    ...(data.livekit_trunks || []),
+                ]
+                    .filter((trunk) => !trunk.direction || trunk.direction === 'inbound')
+                    .flatMap((trunk) => trunk.phone_numbers || [])
+                    .filter(Boolean);
+                setInboundNumbers(Array.from(new Set(numbers)));
+            })
+            .catch((err: any) => {
+                if (!cancelled) setInboundError(err?.message || 'No se pudieron cargar los numeros entrantes');
+            })
+            .finally(() => {
+                if (!cancelled) setInboundLoading(false);
+            });
+        return () => { cancelled = true; };
+    }, [empresaId, isInboundAgent]);
 
     // Elapsed-seconds ticker
     useEffect(() => {
@@ -389,6 +425,59 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, onClose }) 
                     {/* === IDLE / ERROR === */}
                     {(phase === 'idle' || phase === 'error') && (
                         <div className="p-8 space-y-5">
+                            {isInboundAgent ? (
+                                <div className="space-y-4">
+                                    <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+                                        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                                            {t('Prueba entrante', 'Prueba entrante')}
+                                        </p>
+                                        <p className="mt-1 text-sm text-emerald-900">
+                                            {t('Este agente no realiza llamadas salientes. Para probarlo, llama al numero entrante de la empresa.', 'Este agente no realiza llamadas salientes. Para probarlo, llama al numero entrante de la empresa.')}
+                                        </p>
+                                        {empresaName && (
+                                            <p className="mt-2 text-xs text-emerald-700">{empresaName}</p>
+                                        )}
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="block text-xs font-medium text-slate-500">
+                                            {t('Numero que debes llamar', 'Numero que debes llamar')}
+                                        </label>
+                                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 min-h-[50px]">
+                                            {inboundLoading ? (
+                                                <span className="inline-flex items-center gap-2 text-sm text-slate-500">
+                                                    <Loader2 size={16} className="animate-spin" />
+                                                    {t('Cargando numero entrante...', 'Cargando numero entrante...')}
+                                                </span>
+                                            ) : inboundNumbers.length ? (
+                                                <div className="space-y-1">
+                                                    {inboundNumbers.map((num) => (
+                                                        <div key={num} className="font-mono text-base font-semibold text-slate-900">{num}</div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-sm text-slate-500">
+                                                    {t('No hay numero entrante sincronizado para esta empresa.', 'No hay numero entrante sincronizado para esta empresa.')}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {(inboundError || !empresaId) && (
+                                        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-100 rounded-xl">
+                                            <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+                                            <p className="text-sm text-amber-700">
+                                                {inboundError || t('El agente no tiene empresa asociada.', 'El agente no tiene empresa asociada.')}
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    <div className="rounded-xl border border-slate-100 bg-white p-4 text-sm text-slate-600">
+                                        {t('Flujo esperado: llamas a ese DDI, Yeastar/CITELIA enruta la llamada a LiveKit y LiveKit abre la sala con este agente.', 'Flujo esperado: llamas a ese DDI, Yeastar/CITELIA enruta la llamada a LiveKit y LiveKit abre la sala con este agente.')}
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
                             <div className="space-y-2">
                                 <label className="block text-xs font-medium text-slate-500">
                                     {t('Tu número de teléfono', 'Tu número de teléfono')}
@@ -417,6 +506,8 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, onClose }) 
                                 <Phone size={18} />
                                 {t('Llamar Ahora', 'Llamar Ahora')}
                             </button>
+                                </>
+                            )}
                         </div>
                     )}
 

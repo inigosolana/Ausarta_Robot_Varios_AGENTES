@@ -94,6 +94,7 @@ export interface AgentConfig {
   critical_rules?: string;
   greeting: string;
   tipo_resultados?: string;
+  agent_type?: string;
   company_context?: string;
   enthusiasm_level?: 'Bajo' | 'Normal' | 'Alto' | 'Extremo' | string;
   voice_id?: string;
