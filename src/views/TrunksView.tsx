@@ -64,6 +64,32 @@ const TrunksView: React.FC = () => {
     [rows, selectedEmpresaId],
   );
 
+  const companyNumbers = useMemo(() => {
+    const allTrunks = [...livekitTrunks, ...yeastarTrunks];
+    const inbound = new Set<string>();
+    const outbound = new Set<string>();
+    const unknown = new Set<string>();
+
+    allTrunks.forEach((trunk) => {
+      const target =
+        trunk.direction === 'inbound'
+          ? inbound
+          : trunk.direction === 'outbound'
+            ? outbound
+            : unknown;
+      (trunk.phone_numbers || []).forEach((num) => {
+        if (num) target.add(num);
+      });
+    });
+
+    return {
+      inbound: Array.from(inbound),
+      outbound: Array.from(outbound),
+      unknown: Array.from(unknown),
+      all: Array.from(new Set([...inbound, ...outbound, ...unknown])),
+    };
+  }, [livekitTrunks, yeastarTrunks]);
+
   const loadEmpresas = async () => {
     setLoading(true);
     setMsg(null);
@@ -481,6 +507,68 @@ const TrunksView: React.FC = () => {
         </div>
 
         {/* ── Troncales SIP ─────────────────────────────────────────────── */}
+        <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Numeros de esta empresa</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Numeros detectados en LiveKit y Yeastar para {selected?.nombre || 'la empresa seleccionada'}.
+              </p>
+            </div>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600 border border-slate-200">
+              {trunksLoading ? 'Cargando...' : `${companyNumbers.all.length} numero(s)`}
+            </span>
+          </div>
+
+          {trunksLoading ? (
+            <div className="mt-4 flex items-center gap-2 text-sm text-slate-500">
+              <RefreshCw size={14} className="animate-spin" />
+              Cargando numeros...
+            </div>
+          ) : companyNumbers.all.length === 0 ? (
+            <div className="mt-4 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Esta empresa todavia no tiene numeros detectados. Sincroniza Yeastar o crea una troncal LiveKit para que aparezcan aqui.
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-emerald-100 bg-white p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Entrantes</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {companyNumbers.inbound.length ? companyNumbers.inbound.map((num) => (
+                    <span key={`in-${num}`} className="rounded-full bg-emerald-50 px-3 py-1 font-mono text-xs font-semibold text-emerald-800">
+                      {num}
+                    </span>
+                  )) : <span className="text-xs text-slate-400">Sin numeros entrantes</span>}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-blue-100 bg-white p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Salientes</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {companyNumbers.outbound.length ? companyNumbers.outbound.map((num) => (
+                    <span key={`out-${num}`} className="rounded-full bg-blue-50 px-3 py-1 font-mono text-xs font-semibold text-blue-800">
+                      {num}
+                    </span>
+                  )) : <span className="text-xs text-slate-400">Sin numeros salientes</span>}
+                </div>
+              </div>
+
+              {companyNumbers.unknown.length > 0 && (
+                <div className="rounded-lg border border-slate-200 bg-white p-3 sm:col-span-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Otros numeros detectados</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {companyNumbers.unknown.map((num) => (
+                      <span key={`unk-${num}`} className="rounded-full bg-slate-100 px-3 py-1 font-mono text-xs font-semibold text-slate-700">
+                        {num}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         <div>
           <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
             Troncal saliente (SIP_OUTBOUND_TRUNK_ID)
