@@ -151,6 +151,22 @@ services:
       retries: 5
       start_period: 15s
 
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: ausarta-dozzle
+    restart: unless-stopped
+    # Visor centralizado de logs Docker. Solo expuesto en localhost del servidor.
+    # Acceso recomendado: ssh -L 9999:127.0.0.1:9999 usuario@15.216.15.30
+    ports:
+      - "127.0.0.1:9999:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      DOZZLE_NO_ANALYTICS: "true"
+      DOZZLE_LEVEL: "info"
+    networks:
+      - ausarta-network
+
 networks:
   ausarta-network:
     driver: bridge
