@@ -22,10 +22,15 @@ export async function requestPasswordReset(
             if (data?.error) {
                 detail = data.error;
             } else if (Array.isArray(data?.detail)) {
-                detail = data.detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('. ')
-                    || detail;
+                const msgs = data.detail
+                    .map((d: { msg?: string }) => d.msg)
+                    .filter(Boolean)
+                    .map((m: string) =>
+                        m === 'Field required' ? 'El email es obligatorio' : m,
+                    );
+                detail = msgs.join('. ') || detail;
             } else if (typeof data?.detail === 'string') {
-                detail = data.detail;
+                detail = data.detail === 'Field required' ? 'El email es obligatorio' : data.detail;
             }
         } catch {
             /* ignore */

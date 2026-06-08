@@ -8,7 +8,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from services.password_reset_service import send_password_reset_email
 from services.rate_limiter import limiter
@@ -29,11 +29,24 @@ class PasswordResetRequest(BaseModel):
 
 @router.post("/password-reset")
 @limiter.limit("8/minute")
-async def request_password_reset(request: Request, body: PasswordResetRequest):
+async def request_password_reset(request: Request):
     """
     Solicita un email de recuperación con plantilla Ausarta (español + instrucciones).
     Respuesta genérica para no revelar si el email existe.
+
+    Nota: el body se lee con request.json() (no Pydantic en la firma) porque slowapi
+    y el body injection de FastAPI no conviven bien y devuelven 422 "Field required".
     """
+    try:
+        raw = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Petición inválida"})
+
+    try:
+        body = PasswordResetRequest.model_validate(raw)
+    except ValidationError:
+        return JSONResponse(status_code=400, content={"error": "Introduce un email válido"})
+
     try:
         await send_password_reset_email(body.email, body.redirect_to)
     except ValueError:
