@@ -159,7 +159,7 @@ async def list_empresas_for_notion(
 
     emp_res = await sb_query(
         lambda: supabase.table("empresas")
-        .select("id,nombre,plan,max_llamadas_mes,llamadas_consumidas_mes,max_agentes,updated_at,created_at")
+        .select("id,nombre,plan,max_llamadas_mes,llamadas_consumidas_mes,max_agentes,created_at")
         .order("nombre")
         .execute()
     )
@@ -187,7 +187,7 @@ async def list_empresas_for_notion(
             "pct_uso": pct,
             "agentes": agent_counts.get(int(row["id"]), 0),
             "max_agentes": int(row.get("max_agentes") or 0),
-            "ultima_actualizacion": row.get("updated_at") or row.get("created_at"),
+            "ultima_actualizacion": row.get("created_at"),
             "estado": _estado_cliente(pct),
         })
 
