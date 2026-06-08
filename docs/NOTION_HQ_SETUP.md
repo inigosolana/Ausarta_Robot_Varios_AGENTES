@@ -160,21 +160,18 @@ X-Supabase-Webhook-Secret: <mismo valor que SUPABASE_WEBHOOK_SECRET>
 
 ---
 
-## PASO 4 — Credencial Notion en n8n
+## PASO 4 — Token + Database IDs en n8n
 
-1. https://www.notion.so/my-integrations → New integration → **Ausarta HQ Sync**
-2. Copia el **Internal Integration Token**
-3. En n8n → Credentials → Notion API → pega el token
-4. En cada base de datos de Notion → `...` → Connections → invita la integración
+Los nodos Notion ya están en los workflows (como nodos **Code** con upsert automático).
 
-Anota los **Database IDs** (32 chars en la URL de cada tabla):
-```
-NOTION_DB_CLIENTES=xxxxxxxx
-NOTION_DB_USUARIOS=xxxxxxxx
-NOTION_DB_LLAMADAS=xxxxxxxx
-NOTION_DB_AGENTES=xxxxxxxx
-NOTION_DB_INCIDENCIAS=xxxxxxxx
-```
+Guía detallada: **`docs/NOTION_N8N_CONFIG.md`**
+
+Resumen:
+1. Crea integración en https://www.notion.so/my-integrations
+2. Invítala a cada base de datos
+3. En cada nodo **Notion Clientes / Usuarios / ...** sustituye:
+   - `PEGA_TU_NOTION_TOKEN` → tu Internal Integration Secret
+   - `PEGA_DB_CLIENTES` (etc.) → Database ID de 32 caracteres
 
 ---
 
@@ -190,14 +187,11 @@ En tu instancia n8n (`http://79.72.57.62:5678`) ya están creados 3 workflows **
 
 ### Configurar cada workflow
 
-1. Abre el workflow en n8n
-2. En nodos **HTTP Request**: cambia `TU_BACKEND_URL` por tu URL real (ej. `http://79.72.57.62:8003` o dominio público)
-3. En nodos **HTTP Request**: pon tu `X-N8N-Secret` real
-4. Añade nodo **Notion** después de cada Code node (o conecta el que falta):
-   - Resource: Database Page
-   - Operation: Create (llamadas) o Update si existe
-   - Database ID: el de la tabla correspondiente
-5. **Activa** el workflow (toggle arriba a la derecha)
+Ver **`docs/NOTION_N8N_CONFIG.md`**. En resumen:
+
+1. Pega token + Database IDs en nodos **Notion Clientes / Usuarios / Agentes / Llamadas / Incidencia**
+2. En nodos **HTTP Request**: pon tu `X-N8N-Secret` real (URL backend ya apunta a `http://79.72.57.62:8003`)
+3. **Activa** el workflow (toggle arriba a la derecha)
 
 ### Webhook URL final
 
