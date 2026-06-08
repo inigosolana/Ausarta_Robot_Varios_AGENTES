@@ -19,7 +19,14 @@ export async function requestPasswordReset(
         let detail = 'No se pudo enviar el email de recuperación';
         try {
             const data = await res.json();
-            if (data?.error) detail = data.error;
+            if (data?.error) {
+                detail = data.error;
+            } else if (Array.isArray(data?.detail)) {
+                detail = data.detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join('. ')
+                    || detail;
+            } else if (typeof data?.detail === 'string') {
+                detail = data.detail;
+            }
         } catch {
             /* ignore */
         }

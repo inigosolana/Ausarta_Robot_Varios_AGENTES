@@ -8,20 +8,23 @@ from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, EmailStr, Field
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from pydantic import BaseModel, Field, field_validator
 
 from services.password_reset_service import send_password_reset_email
+from services.rate_limiter import limiter
 
 logger = logging.getLogger("api-backend")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-limiter = Limiter(key_func=get_remote_address)
 
 
 class PasswordResetRequest(BaseModel):
-    email: EmailStr
+    email: str = Field(..., min_length=3, max_length=320)
     redirect_to: Optional[str] = Field(None, max_length=500)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
 
 
 @router.post("/password-reset")
