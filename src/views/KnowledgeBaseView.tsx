@@ -57,6 +57,9 @@ export function KnowledgeBaseView() {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [urlInput, setUrlInput] = useState('');
+  const [urlTitle, setUrlTitle] = useState('');
+  const [uploadingUrl, setUploadingUrl] = useState(false);
 
   // Search state
   const [searchQ, setSearchQ] = useState('');
@@ -154,6 +157,38 @@ export function KnowledgeBaseView() {
       flash('error', String(e));
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleUploadUrl = async () => {
+    if (!urlInput.trim() || !urlTitle.trim()) return;
+    setUploadingUrl(true);
+    try {
+      const fd = new FormData();
+      fd.append('url', urlInput.trim());
+      fd.append('titulo', urlTitle.trim());
+      fd.append('source_type', 'web');
+      if (empresa_id) fd.append('empresa_id', String(empresa_id));
+
+      const res = await fetch(`${API_BASE}/api/knowledge/upload-url`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        flash('ok', `✓ URL "${data.titulo}" indexada — ${data.chunks_total} chunks`);
+        setUrlInput('');
+        setUrlTitle('');
+        await load();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        flash('error', err.detail || 'Error al indexar URL');
+      }
+    } catch (e) {
+      flash('error', String(e));
+    } finally {
+      setUploadingUrl(false);
     }
   };
 
@@ -280,7 +315,7 @@ export function KnowledgeBaseView() {
             ref={fileInputRef}
             type="file"
             className="hidden"
-            accept=".txt,.md,.pdf,.csv,.json"
+            accept=".txt,.md,.pdf,.csv,.json,.xlsx,.xls"
             onChange={e => { const f = e.target.files?.[0]; if (f) applyFile(f); }}
           />
           {uploadFile ? (
@@ -297,8 +332,8 @@ export function KnowledgeBaseView() {
           ) : (
             <>
               <Upload size={32} className="mx-auto mb-2 text-gray-300" />
-              <p className="text-sm text-gray-500">Arrastra un PDF o archivo de texto aquí</p>
-              <p className="text-xs text-gray-400 mt-1">Formatos: .txt · .md · .pdf · .csv · .json</p>
+              <p className="text-sm text-gray-500">Arrastra un archivo de conocimiento aquí</p>
+              <p className="text-xs text-gray-400 mt-1">Formatos: .txt · .md · .pdf · .csv · .json · .xlsx · .xls</p>
             </>
           )}
         </div>
@@ -337,6 +372,34 @@ export function KnowledgeBaseView() {
           {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
           {uploading ? 'Indexando…' : 'Indexar'}
         </button>
+
+        <div className="mt-6 border-t border-gray-100 pt-4">
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">Añadir contenido desde URL</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <input
+              type="text"
+              value={urlInput}
+              onChange={e => setUrlInput(e.target.value)}
+              placeholder="https://..."
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            />
+            <input
+              type="text"
+              value={urlTitle}
+              onChange={e => setUrlTitle(e.target.value)}
+              placeholder="Título para esta URL"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            />
+          </div>
+          <button
+            onClick={handleUploadUrl}
+            disabled={uploadingUrl || !urlInput.trim() || !urlTitle.trim()}
+            className="mt-3 flex items-center justify-center gap-2 px-4 py-2 bg-sky-600 text-white text-sm font-medium rounded-lg hover:bg-sky-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {uploadingUrl ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+            {uploadingUrl ? 'Indexando URL…' : 'Add URL'}
+          </button>
+        </div>
       </div>
 
       {/* Document List */}

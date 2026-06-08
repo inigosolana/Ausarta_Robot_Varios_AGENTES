@@ -46,6 +46,9 @@ backend/venv/
 .env.*.local
 !.env.example
 
+# MCP secrets (use ~/.cursor/mcp.json on remote; do not commit tokens)
+.cursor/mcp.json
+
 # Database
 *.db
 *.sqlite

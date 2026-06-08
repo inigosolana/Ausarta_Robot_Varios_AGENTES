@@ -12,9 +12,14 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
+import json
 import logging
+import re
 from typing import Any
 
+import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 
 from services.supabase_service import supabase, sb_query
@@ -121,16 +126,7 @@ async def upload_knowledge(
     filename = file.filename or ""
     content_type = (file.content_type or "").lower()
 
-    texto = ""
-
-    if "pdf" in content_type or filename.lower().endswith(".pdf"):
-        texto = _extract_text_from_pdf(content_bytes)
-    else:
-        # Texto plano (txt, md, csv, json…)
-        try:
-            texto = content_bytes.decode("utf-8", errors="replace")
-        except Exception:
-            raise HTTPException(status_code=400, detail="No se pudo decodificar el archivo")
+    texto = _extract_text_from_uploaded_file(filename, content_type, content_bytes)
 
     texto = texto.strip()
     if not texto:
@@ -185,6 +181,66 @@ async def upload_knowledge(
     }
 
 
+@router.post("/upload-url", status_code=201)
+async def upload_knowledge_url(
+    url: str = Form(...),
+    titulo: str = Form(...),
+    source_type: str = Form("web"),
+    empresa_id: int | None = Form(None),
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Indexa una URL remota como documento de la base de conocimiento."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión a la base de datos")
+
+    eid = _resolve_empresa(current_user, empresa_id)
+    if not eid:
+        raise HTTPException(status_code=400, detail="empresa_id requerido")
+
+    safe_url = (url or "").strip()
+    if not re.match(r"^https?://", safe_url, flags=re.IGNORECASE):
+        raise HTTPException(status_code=400, detail="La URL debe empezar por http:// o https://")
+
+    texto = await _extract_text_from_url(safe_url)
+    texto = texto.strip()
+    if not texto:
+        raise HTTPException(status_code=400, detail="No se pudo extraer contenido de la URL")
+
+    chunks = _split_into_chunks(texto, max_tokens=800, overlap=100)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="No se pudieron generar chunks del texto")
+
+    rows_to_insert: list[dict] = []
+    BATCH = 5
+    for i in range(0, len(chunks), BATCH):
+        batch = chunks[i:i + BATCH]
+        embeddings = await asyncio.gather(
+            *[get_embedding(c) for c in batch], return_exceptions=True
+        )
+        for j, (chunk, emb) in enumerate(zip(batch, embeddings)):
+            if isinstance(emb, Exception) or emb is None:
+                emb = None
+            rows_to_insert.append({
+                "empresa_id": eid,
+                "titulo": titulo,
+                "contenido": chunk,
+                "chunk_index": i + j,
+                "embedding": emb,
+                "source_type": source_type or "web",
+            })
+
+    res = await sb_query(
+        lambda rows=rows_to_insert: supabase.table("knowledge_base").insert(rows).execute()
+    )
+    return {
+        "status": "ok",
+        "titulo": titulo,
+        "chunks_total": len(chunks),
+        "chunks_con_embedding": sum(1 for r in rows_to_insert if r["embedding"]),
+        "insertados": len(res.data) if res.data else 0,
+    }
+
+
 def _extract_text_from_pdf(content: bytes) -> str:
     """Extrae texto de un PDF. Intenta pypdf, luego pymupdf como fallback."""
     try:
@@ -206,6 +262,82 @@ def _extract_text_from_pdf(content: bytes) -> str:
 
     logger.warning("[knowledge] No hay librería PDF disponible (pypdf / PyMuPDF). Instala una de ellas.")
     return ""
+
+
+def _extract_text_from_excel(content: bytes) -> str:
+    """Extrae texto de Excel (.xlsx/.xls) como líneas tabuladas por fila."""
+    try:
+        from openpyxl import load_workbook  # type: ignore
+    except ImportError:
+        logger.warning("[knowledge] openpyxl no instalado: no se puede procesar Excel")
+        return ""
+
+    try:
+        wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        lines: list[str] = []
+        for sheet in wb.worksheets:
+            lines.append(f"### Hoja: {sheet.title}")
+            for row in sheet.iter_rows(values_only=True):
+                row_vals = [str(c).strip() for c in row if c is not None and str(c).strip()]
+                if row_vals:
+                    lines.append(" | ".join(row_vals))
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.warning("[knowledge] Error leyendo Excel: %s", exc)
+        return ""
+
+
+def _extract_text_from_uploaded_file(filename: str, content_type: str, content_bytes: bytes) -> str:
+    ext = (filename or "").lower().rsplit(".", 1)[-1] if "." in (filename or "") else ""
+    is_pdf = "pdf" in content_type or ext == "pdf"
+    is_excel = ext in {"xlsx", "xls"} or "spreadsheet" in content_type or "excel" in content_type
+    is_csv = ext == "csv" or "csv" in content_type
+    is_json = ext == "json" or "json" in content_type
+
+    if is_pdf:
+        return _extract_text_from_pdf(content_bytes)
+    if is_excel:
+        return _extract_text_from_excel(content_bytes)
+    if is_csv:
+        try:
+            decoded = content_bytes.decode("utf-8", errors="replace")
+            rows = list(csv.reader(io.StringIO(decoded)))
+            return "\n".join(" | ".join(cell.strip() for cell in row if cell and cell.strip()) for row in rows)
+        except Exception:
+            return ""
+    if is_json:
+        try:
+            parsed = json.loads(content_bytes.decode("utf-8", errors="replace"))
+            return json.dumps(parsed, ensure_ascii=False, indent=2)
+        except Exception:
+            return content_bytes.decode("utf-8", errors="replace")
+
+    try:
+        return content_bytes.decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+async def _extract_text_from_url(url: str) -> str:
+    """Descarga una URL y extrae texto simple desde HTML."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=10),
+                headers={"User-Agent": "AusartaKB/1.0"},
+            ) as resp:
+                if resp.status != 200:
+                    return ""
+                html = await resp.text(errors="replace")
+    except Exception:
+        return ""
+
+    html = re.sub(r"<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>", " ", html, flags=re.IGNORECASE)
+    html = re.sub(r"<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>", " ", html, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 
 # ─────────────────────────────────────────────────────────────────────────────
