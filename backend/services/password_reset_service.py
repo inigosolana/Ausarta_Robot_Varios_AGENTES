@@ -9,18 +9,19 @@ import re
 
 import aiohttp
 
+from services.n8n_webhook_service import n8n_outbound_headers, n8n_webhook_base_url
+
 logger = logging.getLogger("api-backend")
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _recovery_webhook_url() -> str:
-    base = (os.getenv("N8N_WEBHOOK_BASE_URL") or "https://n8n.ausarta.net/webhook").rstrip("/")
     path = os.getenv(
         "N8N_PASSWORD_RECOVERY_WEBHOOK_PATH",
         "fbdb6333-c473-493a-a1da-6c1756d5ae04",
     ).strip("/")
-    return f"{base}/{path}"
+    return f"{n8n_webhook_base_url()}/{path}"
 
 
 def _redirect_to(explicit: str | None = None) -> str:
@@ -53,6 +54,7 @@ async def send_password_reset_email(email: str, redirect_to: str | None = None) 
             async with session.post(
                 url,
                 json=payload,
+                headers=n8n_outbound_headers(),
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
                 if resp.status >= 400:

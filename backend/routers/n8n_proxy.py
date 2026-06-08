@@ -18,6 +18,7 @@ import aiohttp
 
 from services.rate_limiter import limiter
 from services.password_reset_service import send_password_reset_email
+from services.n8n_webhook_service import n8n_outbound_headers, n8n_webhook_base_url
 
 logger = logging.getLogger("api-backend")
 
@@ -77,12 +78,16 @@ async def proxy_n8n_invite(
     # Sanitizar: solo campos esperados para evitar inyección
     safe_payload = {k: payload[k] for k in ("email", "password", "full_name", "role", "empresa_id", "redirect_to") if k in payload}
 
-    base_url = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
-    webhook_url = f"{base_url.rstrip('/')}/d0952789-a4a1-4eae-b0db-494356a9e3fa"
+    webhook_url = f"{n8n_webhook_base_url()}/d0952789-a4a1-4eae-b0db-494356a9e3fa"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(webhook_url, json=safe_payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.post(
+                webhook_url,
+                json=safe_payload,
+                headers=n8n_outbound_headers(),
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
                 data = await resp.json() if resp.content_type == "application/json" else await resp.text()
                 if not isinstance(data, dict):
                     data = {"message": data}
