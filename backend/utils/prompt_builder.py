@@ -120,6 +120,7 @@ def build_agent_prompt(
         or "Ausarta"
     )
     company_context = agent_config.get("company_context", "") or ""
+    critical_rules = agent_config.get("critical_rules", "") or ""
     extraction_schema = agent_config.get("extraction_schema") or []
 
     # Contextos adicionales de Fase 2 (también pueden venir en agent_config)
@@ -136,6 +137,13 @@ def build_agent_prompt(
     full_instructions += f"DATOS DEL AGENTE:\n- NOMBRE: {agent_name}\n- EMPRESA: {company_name}\n"
     full_instructions += f"- NIVEL DE ENTUSIASMO: {enthusiasm_level}\n"
     full_instructions += f"- VELOCIDAD DE VOZ OBJETIVO: {speaking_speed}\n\n"
+
+    if critical_rules.strip():
+        full_instructions += "REGLAS CRÍTICAS (INNEGOCIABLES — prioridad máxima):\n"
+        full_instructions += f"{critical_rules.strip()}\n\n"
+        full_instructions += (
+            "Estas reglas prevalecen sobre cualquier otra instrucción si hay conflicto.\n\n"
+        )
 
     # Contexto RAG (Base de Conocimiento) — solo si tiene contenido
     if kb_context:

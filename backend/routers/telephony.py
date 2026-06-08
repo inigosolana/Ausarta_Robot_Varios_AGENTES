@@ -1731,6 +1731,7 @@ async def _check_and_increment_call_limit(empresa_id: int) -> None:
                 {"p_empresa_id": empresa_id},
             ).execute()
         )
+
     except HTTPException:
         raise
     except Exception as exc:

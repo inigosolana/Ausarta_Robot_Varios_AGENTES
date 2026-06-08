@@ -34,8 +34,9 @@ async def nombre_herramienta(context: RunContext, param: str) -> str:
         return ""
 
 ## Tareas pendientes (para que Codex las ejecute)
-- [ ] Añadir function_tool `consultar_conocimiento` en agent.py
-      que llame a search_knowledge() con el empresa_id de la sesión
-- [ ] Añadir function_tool `consultar_cliente` en agent.py
-      que llame a query_external_db() con lista blanca de queries
-- [ ] Crear SQL para Supabase: tabla knowledge_base + pgvector + función RPC search_knowledge_base
+- [x] Añadir function_tool `consultar_conocimiento` en agent.py
+- [x] Añadir function_tool `consultar_cliente` en agent.py (+ `external_db_allowed_queries` en config API)
+- [x] Personalidad dinámica: `critical_rules` + entusiasmo/velocidad/voz en prompt y TTS
+- [x] Resumen LLM al colgar → `resumen_llamada` en Supabase (sin sync a Notion)
+- [ ] Alertas operativas → Telegram (cuota 80%/100%, incidencias, etc.)
+- [x] knowledge_base + pgvector + RPC `search_knowledge_base` (migraciones en `backend/supabase/migrations/`)

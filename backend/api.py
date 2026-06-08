@@ -30,8 +30,6 @@ from routers.api_credits import router as api_credits_router
 from routers.monitoring import router as monitoring_router
 from routers.knowledge import router as knowledge_router
 from routers.contacts import router as contacts_router
-from routers.notion_sync import router as notion_sync_router
-
 # --- CONFIGURACIÓN DE LOGS ---
 # Configurado antes de load_dotenv para capturar cualquier problema de arranque
 logging.basicConfig(
@@ -165,8 +163,6 @@ app.include_router(api_credits_router)
 app.include_router(monitoring_router)
 app.include_router(knowledge_router)
 app.include_router(contacts_router)
-app.include_router(notion_sync_router)
-
 
 # --- ENDPOINTS BASE ---
 

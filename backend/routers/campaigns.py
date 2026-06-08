@@ -34,6 +34,33 @@ DEFAULT_AUSARTA_VOICE_ID = "b5aa8098-49ef-475d-89b0-c9262ecf33fd"  # Chica caste
 router = APIRouter(prefix="/api", tags=["campaigns"])
 
 
+def _load_external_db_allowed_queries(empresa_id: int | None) -> list[str]:
+    """Lista blanca de queries CRM/ERP permitidos para consultar_cliente."""
+    if not empresa_id or not supabase:
+        return []
+    try:
+        res = (
+            supabase.table("empresa_external_db")
+            .select("queries")
+            .eq("empresa_id", empresa_id)
+            .eq("activo", True)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            return []
+        queries = res.data[0].get("queries") or {}
+        if isinstance(queries, dict):
+            return [str(k).strip() for k in queries.keys() if str(k).strip()]
+    except Exception as err:
+        logger.warning(
+            "No se pudo cargar external_db_allowed_queries para empresa %s: %s",
+            empresa_id,
+            err,
+        )
+    return []
+
+
 class ScheduleRetryRequest(BaseModel):
     retry_at: str
 
@@ -452,6 +479,9 @@ async def get_agent_config_by_survey(survey_id: int):
             "agent_mode": agent_data.get("agent_mode") or "prompt",
             "workflow_definition": agent_data.get("workflow_definition"),
             "workflow_variables": agent_data.get("workflow_variables") or {},
+            "external_db_allowed_queries": _load_external_db_allowed_queries(
+                empresa_id or agent_empresa_id
+            ),
         }
         # Evita cualquier cache intermedio: tras editar, la siguiente llamada debe leer esto sí o sí.
         return JSONResponse(
@@ -607,6 +637,9 @@ async def get_agent_config_by_agent(agent_id: int, empresa_id: Optional[int] = N
             "agent_mode": agent_data.get("agent_mode") or "prompt",
             "workflow_definition": agent_data.get("workflow_definition"),
             "workflow_variables": agent_data.get("workflow_variables") or {},
+            "external_db_allowed_queries": _load_external_db_allowed_queries(
+                agent_data.get("empresa_id")
+            ),
         }
         return JSONResponse(
             status_code=200,
