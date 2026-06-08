@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
     User, Mail, Building2, Shield, ShieldCheck, Save, Loader2,
-    ArrowLeft, Briefcase, Calendar, CheckCircle, AlertTriangle
+    ArrowLeft, Briefcase, Calendar, CheckCircle, AlertTriangle, Lock
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
@@ -24,6 +24,8 @@ export const ProfileView: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [empresas, setEmpresas] = useState<Empresa[]>([]);
+    const [sendingReset, setSendingReset] = useState(false);
+    const [resetSent, setResetSent] = useState(false);
 
     // Form state
     const [fullName, setFullName] = useState(profile?.full_name || '');
@@ -50,6 +52,25 @@ export const ProfileView: React.FC = () => {
             console.error('Error loading empresas:', err);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleRequestPasswordChange = async () => {
+        if (!profile?.email) return;
+        setSendingReset(true);
+        try {
+            const { error } = await supabase.auth.resetPasswordForEmail(profile.email, {
+                redirectTo: window.location.origin.includes('localhost')
+                    ? 'https://app.ausarta.net'
+                    : window.location.origin,
+            });
+            if (error) throw error;
+            setResetSent(true);
+            toast.success(t('Password reset email sent', 'Email de cambio de contraseña enviado'));
+        } catch (err: any) {
+            toast.error('Error: ' + err.message);
+        } finally {
+            setSendingReset(false);
         }
     };
 
@@ -253,6 +274,33 @@ export const ProfileView: React.FC = () => {
                                 {saving ? t('Saving...') : t('Save Profile')}
                             </button>
                         </div>
+                    </section>
+
+                    <section className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-4">
+                        <h4 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2 border-b border-gray-50 dark:border-gray-700 pb-3">
+                            <Lock size={20} className="text-amber-500" />
+                            {t('Password', 'Contraseña')}
+                        </h4>
+                        <p className="text-sm text-gray-500">
+                            {t('To change your password, we will send a secure link to your email.', 'Para cambiar tu contraseña, te enviaremos un enlace seguro a tu email.')}
+                        </p>
+                        {resetSent ? (
+                            <div className="flex items-center gap-2 text-green-600 text-sm font-medium">
+                                <CheckCircle size={16} />
+                                {t('Check your inbox', 'Revisa tu bandeja de entrada')}
+                            </div>
+                        ) : (
+                            <button
+                                onClick={handleRequestPasswordChange}
+                                disabled={sendingReset}
+                                className="flex items-center gap-2 px-5 py-2.5 bg-amber-500 text-white rounded-xl hover:bg-amber-400 disabled:opacity-50 transition-all font-medium"
+                            >
+                                {sendingReset ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}
+                                {sendingReset
+                                    ? t('Sending...', 'Enviando...')
+                                    : t('Send password change link', 'Enviar enlace de cambio de contraseña')}
+                            </button>
+                        )}
                     </section>
                 </div>
             </div>

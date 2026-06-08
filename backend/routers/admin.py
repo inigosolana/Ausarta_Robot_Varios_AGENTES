@@ -776,6 +776,78 @@ async def delete_auth_user(request: Request, user_id: str, current_user: Current
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+@router.put("/users/{user_id}")
+@limiter.limit("20/minute")
+async def update_user(
+    request: Request,
+    user_id: str,
+    payload: dict,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    prof = await sb_query(
+        lambda: supabase.table("user_profiles").select("id,role,empresa_id").eq("id", user_id).limit(1).execute()
+    )
+    if not prof.data:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    target = prof.data[0]
+    target_role = _canonical_role(target.get("role"))
+    target_empresa = target.get("empresa_id")
+    master_empresa_id = _resolve_master_empresa_id()
+
+    if current_user.role == "superadmin":
+        pass
+    elif is_ausarta_platform_admin(current_user):
+        if target_role == "superadmin":
+            raise HTTPException(status_code=403, detail="Admin Ausarta no puede editar superadmin")
+        if target_role == "admin" and target_empresa == master_empresa_id:
+            raise HTTPException(status_code=403, detail="Solo superadmin puede editar admins de Ausarta")
+    else:
+        if target_empresa != current_user.empresa_id:
+            raise HTTPException(status_code=403, detail="No puedes editar usuarios de otra empresa")
+        if target_role != "user":
+            raise HTTPException(status_code=403, detail="Admin cliente solo puede editar usuarios role=user")
+
+    update: dict = {}
+    if "full_name" in payload and payload["full_name"]:
+        update["full_name"] = str(payload["full_name"]).strip()
+    if "role" in payload:
+        new_role = _canonical_role(payload["role"])
+        if new_role not in {"admin", "user"}:
+            raise HTTPException(status_code=400, detail="Rol inválido")
+        if current_user.role != "superadmin" and new_role == "admin":
+            raise HTTPException(status_code=403, detail="Solo superadmin puede asignar rol admin")
+        update["role"] = new_role
+    if "empresa_id" in payload:
+        update["empresa_id"] = payload["empresa_id"]
+    if "is_active" in payload:
+        update["is_active"] = bool(payload["is_active"])
+
+    if not update:
+        raise HTTPException(status_code=400, detail="No se proporcionaron campos a actualizar")
+
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    await sb_query(
+        lambda: supabase.table("user_profiles").update(update).eq("id", user_id).execute()
+    )
+
+    if "role" in update:
+        await invalidate_user_profile_cache(user_id)
+
+    await log_audit_event(
+        user_id=current_user.user_id,
+        action="update_user",
+        target_type="user",
+        target_id=user_id,
+        metadata={"changes": update},
+    )
+    return {"status": "ok", "user_id": user_id, "changes": update}
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Métricas en tiempo real (LiveKit + Redis) — panel de administración
 # ──────────────────────────────────────────────────────────────────────────────

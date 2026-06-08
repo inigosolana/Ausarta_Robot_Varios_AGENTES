@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import {
     Users, Plus, Shield, ShieldCheck, User, Trash2, Loader2,
     ToggleLeft, ToggleRight, X, Settings, ChevronDown, ChevronUp,
-    Mail, CheckCircle, AlertCircle
+    Mail, CheckCircle, AlertCircle, Eye, EyeOff, KeyRound, Pencil, Save
 } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { apiFetch } from '../lib/apiFetch';
@@ -40,6 +41,7 @@ const UserManagementView: React.FC = () => {
     const [newRole, setNewRole] = useState<UserRole>('user');
     const [newEmpresaId, setNewEmpresaId] = useState<number | ''>('');
     const [newPassword, setNewPassword] = useState('');
+    const [showNewPassword, setShowNewPassword] = useState(false);
     const [creating, setCreating] = useState(false);
     const [inviteSuccess, setInviteSuccess] = useState(false);
 
@@ -111,19 +113,19 @@ const UserManagementView: React.FC = () => {
 
     const handleCreateUser = async () => {
         if (!newEmail || !newName) {
-            alert(t('Fill in name and email', 'Rellena nombre y email'));
+            toast.error(t('Fill in name and email', 'Rellena nombre y email'));
             return;
         }
 
         // Only superadmin and admin can create users
         if (!isRole('superadmin', 'admin')) {
-            alert(t('You do not have permissions to create users', 'No tienes permisos para crear usuarios'));
+            toast.error(t('You do not have permissions to create users', 'No tienes permisos para crear usuarios'));
             return;
         }
 
         // Admins can't create superadmins
         if (!isRole('superadmin') && newRole === 'superadmin') {
-            alert(t('You cannot create superadmin users', 'No puedes crear usuarios superadmin'));
+            toast.error(t('You cannot create superadmin users', 'No puedes crear usuarios superadmin'));
             return;
         }
 
@@ -131,7 +133,7 @@ const UserManagementView: React.FC = () => {
         const isAusartaCompany = selectedEmpresa?.nombre?.toLowerCase() === 'ausarta';
         // Solo superadmin puede crear administradores de Ausarta
         if (!canCreateAusartaAdmins && isAusartaCompany && newRole === 'admin') {
-            alert(t(
+            toast.error(t(
                 'Only Superadmin can create Ausarta company administrators.',
                 'Solo el Superadmin puede crear administradores de la empresa Ausarta.'
             ));
@@ -149,7 +151,7 @@ const UserManagementView: React.FC = () => {
                 const existingAdmins = users.filter(u => u.empresa_id === selectedEmpresa.id && u.role === 'admin').length;
                 const limit = selectedEmpresa.max_admins || 1;
                 if (existingAdmins >= limit) {
-                    alert(t('This company already has the maximum allowed administrators ({{limit}}). To add more, the main administrator must enable it (Premium Service).', 'Esta empresa ya tiene el máximo permitido de administradores ({{limit}}). Para añadir más, el administrador principal debe habilitarlo (Servicio Premium).', { limit }));
+                    toast.error(t('This company already has the maximum allowed administrators ({{limit}}). To add more, the main administrator must enable it (Premium Service).', 'Esta empresa ya tiene el máximo permitido de administradores ({{limit}}). Para añadir más, el administrador principal debe habilitarlo (Servicio Premium).', { limit }));
                     return;
                 }
             }
@@ -206,7 +208,7 @@ const UserManagementView: React.FC = () => {
             setUsers(prev => [newUser, ...prev]);
             setInviteSuccess(true);
 
-            alert(invited
+            toast.success(invited
                 ? t('Invitation sent successfully!', '¡Invitación enviada correctamente!')
                 : t('User created successfully!', '¡Usuario creado con éxito!'));
 
@@ -221,7 +223,7 @@ const UserManagementView: React.FC = () => {
 
         } catch (err: any) {
             console.error("Error creating user:", err);
-            alert(`Error: ${err.message}`);
+            toast.error(`Error: ${err.message}`);
         } finally {
             setCreating(false);
         }
@@ -233,9 +235,23 @@ const UserManagementView: React.FC = () => {
                 redirectTo: window.location.origin.includes('localhost') ? 'https://app.ausarta.net' : window.location.origin,
             });
             if (error) throw error;
-            alert(`📧 ${t('Invitation email resent to', 'Email de invitación reenviado a')} ${email}`);
+            toast.success(`${t('Invitation email resent to', 'Email de invitación reenviado a')} ${email}`);
         } catch (err: any) {
-            alert(`Error: ${err.message}`);
+            toast.error(`Error: ${err.message}`);
+        }
+    };
+
+    const handleResetPassword = async (email: string) => {
+        try {
+            const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: window.location.origin.includes('localhost')
+                    ? 'https://app.ausarta.net'
+                    : window.location.origin,
+            });
+            if (error) throw error;
+            toast.success(t('Password reset email sent to', 'Email de recuperación enviado a') + ' ' + email);
+        } catch (err: any) {
+            toast.error('Error: ' + err.message);
         }
     };
 
@@ -283,7 +299,7 @@ const UserManagementView: React.FC = () => {
                 }
             }));
         } catch (err) {
-            alert(t('Error changing permission', 'Error al cambiar permiso'));
+            toast.error(t('Error changing permission', 'Error al cambiar permiso'));
             loadUsersAndEmpresas();
         }
     };
@@ -298,27 +314,68 @@ const UserManagementView: React.FC = () => {
                 u.id === userId ? { ...u, is_active: !currentActive } : u
             ));
         } catch (err) {
-            alert(t('Error changing user status', 'Error al cambiar estado del usuario'));
+            toast.error(t('Error changing user status', 'Error al cambiar estado del usuario'));
         }
     };
 
-    const handleDeleteUser = async (userId: string) => {
-        if (!confirm(t('Are you sure you want to delete this user? This action cannot be undone and will also delete their authentication access.', '¿Estás seguro de que quieres eliminar este usuario? Esta acción no se puede deshacer y borrará también su acceso de autenticación.'))) return;
-        try {
-            // apiFetch adjunta automáticamente el Bearer token necesario para require_admin
-            const res = await apiFetch(`/api/admin/users/${userId}`, {
-                method: 'DELETE',
-            });
+    const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
+    const [editingUser, setEditingUser] = useState<typeof users[0] | null>(null);
+    const [editName, setEditName] = useState('');
+    const [editRole, setEditRole] = useState<UserRole>('user');
+    const [editEmpresaId, setEditEmpresaId] = useState<number | ''>('');
+    const [savingEdit, setSavingEdit] = useState(false);
+
+    const handleDeleteUser = (userId: string) => setDeleteConfirm(userId);
+
+    const confirmDeleteUser = async () => {
+        if (!deleteConfirm) return;
+        const userId = deleteConfirm;
+        setDeleteConfirm(null);
+        try {
+            const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
             if (!res.ok) {
                 const data = await res.json().catch(() => ({}));
-                throw new Error(data.message || data.error || `Error ${res.status} al eliminar usuario`);
+                throw new Error(data.message || data.error || `Error ${res.status}`);
             }
-
             setUsers(prev => prev.filter(u => u.id !== userId));
+            toast.success(t('User deleted', 'Usuario eliminado'));
         } catch (err: any) {
             console.error('[DeleteUser]', err);
-            alert(`Error: ${err.message}`);
+            toast.error('Error: ' + err.message);
+        }
+    };
+
+    const handleEditUser = (user: typeof users[0]) => {
+        setEditingUser(user);
+        setEditName(user.full_name || '');
+        setEditRole(user.role);
+        setEditEmpresaId(user.empresa_id || '');
+    };
+
+    const handleSaveEdit = async () => {
+        if (!editingUser) return;
+        setSavingEdit(true);
+        try {
+            const res = await apiFetch(`/api/admin/users/${editingUser.id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ full_name: editName, role: editRole, empresa_id: editEmpresaId || null }),
+            });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.message || data.error || `Error ${res.status}`);
+            }
+            setUsers(prev => prev.map(u => u.id === editingUser.id
+                ? { ...u, full_name: editName, role: editRole, empresa_id: editEmpresaId || null }
+                : u
+            ));
+            toast.success(t('User updated', 'Usuario actualizado'));
+            setEditingUser(null);
+            loadUsersAndEmpresas();
+        } catch (err: any) {
+            toast.error('Error: ' + err.message);
+        } finally {
+            setSavingEdit(false);
         }
     };
 
@@ -445,9 +502,23 @@ const UserManagementView: React.FC = () => {
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); handleResendInvite(user.email); }}
                                                 className="p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
-                                                title={t('Resend invitation / Reset password', 'Reenviar invitación / Reset contraseña')}
+                                                title={t('Resend invitation', 'Reenviar invitación')}
                                             >
                                                 <Mail size={16} />
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleResetPassword(user.email); }}
+                                                className="p-1.5 rounded-lg hover:bg-amber-50 text-gray-400 hover:text-amber-600 transition-colors"
+                                                title={t('Reset password', 'Resetear contraseña')}
+                                            >
+                                                <KeyRound size={16} />
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleEditUser(user); }}
+                                                className="p-1.5 rounded-lg hover:bg-indigo-50 text-gray-400 hover:text-indigo-600 transition-colors"
+                                                title={t('Edit', 'Editar')}
+                                            >
+                                                <Pencil size={16} />
                                             </button>
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); handleToggleActive(user.id, user.is_active); }}
@@ -531,6 +602,85 @@ const UserManagementView: React.FC = () => {
                     ))
                 )}
             </div>
+
+            {/* Delete Confirm Modal */}
+            {deleteConfirm && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 space-y-4">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center">
+                                <Trash2 size={20} className="text-red-500" />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-gray-900">{t('Delete user', 'Eliminar usuario')}</h3>
+                                <p className="text-sm text-gray-500">{t('This action cannot be undone.', 'Esta acción no se puede deshacer.')}</p>
+                            </div>
+                        </div>
+                        <div className="flex gap-3 justify-end pt-2">
+                            <button onClick={() => setDeleteConfirm(null)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                                {t('Cancel', 'Cancelar')}
+                            </button>
+                            <button onClick={confirmDeleteUser} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors">
+                                {t('Delete', 'Eliminar')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit User Modal */}
+            {editingUser && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                                <Pencil size={20} className="text-indigo-600" />
+                                {t('Edit User', 'Editar Usuario')}
+                            </h3>
+                            <button onClick={() => setEditingUser(null)} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">{t('Full Name', 'Nombre completo')}</label>
+                                <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)}
+                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none" />
+                            </div>
+                            {canCreateAusartaAdmins && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Role', 'Rol')}</label>
+                                    <select value={editRole} onChange={(e) => setEditRole(e.target.value as UserRole)}
+                                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white font-medium">
+                                        <option value="admin">Admin</option>
+                                        <option value="user">{t('User', 'Usuario')}</option>
+                                    </select>
+                                </div>
+                            )}
+                            {isPlatformOwner && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('Company', 'Empresa')}</label>
+                                    <select value={editEmpresaId} onChange={(e) => setEditEmpresaId(e.target.value === '' ? '' : Number(e.target.value))}
+                                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none bg-white font-medium">
+                                        <option value="">-- {t('None', 'Ninguna')} --</option>
+                                        {empresas.map(emp => <option key={emp.id} value={emp.id}>{emp.nombre}</option>)}
+                                    </select>
+                                </div>
+                            )}
+                        </div>
+                        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+                            <button onClick={() => setEditingUser(null)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                                {t('Cancel', 'Cancelar')}
+                            </button>
+                            <button onClick={handleSaveEdit} disabled={savingEdit}
+                                className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 disabled:opacity-50 flex items-center gap-2 transition-colors">
+                                {savingEdit ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                                {savingEdit ? t('Saving...', 'Guardando...') : t('Save changes', 'Guardar cambios')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Create / Invite User Modal */}
             {showCreate && (
@@ -631,13 +781,23 @@ const UserManagementView: React.FC = () => {
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
                                             {t('Password', 'Contraseña')} <span className="text-gray-400 font-normal">({t('Optional', 'Opcional')})</span>
                                         </label>
-                                        <input
-                                            type="text"
-                                            value={newPassword}
-                                            onChange={(e) => setNewPassword(e.target.value)}
-                                            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                            placeholder={t('Enter a password for the user', 'Introduce una contraseña para el usuario')}
-                                        />
+                                        <div className="relative">
+                                            <input
+                                                type={showNewPassword ? 'text' : 'password'}
+                                                value={newPassword}
+                                                onChange={(e) => setNewPassword(e.target.value)}
+                                                className="w-full px-4 py-2.5 pr-10 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none"
+                                                placeholder={t('Enter a password for the user', 'Introduce una contraseña para el usuario')}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowNewPassword(v => !v)}
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                                tabIndex={-1}
+                                            >
+                                                {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                            </button>
+                                        </div>
                                         <p className="text-xs text-gray-500 mt-1.5">{t('If you leave it blank, we will send an invitation email. (Minimum 6 characters)', 'Si lo dejas en blanco, enviaremos un email de invitación. (Mínimo 6 caracteres)')}</p>
                                     </div>
                                 </div>
