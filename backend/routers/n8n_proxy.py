@@ -12,8 +12,12 @@ from fastapi.responses import JSONResponse
 from typing import Optional
 import os
 import hmac
-import aiohttp
 import logging
+
+import aiohttp
+
+from services.rate_limiter import limiter
+from services.password_reset_service import send_password_reset_email
 
 logger = logging.getLogger("api-backend")
 
@@ -89,30 +93,21 @@ async def proxy_n8n_invite(
 
 
 @router.post("/recover")
-async def proxy_n8n_recover(
-    request: Request,
-    x_n8n_secret: Optional[str] = Header(None, alias="X-N8N-Secret"),
-):
-    """Proxy a n8n para recuperación de contraseña. Requiere auth."""
-    await _require_auth(request, x_n8n_secret)
-
+@limiter.limit("8/minute")
+async def proxy_n8n_recover(request: Request):
+    """Recuperación de contraseña (público). Misma plantilla que /api/auth/password-reset."""
     payload = await request.json()
-
-    # Solo reenviar el email
-    safe_payload = {"email": payload.get("email", "")}
-    if not safe_payload["email"]:
+    email = (payload.get("email") or "").strip()
+    if not email:
         return JSONResponse(status_code=400, content={"error": "email es obligatorio"})
-
-    base_url = os.getenv("N8N_WEBHOOK_BASE_URL", "https://n8n.ausarta.net/webhook")
-    webhook_url = f"{base_url.rstrip('/')}/fbdb6333-c473-493a-a1da-6c1756d5ae04"
-
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(webhook_url, json=safe_payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                data = await resp.json() if resp.content_type == "application/json" else await resp.text()
-                if not isinstance(data, dict):
-                    data = {"message": data}
-                return JSONResponse(status_code=resp.status, content=data)
+        await send_password_reset_email(email, payload.get("redirect_to"))
+    except ValueError:
+        return JSONResponse(status_code=400, content={"error": "Email inválido"})
     except Exception as e:
-        logger.error(f"❌ Error en proxy n8n recover: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.error(f"❌ Error en recover: {e}")
+        return JSONResponse(status_code=503, content={"error": "No se pudo enviar el email"})
+    return {
+        "status": "ok",
+        "message": "Si el email está registrado, recibirás las instrucciones en breve.",
+    }

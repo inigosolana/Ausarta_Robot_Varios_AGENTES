@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
+import { passwordResetRedirectUrl, requestPasswordReset } from '../lib/passwordReset';
 import { useAuth } from '../contexts/AuthContext';
 import type { UserProfile, UserRole, Empresa } from '../types';
 import { toast } from 'react-hot-toast';
@@ -59,12 +60,7 @@ export const ProfileView: React.FC = () => {
         if (!profile?.email) return;
         setSendingReset(true);
         try {
-            const { error } = await supabase.auth.resetPasswordForEmail(profile.email, {
-                redirectTo: window.location.origin.includes('localhost')
-                    ? 'https://app.ausarta.net'
-                    : window.location.origin,
-            });
-            if (error) throw error;
+            await requestPasswordReset(profile.email, passwordResetRedirectUrl());
             setResetSent(true);
             toast.success(t('Password reset email sent', 'Email de cambio de contraseña enviado'));
         } catch (err: any) {

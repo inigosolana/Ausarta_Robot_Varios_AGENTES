@@ -1,14 +1,86 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { passwordResetRedirectUrl, requestPasswordReset } from '../lib/passwordReset';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Loader2, ArrowLeft, CheckCircle, Mail, Lock, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import {
+    Loader2,
+    ArrowLeft,
+    CheckCircle,
+    Mail,
+    Lock,
+    Eye,
+    EyeOff,
+    ArrowRight,
+    type LucideIcon,
+} from 'lucide-react';
 import './login.css';
 
 type ViewMode = 'login' | 'forgot' | 'forgot-sent' | 'update-password';
 
 /** Logo grande, fondo transparente, colores claros para UI oscura */
 const LOGO_SRC = '/ausarta-logo-light.png';
+
+type LoginFieldProps = {
+    id: string;
+    label: string;
+    type: string;
+    value: string;
+    onChange: (v: string) => void;
+    placeholder: string;
+    icon: LucideIcon;
+    showToggle?: boolean;
+    showPassword?: boolean;
+    onTogglePassword?: () => void;
+};
+
+/** Fuera de LoginView para no perder foco del input en cada tecla */
+const LoginField: React.FC<LoginFieldProps> = ({
+    id,
+    label,
+    type,
+    value,
+    onChange,
+    placeholder,
+    icon: Icon,
+    showToggle,
+    showPassword,
+    onTogglePassword,
+}) => (
+    <div className="mb-4">
+        <label htmlFor={id} className="block text-sm font-medium text-[#bbcabf] mb-1.5">
+            {label}
+        </label>
+        <div className="relative">
+            <Icon
+                size={18}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-[#86948a] pointer-events-none"
+            />
+            <input
+                id={id}
+                type={type}
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                className={`login-input${showToggle ? ' !pr-10' : ''}`}
+                placeholder={placeholder}
+                required
+                autoComplete={
+                    id.includes('password') || id.includes('pw') ? 'current-password' : 'email'
+                }
+            />
+            {showToggle && onTogglePassword && (
+                <button
+                    type="button"
+                    onClick={onTogglePassword}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#86948a] hover:text-[#4edea3] transition-colors"
+                    aria-label={showPassword ? 'Ocultar' : 'Mostrar'}
+                >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+            )}
+        </div>
+    </div>
+);
 
 const LoginView: React.FC = () => {
     const { signIn, user, profile, loading: authLoading } = useAuth();
@@ -77,17 +149,7 @@ const LoginView: React.FC = () => {
         setError('');
         setLoading(true);
         try {
-            const API_URL =
-                (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL || '';
-            const res = await fetch(`${API_URL}/api/n8n/recover`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email }),
-            });
-            if (!res.ok) {
-                const errorText = await res.text();
-                throw new Error(errorText || 'Error al conectar con el sistema de recuperación');
-            }
+            await requestPasswordReset(email, passwordResetRedirectUrl());
             setViewMode('forgot-sent');
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Error desconocido');
@@ -133,60 +195,8 @@ const LoginView: React.FC = () => {
             : viewMode === 'forgot'
               ? 'Te enviaremos un enlace para restablecerla.'
               : viewMode === 'forgot-sent'
-                ? 'Hemos enviado las instrucciones a tu bandeja.'
-                : 'Introduce y confirma tu nueva contraseña.';
-
-    const Field = ({
-        id,
-        label,
-        type,
-        value,
-        onChange,
-        placeholder,
-        icon: Icon,
-        showToggle,
-    }: {
-        id: string;
-        label: string;
-        type: string;
-        value: string;
-        onChange: (v: string) => void;
-        placeholder: string;
-        icon: typeof Mail;
-        showToggle?: boolean;
-    }) => (
-        <div className="mb-4">
-            <label htmlFor={id} className="block text-sm font-medium text-[#bbcabf] mb-1.5">
-                {label}
-            </label>
-            <div className="relative">
-                <Icon
-                    size={18}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-[#86948a] pointer-events-none"
-                />
-                <input
-                    id={id}
-                    type={type}
-                    value={value}
-                    onChange={(e) => onChange(e.target.value)}
-                    className={`login-input${showToggle ? ' !pr-10' : ''}`}
-                    placeholder={placeholder}
-                    required
-                    autoComplete={id.includes('password') || id.includes('pw') ? 'current-password' : 'email'}
-                />
-                {showToggle && (
-                    <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#86948a] hover:text-[#4edea3] transition-colors"
-                        aria-label={showPassword ? 'Ocultar' : 'Mostrar'}
-                    >
-                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                )}
-            </div>
-        </div>
-    );
+                ? 'Abre el email y sigue los 3 pasos del mensaje.'
+                : 'Escribe la nueva contraseña dos veces y confírmala.';
 
     if (authLoading) {
         return (
@@ -240,7 +250,7 @@ const LoginView: React.FC = () => {
 
                         {viewMode === 'login' && (
                             <form onSubmit={handleSubmit}>
-                                <Field
+                                <LoginField
                                     id="email"
                                     label="Email"
                                     type="email"
@@ -249,7 +259,7 @@ const LoginView: React.FC = () => {
                                     placeholder="tu@empresa.com"
                                     icon={Mail}
                                 />
-                                <Field
+                                <LoginField
                                     id="password"
                                     label="Contraseña"
                                     type={showPassword ? 'text' : 'password'}
@@ -258,6 +268,8 @@ const LoginView: React.FC = () => {
                                     placeholder="••••••••"
                                     icon={Lock}
                                     showToggle
+                                    showPassword={showPassword}
+                                    onTogglePassword={() => setShowPassword((v) => !v)}
                                 />
 
                                 <div className="flex items-center justify-between mb-6 text-sm">
@@ -321,7 +333,7 @@ const LoginView: React.FC = () => {
                                     <ArrowLeft size={16} /> Volver al login
                                 </button>
                                 <form onSubmit={handleForgotPassword}>
-                                    <Field
+                                    <LoginField
                                         id="forgot-email"
                                         label="Email"
                                         type="email"
@@ -346,11 +358,17 @@ const LoginView: React.FC = () => {
                                 <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-950/60 mb-4">
                                     <CheckCircle size={32} className="text-[#4edea3]" />
                                 </div>
-                                <p className="text-[#bbcabf] text-sm mb-6">
-                                    Hemos enviado un enlace a{' '}
-                                    <strong className="text-[#dae2fd]">{email}</strong>. Revisa también
-                                    spam.
+                                <p className="text-[#bbcabf] text-sm mb-4 text-left">
+                                    Hemos enviado un email a{' '}
+                                    <strong className="text-[#dae2fd]">{email}</strong> con el asunto
+                                    «Cómo restablecer tu contraseña».
                                 </p>
+                                <ol className="text-left text-sm text-[#86948a] space-y-2 mb-6 pl-5 list-decimal">
+                                    <li>Abre el correo y pulsa <strong className="text-[#bbcabf]">Crear nueva contraseña</strong>.</li>
+                                    <li>En la web de Ausarta, escribe la nueva contraseña dos veces.</li>
+                                    <li>Vuelve aquí e inicia sesión con tu email y la clave nueva.</li>
+                                </ol>
+                                <p className="text-xs text-[#6b7a70] mb-6">Revisa la carpeta de spam si no lo ves en unos minutos.</p>
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -366,7 +384,7 @@ const LoginView: React.FC = () => {
 
                         {viewMode === 'update-password' && (
                             <form onSubmit={handleUpdatePassword}>
-                                <Field
+                                <LoginField
                                     id="new-pw"
                                     label="Nueva contraseña"
                                     type={showPassword ? 'text' : 'password'}
@@ -375,8 +393,10 @@ const LoginView: React.FC = () => {
                                     placeholder="Mínimo 6 caracteres"
                                     icon={Lock}
                                     showToggle
+                                    showPassword={showPassword}
+                                    onTogglePassword={() => setShowPassword((v) => !v)}
                                 />
-                                <Field
+                                <LoginField
                                     id="confirm-pw"
                                     label="Confirmar contraseña"
                                     type="password"

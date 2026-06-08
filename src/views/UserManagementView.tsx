@@ -8,6 +8,7 @@ import { toast } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { apiFetch } from '../lib/apiFetch';
+import { passwordResetRedirectUrl, requestPasswordReset } from '../lib/passwordReset';
 import { useAuth } from '../contexts/AuthContext';
 import type { UserProfile, UserPermission, UserRole, Empresa } from '../types';
 import { ALL_MODULES } from '../types';
@@ -243,12 +244,7 @@ const UserManagementView: React.FC = () => {
 
     const handleResetPassword = async (email: string) => {
         try {
-            const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                redirectTo: window.location.origin.includes('localhost')
-                    ? 'https://app.ausarta.net'
-                    : window.location.origin,
-            });
-            if (error) throw error;
+            await requestPasswordReset(email, passwordResetRedirectUrl());
             toast.success(t('Password reset email sent to', 'Email de recuperación enviado a') + ' ' + email);
         } catch (err: any) {
             toast.error('Error: ' + err.message);
