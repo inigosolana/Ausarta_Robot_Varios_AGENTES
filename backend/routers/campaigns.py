@@ -469,7 +469,7 @@ async def get_agent_config_by_survey(survey_id: int):
             "stt_provider": ai_data.get("stt_provider") or "deepgram",
             "stt_model": ai_data.get("stt_model") or settings.default_stt_model,
             "extraction_schema": extraction_schema,
-            "company_context": agent_data.get("company_context") or "",
+            "company_context": agent_data.get("company_context") or empresa_context or "",
             "enthusiasm_level": agent_data.get("enthusiasm_level") or "Normal",
             "speaking_speed": agent_data.get("speaking_speed") or 1.0,
             "agent_type": resolved_agent_type,
@@ -607,6 +607,12 @@ async def get_agent_config_by_agent(agent_id: int, empresa_id: Optional[int] = N
             return JSONResponse(status_code=404, content={"error": "Agent not found"})
 
         agent_data = res_agent.data[0]
+        empresa_id_resolved = agent_data.get("empresa_id")
+        empresa_context = ""
+        if empresa_id_resolved:
+            emp_res = supabase.table("empresas").select("company_context").eq("id", empresa_id_resolved).limit(1).execute()
+            if emp_res.data:
+                empresa_context = emp_res.data[0].get("company_context") or ""
         res_ai = supabase.table("ai_config").select("*").eq("agent_id", agent_id).execute()
         ai_data = res_ai.data[0] if res_ai.data else {}
         resolved_agent_type = (
@@ -626,7 +632,7 @@ async def get_agent_config_by_agent(agent_id: int, empresa_id: Optional[int] = N
             "stt_provider": ai_data.get("stt_provider") or "deepgram",
             "stt_model": ai_data.get("stt_model") or settings.default_stt_model,
             "extraction_schema": [],
-            "company_context": agent_data.get("company_context") or "",
+            "company_context": agent_data.get("company_context") or empresa_context or "",
             "enthusiasm_level": agent_data.get("enthusiasm_level") or "Normal",
             "speaking_speed": agent_data.get("speaking_speed") or 1.0,
             "agent_type": resolved_agent_type,

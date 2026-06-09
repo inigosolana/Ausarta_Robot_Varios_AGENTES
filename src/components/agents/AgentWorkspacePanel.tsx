@@ -9,6 +9,7 @@ import {
   ENTHUSIASM_LEVELS,
   getAgentCallDirection,
 } from '../../lib/agentVoiceOptions';
+import { AgentKnowledgeDocs } from './AgentKnowledgeDocs';
 
 type AgentRow = AgentConfig & { ai_config?: AIConfig; empresas?: Empresa };
 
@@ -45,7 +46,6 @@ function agentToForm(agent: AgentRow): AgentConfig {
     instructions: agent.instructions || '',
     critical_rules: agent.critical_rules || '',
     greeting: agent.greeting || '',
-    company_context: agent.company_context || '',
     enthusiasm_level: agent.enthusiasm_level || 'Normal',
     voice_id: agent.voice_id || agent.ai_config?.tts_voice || '',
     speaking_speed: agent.speaking_speed ?? 1.0,
@@ -66,7 +66,6 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
   const [aiConfig, setAiConfig] = useState<AIConfig>({ ...defaultAIConfig, ...(agent.ai_config || {}) });
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingConfig, setIsLoadingConfig] = useState(false);
-  const [isGeneratingContext, setIsGeneratingContext] = useState(false);
 
   const resetForm = useCallback(() => {
     setFormData(agentToForm(agent));
@@ -108,7 +107,6 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
           greeting: data.greeting ?? prev.greeting,
           instructions: data.instructions ?? prev.instructions,
           critical_rules: data.critical_rules ?? prev.critical_rules,
-          company_context: data.company_context ?? prev.company_context,
           enthusiasm_level: data.enthusiasm_level ?? prev.enthusiasm_level,
           speaking_speed: data.speaking_speed ?? prev.speaking_speed,
         }));
@@ -135,25 +133,6 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
   const textareaCls = `${inputCls} agent-mono resize-none leading-relaxed`;
   const labelCls = 'agent-mono mb-1.5 block text-xs font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400';
 
-  const handleGenerateCompanyContext = async () => {
-    setIsGeneratingContext(true);
-    try {
-      const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
-      const resp = await fetch(`${API_URL}/api/ai/company-context`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ empresa_id: formData.empresa_id || agent.empresa_id }),
-      });
-      const result = await resp.json();
-      if (!resp.ok || !result.success) throw new Error(result.error || 'Error');
-      setFormData(prev => ({ ...prev, company_context: result.company_context || prev.company_context || '' }));
-    } catch (err: any) {
-      alert(`${t('Could not generate company context', 'No se pudo generar el contexto')}: ${err.message}`);
-    } finally {
-      setIsGeneratingContext(false);
-    }
-  };
-
   const handleSave = async () => {
     if (!formData.name?.trim()) {
       alert(t('Agent name is mandatory', 'El nombre del agente es obligatorio'));
@@ -173,6 +152,7 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
           tts_voice: formData.voice_id || aiConfig.tts_voice,
           agent_mode: agent.agent_mode || 'prompt',
           workflow_definition: agent.workflow_definition ?? null,
+          company_context: undefined,
         }),
       });
       if (!res.ok) {
@@ -351,33 +331,13 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
                   className={`${textareaCls} h-64 ${!isEditing ? 'cursor-default opacity-90' : ''}`}
                 />
               </div>
-              <div>
-                <div className="mb-1.5 flex items-center justify-between">
-                  <label className={labelCls}>Contexto empresa</label>
-                  {isEditing && (
-                    <button
-                      type="button"
-                      onClick={handleGenerateCompanyContext}
-                      disabled={isGeneratingContext}
-                      className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400"
-                    >
-                      {isGeneratingContext ? t('Generating...', 'Generando...') : t('Auto-fill from web', 'Autorrellenar')}
-                    </button>
-                  )}
-                </div>
-                {isEditing ? (
-                  <textarea
-                    value={formData.company_context || ''}
-                    onChange={e => setFormData({ ...formData, company_context: e.target.value })}
-                    rows={5}
-                    className={textareaCls}
-                  />
-                ) : (
-                  <p className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-sm text-gray-600 dark:border-white/5 dark:bg-gray-900/40 dark:text-gray-400">
-                    {agent.company_context || '—'}
-                  </p>
-                )}
-              </div>
+              {agent.id && (
+                <AgentKnowledgeDocs
+                  agentId={Number(agent.id)}
+                  empresaId={agent.empresa_id}
+                  isEditing={isEditing}
+                />
+              )}
             </div>
           )}
 

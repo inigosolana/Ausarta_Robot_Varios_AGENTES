@@ -4,6 +4,8 @@ import {
   AlertCircle,
   Loader2,
   X,
+  Building2,
+  Users,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -33,13 +35,13 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 const SOURCE_BADGE: Record<string, string> = {
-  pdf: 'bg-violet-500/10 text-violet-300 border-violet-500/25',
-  web: 'bg-primary/10 text-primary border-primary/25',
-  manual: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25',
-  faq: 'bg-amber-500/10 text-amber-300 border-amber-500/25',
-  policy: 'bg-rose-500/10 text-rose-300 border-rose-500/25',
-  md: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25',
-  json: 'bg-yellow-500/10 text-yellow-300 border-yellow-500/25',
+  pdf: 'bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-500/10 dark:text-violet-300 dark:border-violet-500/25',
+  web: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-primary/10 dark:text-primary dark:border-primary/25',
+  manual: 'bg-cyan-100 text-cyan-700 border-cyan-200 dark:bg-cyan-500/10 dark:text-cyan-300 dark:border-cyan-500/25',
+  faq: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/25',
+  policy: 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/25',
+  md: 'bg-cyan-100 text-cyan-700 border-cyan-200 dark:bg-cyan-500/10 dark:text-cyan-300 dark:border-cyan-500/25',
+  json: 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-500/10 dark:text-yellow-300 dark:border-yellow-500/25',
 };
 
 const API_BASE =
@@ -51,13 +53,13 @@ function MaterialIcon({ name, className = '' }: { name: string; className?: stri
 
 function sourceBadgeClass(type: string): string {
   const key = type.toLowerCase();
-  return SOURCE_BADGE[key] ?? 'bg-surface-container-highest text-on-surface-variant border-outline-variant/40';
+  return SOURCE_BADGE[key] ?? 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700';
 }
 
 function matchColor(similarity: number): string {
-  if (similarity >= 0.9) return 'text-primary border-primary/25 bg-primary/10';
-  if (similarity >= 0.75) return 'text-cyan-300 border-cyan-500/25 bg-cyan-500/10';
-  return 'text-on-surface-variant border-outline-variant/40 bg-surface-container';
+  if (similarity >= 0.9) return 'text-emerald-700 border-emerald-200 bg-emerald-50 dark:text-primary dark:border-primary/25 dark:bg-primary/10';
+  if (similarity >= 0.75) return 'text-cyan-700 border-cyan-200 bg-cyan-50 dark:text-cyan-300 dark:border-cyan-500/25 dark:bg-cyan-500/10';
+  return 'text-gray-600 border-gray-200 bg-gray-50 dark:text-gray-400 dark:border-gray-700 dark:bg-gray-800';
 }
 
 export function KnowledgeBaseView() {
@@ -87,6 +89,9 @@ export function KnowledgeBaseView() {
   const [searchThreshold, setSearchThreshold] = useState(0.7);
 
   const [deletingTitle, setDeletingTitle] = useState<string | null>(null);
+  const [companyContext, setCompanyContext] = useState('');
+  const [savingContext, setSavingContext] = useState(false);
+  const [generatingContext, setGeneratingContext] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -138,6 +143,65 @@ export function KnowledgeBaseView() {
   }, [empresa_id, token]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadCompanyContext = useCallback(async () => {
+    if (!empresa_id) {
+      setCompanyContext('');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/knowledge/company-context?empresa_id=${empresa_id}`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setCompanyContext(data.company_context || '');
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, [empresa_id, token]);
+
+  useEffect(() => { loadCompanyContext(); }, [loadCompanyContext]);
+
+  const saveCompanyContext = async () => {
+    if (!empresa_id) return;
+    setSavingContext(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/knowledge/company-context`, {
+        method: 'PUT',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ empresa_id, company_context: companyContext }),
+      });
+      if (res.ok) flash('ok', 'Contexto de empresa guardado');
+      else flash('error', 'No se pudo guardar el contexto');
+    } catch (e) {
+      flash('error', String(e));
+    } finally {
+      setSavingContext(false);
+    }
+  };
+
+  const generateCompanyContext = async () => {
+    if (!empresa_id) return;
+    setGeneratingContext(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/company-context`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ empresa_id }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCompanyContext(data.company_context || '');
+        flash('ok', 'Contexto generado — recuerda guardar');
+      } else {
+        flash('error', data.error || 'Error al generar contexto');
+      }
+    } catch (e) {
+      flash('error', String(e));
+    } finally {
+      setGeneratingContext(false);
+    }
+  };
 
   const flash = (type: 'ok' | 'error', text: string) => {
     setMsg({ type, text });
@@ -281,20 +345,54 @@ export function KnowledgeBaseView() {
   };
 
   return (
-    <div className="kb-page relative min-h-full text-on-surface">
-      <div className="pointer-events-none absolute top-0 right-0 h-[420px] w-[420px] rounded-full bg-primary/5 blur-[100px]" />
+    <div className="kb-page relative min-h-full">
+      <div className="pointer-events-none absolute top-0 right-0 h-[420px] w-[420px] rounded-full bg-emerald-500/5 blur-[100px]" />
       <div className="pointer-events-none absolute bottom-0 left-0 h-[360px] w-[360px] rounded-full bg-cyan-500/5 blur-[90px]" />
 
-      <div className="relative z-10 mx-auto max-w-7xl space-y-8">
+      <div className="relative z-10 mx-auto max-w-7xl space-y-6">
+        {/* Empresa selector */}
+        <div className="kb-empresa-bar flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-300">
+              <Building2 size={22} />
+            </div>
+            <div>
+              <p className="kb-mono text-xs font-bold uppercase tracking-widest text-indigo-600/80 dark:text-indigo-300/90">
+                Empresas
+              </p>
+              <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                {selectedEmpresaName || (isPlatformOwner ? 'Selecciona una empresa' : 'Tu empresa')}
+              </p>
+              {empresa_id && (
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  Conocimiento compartido por todos los agentes de esta empresa
+                </p>
+              )}
+            </div>
+          </div>
+          {isPlatformOwner ? (
+            <select
+              value={selectedEmpresaId || ''}
+              onChange={e => setSelectedEmpresaId(e.target.value ? Number(e.target.value) : null)}
+              className="kb-empresa-bar__select"
+            >
+              <option value="">Selecciona empresa</option>
+              {empresas.map(emp => (
+                <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+              ))}
+            </select>
+          ) : null}
+        </div>
+
         {/* Breadcrumb */}
-        <div className="flex items-center gap-2 text-sm text-on-surface-variant">
+        <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
           <span>Operaciones</span>
           <MaterialIcon name="chevron_right" className="!text-base opacity-60" />
-          <span className="font-medium text-on-surface">Base de Conocimiento</span>
+          <span className="font-medium text-gray-900 dark:text-gray-100">Base de Conocimiento</span>
           {selectedEmpresaName && (
             <>
               <MaterialIcon name="chevron_right" className="!text-base opacity-60" />
-              <span className="font-medium text-primary">{selectedEmpresaName}</span>
+              <span className="font-medium text-emerald-600 dark:text-primary">{selectedEmpresaName}</span>
             </>
           )}
         </div>
@@ -303,39 +401,33 @@ export function KnowledgeBaseView() {
         <div className="flex flex-col justify-between gap-6 md:flex-row md:items-start">
           <div className="space-y-2">
             <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary/80 to-cyan-600 shadow-lg shadow-primary/20">
-                <MaterialIcon name="menu_book" className="!text-2xl text-on-primary" />
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-600 shadow-lg shadow-emerald-500/20">
+                <MaterialIcon name="menu_book" className="!text-2xl text-white" />
               </div>
-              <h1 className="text-3xl font-bold tracking-tight text-on-surface">
-                Bóveda de Conocimiento
+              <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+                Base de Conocimiento
               </h1>
             </div>
-            <p className="ml-16 text-lg text-on-surface-variant">
-              Conocimiento indexado para RAG de alta fidelidad por empresa.
+            <p className="ml-16 max-w-2xl text-base text-gray-500 dark:text-gray-400">
+              Información de la empresa, datos de clientes, catálogos, políticas o cualquier documento útil para las llamadas.
+              Lo consultan <strong className="font-semibold text-gray-700 dark:text-gray-200">todos los agentes</strong> de{' '}
+              {selectedEmpresaName || 'la empresa'}.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            {isPlatformOwner && (
-              <select
-                value={selectedEmpresaId || ''}
-                onChange={e => setSelectedEmpresaId(e.target.value ? Number(e.target.value) : null)}
-                className="rounded-lg border border-outline-variant/50 bg-surface-container px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                <option value="">Selecciona empresa</option>
-                {empresas.map(emp => (
-                  <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                ))}
-              </select>
-            )}
-            <div className="kb-glass flex items-center gap-3 rounded-full px-4 py-2">
-              <span className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Estado</span>
-              <div className="h-4 w-px bg-outline-variant/50" />
-              <div className="flex items-center gap-2 text-sm font-bold text-primary">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-primary shadow-[0_0_8px_rgba(78,222,163,0.6)]" />
-                {loading ? 'SINCRONIZANDO' : docs.length ? 'SINCRONIZADO' : 'VACÍO'}
-              </div>
+          <div className="flex flex-col items-end gap-2 self-start">
+          <div className="kb-glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-primary">
+            <Users size={14} />
+            <span>Compartido · todos los agentes</span>
+          </div>
+          <div className="kb-glass flex items-center gap-3 rounded-full px-4 py-2">
+            <span className="text-xs font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400">Estado</span>
+            <div className="h-4 w-px bg-gray-200 dark:bg-gray-600" />
+            <div className="flex items-center gap-2 text-sm font-bold text-emerald-600 dark:text-primary">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500 dark:bg-primary shadow-[0_0_8px_rgba(78,222,163,0.6)]" />
+              {loading ? 'SINCRONIZANDO' : docs.length ? 'SINCRONIZADO' : 'VACÍO'}
             </div>
+          </div>
           </div>
         </div>
 
@@ -344,8 +436,8 @@ export function KnowledgeBaseView() {
           <div
             className={`kb-glass flex items-center gap-2 rounded-xl px-4 py-3 text-sm ${
               msg.type === 'ok'
-                ? 'border-primary/30 text-primary'
-                : 'border-red-500/30 text-red-300'
+                ? 'border-emerald-200 text-emerald-700 dark:border-primary/30 dark:text-primary'
+                : 'border-red-200 text-red-700 dark:border-red-500/30 dark:text-red-300'
             }`}
           >
             {msg.type === 'ok' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
@@ -357,12 +449,68 @@ export function KnowledgeBaseView() {
         )}
 
         {!empresa_id && (
-          <div className="kb-glass rounded-2xl p-10 text-center text-on-surface-variant">
+          <div className="kb-glass rounded-2xl p-10 text-center text-gray-500 dark:text-gray-400">
             Selecciona una empresa para gestionar su base de conocimiento.
           </div>
         )}
 
         {empresa_id && (
+          <>
+          <div className="kb-glass rounded-2xl border border-emerald-200/80 bg-emerald-50/60 p-4 dark:border-primary/20 dark:bg-primary/5">
+            <div className="flex gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-primary/15 dark:text-primary">
+                <Users size={20} />
+              </div>
+              <div className="text-sm text-gray-700 dark:text-gray-300">
+                <p className="font-semibold text-gray-900 dark:text-white">
+                  Base de conocimiento de {selectedEmpresaName || 'la empresa'}
+                </p>
+                <p className="mt-1 leading-relaxed text-gray-600 dark:text-gray-400">
+                  Sube aquí lo que cualquier agente de la empresa pueda necesitar: quiénes sois, servicios, precios,
+                  guías de clientes, incidencias frecuentes, procedimientos internos, etc. No hace falta repetirlo en cada agente.
+                  Si un agente necesita documentación solo suya (por ejemplo, un guion de ventas), añádela en{' '}
+                  <span className="font-medium text-emerald-700 dark:text-primary">Agentes de voz</span>.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <section className="kb-glass rounded-2xl p-6">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Contexto de empresa</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Resumen en texto libre sobre {selectedEmpresaName || 'la empresa'}: qué hace, cómo atiende y qué debe saber cualquier agente.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={generateCompanyContext}
+                  disabled={generatingContext}
+                  className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary"
+                >
+                  {generatingContext ? 'Generando…' : 'Autorrellenar'}
+                </button>
+                <button
+                  type="button"
+                  onClick={saveCompanyContext}
+                  disabled={savingContext}
+                  className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-on-primary"
+                >
+                  {savingContext ? 'Guardando…' : 'Guardar contexto'}
+                </button>
+              </div>
+            </div>
+            <textarea
+              value={companyContext}
+              onChange={e => setCompanyContext(e.target.value)}
+              rows={5}
+              placeholder="Ej: somos una clínica dental en Madrid; horario L–V 9–20h; política de cancelación 24h; tono cercano y profesional…"
+              className="kb-field w-full rounded-xl px-4 py-3"
+            />
+          </section>
+
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             {/* Left column */}
             <div className="space-y-6 lg:col-span-2">
@@ -370,12 +518,17 @@ export function KnowledgeBaseView() {
               <section className="kb-glass relative overflow-hidden rounded-2xl p-6">
                 <div className="absolute left-0 top-0 h-full w-1 bg-primary" />
                 <div className="mb-6 flex items-center justify-between">
-                  <h2 className="flex items-center gap-2 text-lg font-semibold">
-                    <MaterialIcon name="upload_file" className="text-primary" />
-                    Indexar documentos
-                  </h2>
-                  <span className="rounded border border-primary/20 bg-surface-container-highest px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-primary">
-                    RAG · pgvector
+                  <div>
+                    <h2 className="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
+                      <MaterialIcon name="upload_file" className="text-emerald-600 dark:text-primary" />
+                      Documentos de la empresa
+                    </h2>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      Manuales, FAQs, fichas de clientes, catálogos, políticas… indexados para toda la empresa.
+                    </p>
+                  </div>
+                  <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:border-primary/20 dark:bg-gray-800 dark:text-primary">
+                    Empresa · todos los agentes
                   </span>
                 </div>
 
@@ -389,10 +542,10 @@ export function KnowledgeBaseView() {
                   onKeyDown={e => e.key === 'Enter' && fileInputRef.current?.click()}
                   className={`group flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-10 text-center transition-all ${
                     dragOver
-                      ? 'border-primary/60 bg-primary/5'
+                      ? 'border-emerald-400 bg-emerald-50 dark:border-primary/60 dark:bg-primary/5'
                       : uploadFile
-                        ? 'border-primary/40 bg-primary/5'
-                        : 'border-outline-variant/60 hover:border-primary/50 hover:bg-surface-container-highest/30'
+                        ? 'border-emerald-300 bg-emerald-50 dark:border-primary/40 dark:bg-primary/5'
+                        : 'border-gray-300 hover:border-emerald-400 hover:bg-gray-50 dark:border-gray-600 dark:hover:border-primary/50 dark:hover:bg-gray-800/40'
                   }`}
                 >
                   <input
@@ -402,27 +555,27 @@ export function KnowledgeBaseView() {
                     accept=".txt,.md,.pdf,.csv,.json,.xlsx,.xls,.docx"
                     onChange={e => { const f = e.target.files?.[0]; if (f) applyFile(f); }}
                   />
-                  <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-surface-container-highest transition-transform group-hover:scale-110 group-hover:bg-primary/15">
+                  <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 transition-transform group-hover:scale-110 group-hover:bg-emerald-100 dark:bg-gray-800 dark:group-hover:bg-primary/15">
                     <MaterialIcon
                       name={uploadFile ? 'description' : 'cloud_upload'}
-                      className="!text-3xl text-on-surface-variant group-hover:text-primary"
+                      className="!text-3xl text-gray-400 group-hover:text-emerald-600 dark:group-hover:text-primary"
                     />
                   </div>
                   {uploadFile ? (
-                    <div className="flex items-center gap-2 text-primary">
+                    <div className="flex items-center gap-2 text-emerald-600 dark:text-primary">
                       <span className="font-semibold">{uploadFile.name}</span>
                       <button
                         type="button"
                         onClick={e => { e.stopPropagation(); setUploadFile(null); }}
-                        className="rounded p-1 hover:bg-red-500/10 hover:text-red-300"
+                        className="rounded p-1 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-300"
                       >
                         <X size={16} />
                       </button>
                     </div>
                   ) : (
                     <>
-                      <h3 className="mb-1 text-lg font-semibold">Arrastra documentos aquí</h3>
-                      <p className="mb-6 text-sm text-on-surface-variant">
+                      <h3 className="mb-1 text-lg font-semibold text-gray-900 dark:text-white">Arrastra documentos aquí</h3>
+                      <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
                         PDF, Markdown, TXT, CSV, JSON y Excel hasta 50 MB
                       </p>
                     </>
@@ -430,7 +583,7 @@ export function KnowledgeBaseView() {
                   <button
                     type="button"
                     onClick={e => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                    className="rounded-lg bg-on-surface px-6 py-2.5 text-sm font-semibold text-background shadow-[0_0_15px_rgba(255,255,255,0.08)] transition-colors hover:bg-white"
+                    className="rounded-lg bg-gray-900 px-6 py-2.5 text-sm font-semibold text-white shadow-md transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
                   >
                     Seleccionar archivos
                   </button>
@@ -438,25 +591,25 @@ export function KnowledgeBaseView() {
 
                 <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-on-surface-variant">
+                    <label className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
                       Título del documento
                     </label>
                     <input
                       type="text"
                       value={uploadTitle}
                       onChange={e => setUploadTitle(e.target.value)}
-                      placeholder="Ej: Manual de instalación v2"
-                      className="w-full rounded-lg border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      placeholder="Ej: Catálogo productos 2025, FAQ clientes, Política devoluciones…"
+                      className="kb-field px-3 py-2.5"
                     />
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-on-surface-variant">
+                    <label className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
                       Tipo de fuente
                     </label>
                     <select
                       value={uploadType}
                       onChange={e => setUploadType(e.target.value)}
-                      className="w-full rounded-lg border border-outline-variant/50 bg-surface-container px-3 py-2.5 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="kb-field px-3 py-2.5"
                     >
                       {Object.entries(SOURCE_LABELS).map(([v, l]) => (
                         <option key={v} value={v}>{l}</option>
@@ -475,20 +628,20 @@ export function KnowledgeBaseView() {
                   {uploading ? 'Indexando…' : 'Indexar documento'}
                 </button>
 
-                <div className="mt-6 border-t border-outline-variant/30 pt-6">
-                  <h3 className="mb-3 flex items-center gap-2 text-sm font-medium text-on-surface-variant">
-                    <MaterialIcon name="language" className="!text-base text-cyan-400" />
+                <div className="mt-6 border-t border-gray-200 pt-6 dark:border-gray-700">
+                  <h3 className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-500 dark:text-gray-400">
+                    <MaterialIcon name="language" className="!text-base text-cyan-500 dark:text-cyan-400" />
                     Añadir fuente desde URL
                   </h3>
                   <div className="flex flex-col gap-3 sm:flex-row">
                     <div className="relative flex-1">
-                      <MaterialIcon name="link" className="absolute left-3 top-1/2 -translate-y-1/2 !text-base text-on-surface-variant" />
+                      <MaterialIcon name="link" className="absolute left-3 top-1/2 -translate-y-1/2 !text-base text-gray-400" />
                       <input
                         type="text"
                         value={urlInput}
                         onChange={e => setUrlInput(e.target.value)}
                         placeholder="https://docs.tuempresa.com/guias/..."
-                        className="w-full rounded-lg border border-outline-variant/50 bg-surface-container py-2.5 pl-9 pr-4 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:border-cyan-400 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                        className="kb-field py-2.5 pl-9 pr-4"
                       />
                     </div>
                     <input
@@ -496,7 +649,7 @@ export function KnowledgeBaseView() {
                       value={urlTitle}
                       onChange={e => setUrlTitle(e.target.value)}
                       placeholder="Título"
-                      className="w-full rounded-lg border border-outline-variant/50 bg-surface-container px-4 py-2.5 text-sm text-on-surface sm:w-48"
+                      className="kb-field px-4 py-2.5 sm:w-48"
                     />
                     <button
                       type="button"
@@ -515,28 +668,33 @@ export function KnowledgeBaseView() {
               <section className="kb-glass relative overflow-hidden rounded-2xl p-6">
                 <div className="absolute left-0 top-0 h-full w-1 bg-cyan-400" />
                 <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-                  <h2 className="flex items-center gap-2 text-lg font-semibold">
-                    <MaterialIcon name="layers" className="text-cyan-400" />
-                    Conocimiento activo
-                  </h2>
-                  <p className="kb-mono rounded bg-surface-container px-2 py-1 text-xs text-on-surface-variant">
+                  <div>
+                    <h2 className="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
+                      <MaterialIcon name="layers" className="text-cyan-500 dark:text-cyan-400" />
+                      Conocimiento activo de la empresa
+                    </h2>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      Documentos indexados disponibles para todos los agentes de {selectedEmpresaName || 'la empresa'}.
+                    </p>
+                  </div>
+                  <p className="kb-mono rounded bg-gray-100 px-2 py-1 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-400">
                     Total chunks: {totalChunks}
                   </p>
                 </div>
 
                 {loading ? (
-                  <div className="flex items-center justify-center py-16 text-on-surface-variant">
+                  <div className="flex items-center justify-center py-16 text-gray-500 dark:text-gray-400">
                     <Loader2 size={24} className="mr-2 animate-spin" />
                     Cargando índice…
                   </div>
                 ) : docs.length === 0 ? (
-                  <p className="py-12 text-center text-sm text-on-surface-variant">
-                    No hay documentos indexados. Sube el primero arriba.
+                  <p className="py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+                    Aún no hay documentos de empresa. Sube información, clientes o procedimientos que todos los agentes puedan usar.
                   </p>
                 ) : (
-                  <div className="overflow-x-auto rounded-lg border border-outline-variant/30 bg-surface-container-low/40">
+                  <div className="overflow-x-auto rounded-lg border border-gray-200 bg-gray-50/50 dark:border-gray-700 dark:bg-gray-900/30">
                     <table className="w-full text-left text-sm">
-                      <thead className="border-b border-outline-variant/30 bg-surface-container-highest/50 text-xs uppercase text-on-surface-variant">
+                      <thead className="border-b border-gray-200 bg-gray-100 text-xs uppercase text-gray-500 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-400">
                         <tr>
                           <th className="px-4 py-3 font-semibold">Documento</th>
                           <th className="px-4 py-3 font-semibold">Tipo</th>
@@ -545,11 +703,11 @@ export function KnowledgeBaseView() {
                           <th className="px-4 py-3 text-right font-semibold">Acciones</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-outline-variant/20">
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                         {docs.map(doc => (
-                          <tr key={doc.titulo} className="group transition-colors hover:bg-surface-container-highest/30">
-                            <td className="flex max-w-xs items-center gap-2 px-4 py-3 font-medium">
-                              <MaterialIcon name={docIcon(doc.source_type)} className="!text-base text-on-surface-variant" />
+                          <tr key={doc.titulo} className="group transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/40">
+                            <td className="flex max-w-xs items-center gap-2 px-4 py-3 font-medium text-gray-900 dark:text-gray-100">
+                              <MaterialIcon name={docIcon(doc.source_type)} className="!text-base text-gray-400" />
                               <span className="truncate">{doc.titulo}</span>
                             </td>
                             <td className="px-4 py-3">
@@ -557,8 +715,8 @@ export function KnowledgeBaseView() {
                                 {SOURCE_LABELS[doc.source_type] ?? doc.source_type}
                               </span>
                             </td>
-                            <td className="kb-mono px-4 py-3 text-on-surface-variant">{doc.chunks}</td>
-                            <td className="px-4 py-3 text-on-surface-variant">
+                            <td className="kb-mono px-4 py-3 text-gray-500 dark:text-gray-400">{doc.chunks}</td>
+                            <td className="px-4 py-3 text-gray-500 dark:text-gray-400">
                               {new Date(doc.created_at).toLocaleDateString('es-ES', {
                                 day: 'numeric',
                                 month: 'short',
@@ -570,7 +728,7 @@ export function KnowledgeBaseView() {
                                 type="button"
                                 onClick={() => handleDelete(doc.titulo)}
                                 disabled={deletingTitle === doc.titulo}
-                                className="rounded p-1 text-on-surface-variant opacity-0 transition-all hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100 disabled:opacity-50"
+                                className="rounded p-1 text-gray-400 opacity-0 transition-all hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 disabled:opacity-50 dark:hover:bg-red-500/10 dark:hover:text-red-300"
                                 title="Eliminar"
                               >
                                 {deletingTitle === doc.titulo
@@ -591,28 +749,33 @@ export function KnowledgeBaseView() {
             <div className="lg:col-span-1">
               <div className="kb-glass relative flex h-full flex-col overflow-hidden rounded-2xl p-6">
                 <div className="kb-grid-bg pointer-events-none absolute inset-0" />
-                <h2 className="relative z-10 mb-6 flex items-center gap-2 text-lg font-semibold">
-                  <MaterialIcon name="troubleshoot" className="text-primary" />
-                  Búsqueda semántica
-                </h2>
+                <div className="relative z-10 mb-6">
+                  <h2 className="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
+                    <MaterialIcon name="troubleshoot" className="text-emerald-600 dark:text-primary" />
+                    Búsqueda semántica
+                  </h2>
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    Prueba qué encontrarían los agentes al consultar el conocimiento de la empresa.
+                  </p>
+                </div>
 
                 <div className="relative z-10 flex flex-1 flex-col space-y-4">
                   <div className="relative">
-                    <MaterialIcon name="manage_search" className="absolute left-3 top-1/2 -translate-y-1/2 !text-base text-on-surface-variant" />
+                    <MaterialIcon name="manage_search" className="absolute left-3 top-1/2 -translate-y-1/2 !text-base text-gray-400" />
                     <input
                       type="text"
                       value={searchQ}
                       onChange={e => setSearchQ(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && handleSearch()}
                       placeholder="Consulta el índice semántico…"
-                      className="w-full rounded-lg border border-outline-variant/50 bg-surface-container py-2.5 pl-10 pr-4 text-sm text-on-surface shadow-inner placeholder:text-on-surface-variant/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="kb-field py-2.5 pl-10 pr-4 shadow-inner"
                     />
                   </div>
 
-                  <div className="rounded-lg border border-outline-variant/30 bg-surface-container-low p-3">
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/40">
                     <div className="mb-2 flex items-center justify-between">
-                      <span className="text-xs font-medium text-on-surface-variant">Umbral de similitud</span>
-                      <span className="kb-mono text-xs text-primary">{searchThreshold.toFixed(2)}</span>
+                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Umbral de similitud</span>
+                      <span className="kb-mono text-xs text-emerald-600 dark:text-primary">{searchThreshold.toFixed(2)}</span>
                     </div>
                     <input
                       type="range"
@@ -620,7 +783,7 @@ export function KnowledgeBaseView() {
                       max={100}
                       value={Math.round(searchThreshold * 100)}
                       onChange={e => setSearchThreshold(Number(e.target.value) / 100)}
-                      className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-surface-container-highest accent-primary"
+                      className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gray-200 accent-emerald-500 dark:bg-gray-700 dark:accent-primary"
                     />
                   </div>
 
@@ -635,27 +798,27 @@ export function KnowledgeBaseView() {
                   </button>
 
                   <div className="mt-2 flex-1 space-y-3">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                       Mejores coincidencias
                     </h3>
 
                     {searchResults.length === 0 && !searching && (
-                      <p className="py-6 text-center text-xs italic text-on-surface-variant/60">
+                      <p className="py-6 text-center text-xs italic text-gray-400 dark:text-gray-500">
                         Escribe una consulta para ver chunks semánticos.
                       </p>
                     )}
 
                     {searchResults.map((r, i) => {
                       const pct = Math.round(r.similarity * 100);
-                      const barColor = r.similarity >= 0.9 ? 'bg-primary/80' : r.similarity >= 0.75 ? 'bg-cyan-400/70' : 'bg-outline-variant';
+                      const barColor = r.similarity >= 0.9 ? 'bg-emerald-500 dark:bg-primary/80' : r.similarity >= 0.75 ? 'bg-cyan-500 dark:bg-cyan-400/70' : 'bg-gray-300 dark:bg-gray-600';
                       return (
                         <div
                           key={`${r.titulo}-${i}`}
-                          className="group relative cursor-pointer overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container p-3 transition-colors hover:border-primary/40"
+                          className="group relative cursor-pointer overflow-hidden rounded-xl border border-gray-200 bg-white p-3 transition-colors hover:border-emerald-300 dark:border-gray-700 dark:bg-gray-800/60 dark:hover:border-primary/40"
                         >
                           <div className={`absolute left-0 top-0 h-full w-1 ${barColor}`} />
                           <div className="mb-2 flex items-start justify-between pl-2">
-                            <div className="flex items-center gap-1 text-xs font-medium text-on-surface-variant">
+                            <div className="flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400">
                               <MaterialIcon name={docIcon('manual')} className="!text-sm" />
                               <span className="max-w-[140px] truncate">{r.titulo}</span>
                             </div>
@@ -663,7 +826,7 @@ export function KnowledgeBaseView() {
                               {pct}% match
                             </span>
                           </div>
-                          <p className="kb-mono line-clamp-3 pl-2 text-[11px] leading-relaxed text-on-surface">
+                          <p className="kb-mono line-clamp-3 pl-2 text-[11px] leading-relaxed text-gray-700 dark:text-gray-200">
                             {r.contenido}
                           </p>
                         </div>
@@ -674,6 +837,7 @@ export function KnowledgeBaseView() {
               </div>
             </div>
           </div>
+          </>
         )}
       </div>
     </div>

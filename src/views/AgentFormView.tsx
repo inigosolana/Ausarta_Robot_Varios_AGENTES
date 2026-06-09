@@ -8,6 +8,8 @@ import DashboardView from './DashboardView';
 import ResultsView from './ResultsView';
 import { TestCallModal } from '../components/TestCallModal';
 import WorkflowEditor from '../components/WorkflowEditor';
+import { AgentKnowledgeDocs } from '../components/agents/AgentKnowledgeDocs';
+import { Link } from 'react-router-dom';
 import './agents.css';
 
 const AUSARTA_FEMALE_VOICE_ID = 'b5aa8098-49ef-475d-89b0-c9262ecf33fd';  // Chica castellano Cartesia
@@ -59,7 +61,6 @@ const AgentFormView: React.FC<Props> = ({ agent, empresaName, onSave, onCancel }
     const [isSaving, setIsSaving] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [isLoadingEmpresas, setIsLoadingEmpresas] = useState(false);
-    const [isGeneratingCompanyContext, setIsGeneratingCompanyContext] = useState(false);
     const [templates, setTemplates] = useState<{ id: number; name: string; content: string }[]>([]);
     const [activeTab, setActiveTab] = useState<'config' | 'overview' | 'results'>('config');
 
@@ -114,42 +115,6 @@ const AgentFormView: React.FC<Props> = ({ agent, empresaName, onSave, onCancel }
             setEmpresas([]);
         } finally {
             setIsLoadingEmpresas(false);
-        }
-    };
-
-    const handleGenerateCompanyContext = async () => {
-        const selectedEmpresa = empresas.find(e => Number(e.id) === Number(formData.empresa_id));
-        const companyName = selectedEmpresa?.nombre?.trim() || '';
-
-        if (!companyName && !formData.empresa_id) {
-            alert(t('Select a company first', 'Selecciona una empresa primero'));
-            return;
-        }
-
-        setIsGeneratingCompanyContext(true);
-        try {
-            const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
-            const resp = await fetch(`${API_URL}/api/ai/company-context`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    empresa_id: formData.empresa_id || profile?.empresa_id || null,
-                    company_name: companyName || undefined,
-                }),
-            });
-            const result = await resp.json();
-            if (!resp.ok || !result.success) {
-                throw new Error(result.error || t('Unknown error', 'Error desconocido'));
-            }
-            setFormData(prev => ({
-                ...prev,
-                company_context: result.company_context || prev.company_context || '',
-            }));
-        } catch (err: any) {
-            console.error('Error generating company context:', err);
-            alert(`${t('Could not generate company context', 'No se pudo generar el contexto de empresa')}: ${err.message}`);
-        } finally {
-            setIsGeneratingCompanyContext(false);
         }
     };
 
@@ -610,33 +575,23 @@ const AgentFormView: React.FC<Props> = ({ agent, empresaName, onSave, onCancel }
                         <section className="agent-form-section space-y-4">
                             <div className="flex items-center gap-2 mb-2">
                                 <Brain size={20} className="text-green-500" />
-                                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('Knowledge Base', 'Base de Conocimiento')}</h2>
+                                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('Agent Knowledge', 'Conocimiento del agente')}</h2>
                             </div>
-                            
-                            <div className="space-y-4">
-                                <div>
-                                    <div className="flex items-center justify-between mb-1 ml-1">
-                                        <label className="block text-xs font-medium text-gray-500">{t('Company Context', 'Contexto de la Empresa')}</label>
-                                        <button
-                                            type="button"
-                                            onClick={handleGenerateCompanyContext}
-                                            disabled={isGeneratingCompanyContext || (!formData.empresa_id && isPlatformOwner)}
-                                            className="text-[11px] px-2 py-1 rounded-md bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 disabled:opacity-50"
-                                        >
-                                            {isGeneratingCompanyContext
-                                                ? t('Generating...', 'Generando...')
-                                                : t('Auto-fill from web', 'Autorrellenar desde web')}
-                                        </button>
-                                    </div>
-                                    <textarea
-                                        rows={8}
-                                        value={formData.company_context || ''}
-                                        onChange={(e) => setFormData({ ...formData, company_context: e.target.value })}
-                                        placeholder={t('Describe your company services, tone, and main objectives...', 'Describe los servicios, tono y objetivos principales...')}
-                                        className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-green-500/20 outline-none resize-none"
-                                    />
-                                </div>
-                            </div>
+                            {isEditing && agent?.id ? (
+                                <AgentKnowledgeDocs
+                                    agentId={Number(agent.id)}
+                                    empresaId={formData.empresa_id || agent.empresa_id}
+                                    isEditing
+                                />
+                            ) : (
+                                <p className="text-sm text-gray-500">
+                                    {t('Save the agent first to attach agent-specific documents.', 'Guarda el agente primero para adjuntar documentos propios.')}{' '}
+                                    <Link to="/knowledge" className="text-cyan-600 hover:underline">
+                                        {t('Company knowledge is managed here', 'El conocimiento de empresa se gestiona aquí')}
+                                    </Link>
+                                    .
+                                </p>
+                            )}
                         </section>
                     </div>
 

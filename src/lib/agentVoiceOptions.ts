@@ -17,12 +17,18 @@ export function getAgentCallDirection(agent: {
   use_case?: string;
   description?: string;
   agent_type?: string;
+  tipo_resultados?: string;
 }): AgentCallDirection | null {
-  const haystack = [agent.name, agent.use_case, agent.description, agent.agent_type]
+  const tipo = String(agent.agent_type || agent.tipo_resultados || '').toUpperCase();
+  if (tipo === 'SOPORTE_CLIENTE') return 'inbound';
+
+  const haystack = [agent.name, agent.use_case, agent.description, agent.agent_type, agent.tipo_resultados]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
-  if (/\binbound\b/.test(haystack) || /\bentrante/.test(haystack)) return 'inbound';
+  if (/\binbound\b/.test(haystack) || /\bentrante/.test(haystack) || /\brecepcion/.test(haystack)) {
+    return 'inbound';
+  }
   if (/\boutbound\b/.test(haystack) || /\bsaliente/.test(haystack)) return 'outbound';
   return null;
 }

@@ -1,12 +1,24 @@
 .kb-page {
   font-family: 'Geist', 'Inter', system-ui, sans-serif;
+  color: #111827;
+}
+
+.dark .kb-page {
+  color: #dae2fd;
 }
 
 .kb-glass {
-  background: rgba(23, 31, 51, 0.55);
+  background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.dark .kb-glass {
+  background: rgba(23, 31, 51, 0.55);
   border: 1px solid rgba(70, 73, 84, 0.35);
+  box-shadow: none;
 }
 
 .kb-mono {
@@ -14,9 +26,77 @@
 }
 
 .kb-grid-bg {
-  background-image: url("data:image/svg+xml,%3Csvg width='20' height='20' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='1' cy='1' r='1' fill='rgba(255,255,255,0.05)'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg width='20' height='20' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='1' cy='1' r='1' fill='rgba(0,0,0,0.04)'/%3E%3C/svg%3E");
   mask-image: linear-gradient(to bottom, white, transparent);
   -webkit-mask-image: linear-gradient(to bottom, white, transparent);
+}
+
+.dark .kb-grid-bg {
+  background-image: url("data:image/svg+xml,%3Csvg width='20' height='20' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='1' cy='1' r='1' fill='rgba(255,255,255,0.05)'/%3E%3C/svg%3E");
+}
+
+.kb-empresa-bar {
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.08), rgba(6, 182, 212, 0.08));
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  padding: 1rem 1.25rem;
+  border-radius: 0.875rem;
+}
+
+.dark .kb-empresa-bar {
+  background: linear-gradient(90deg, rgba(128, 131, 255, 0.12), rgba(76, 215, 246, 0.08));
+  border-color: rgba(128, 131, 255, 0.25);
+}
+
+.kb-empresa-bar__select {
+  min-width: 220px;
+  border-radius: 0.625rem;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  background: #fff;
+  color: #111827;
+}
+
+.kb-empresa-bar__select:focus {
+  outline: none;
+  border-color: #06b6d4;
+  box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.2);
+}
+
+.dark .kb-empresa-bar__select {
+  background: rgba(17, 24, 39, 0.9);
+  color: #f3f4f6;
+  border-color: rgba(6, 182, 212, 0.35);
+}
+
+.kb-field {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #111827;
+  font-size: 0.875rem;
+}
+
+.kb-field:focus {
+  outline: none;
+  border-color: #4edea3;
+  box-shadow: 0 0 0 2px rgba(78, 222, 163, 0.2);
+}
+
+.dark .kb-field {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(6, 14, 32, 0.8);
+  color: #dae2fd;
+}
+
+.kb-field::placeholder {
+  color: #9ca3af;
+}
+
+.dark .kb-field::placeholder {
+  color: rgba(187, 202, 191, 0.5);
 }
 
 .material-symbols-outlined.kb-icon {

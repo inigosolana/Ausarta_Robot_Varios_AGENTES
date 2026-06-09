@@ -24,7 +24,8 @@ import {
 import { supabase } from '../lib/supabase';
 import { SurveyResult } from '../types';
 import { CallResultModal } from './CallResultModal';
-import { apiFetch, fetchTrunks } from '../lib/apiFetch';
+import { apiFetch, extractInboundPhoneNumbers, fetchTrunks } from '../lib/apiFetch';
+import { getAgentCallDirection } from '../lib/agentVoiceOptions';
 
 interface Props {
     agentId: number;
@@ -101,10 +102,7 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, agentType, 
     const thinkingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const transcriptsEndRef = useRef<HTMLDivElement>(null);
     const entryCounter = useRef(0);
-    const normalizedAgentType = String(agentType || '').toUpperCase();
-    const isInboundAgent =
-        normalizedAgentType === 'SOPORTE_CLIENTE' ||
-        /\b(inbound|entrante|recepcion|recepcionista)\b/i.test(agentName || '');
+    const isInboundAgent = getAgentCallDirection({ name: agentName, agent_type: agentType }) === 'inbound';
 
     const cleanup = useCallback(() => {
         if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null; }
@@ -129,14 +127,7 @@ export const TestCallModal: React.FC<Props> = ({ agentId, agentName, agentType, 
         fetchTrunks(empresaId)
             .then((data) => {
                 if (cancelled) return;
-                const numbers = [
-                    ...(data.yeastar_trunks || []),
-                    ...(data.livekit_trunks || []),
-                ]
-                    .filter((trunk) => !trunk.direction || trunk.direction === 'inbound')
-                    .flatMap((trunk) => trunk.phone_numbers || [])
-                    .filter(Boolean);
-                setInboundNumbers(Array.from(new Set(numbers)));
+                setInboundNumbers(extractInboundPhoneNumbers(data));
             })
             .catch((err: any) => {
                 if (!cancelled) setInboundError(err?.message || 'No se pudieron cargar los numeros entrantes');

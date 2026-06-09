@@ -50,13 +50,66 @@ def _resolve_empresa(user: CurrentUser, empresa_id_param: int | None) -> int:
     return int(user.empresa_id or 0)
 
 
+def _apply_agent_scope(query, agent_id: int | None):
+    """NULL agent_id = documentos compartidos de la empresa."""
+    if agent_id is not None:
+        return query.eq("agent_id", agent_id)
+    return query.is_("agent_id", "null")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # LISTA
 # ─────────────────────────────────────────────────────────────────────────────
 
+@router.get("/company-context")
+async def get_company_context(
+    empresa_id: int | None = Query(None),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Contexto textual compartido de la empresa (no por agente)."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión a la base de datos")
+    eid = _resolve_empresa(current_user, empresa_id)
+    if not eid:
+        raise HTTPException(status_code=400, detail="empresa_id requerido")
+    res = await sb_query(
+        lambda: supabase.table("empresas").select("id, nombre, company_context").eq("id", eid).limit(1).execute()
+    )
+    row = (res.data or [None])[0]
+    if not row:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    return {
+        "empresa_id": eid,
+        "nombre": row.get("nombre"),
+        "company_context": row.get("company_context") or "",
+    }
+
+
+@router.put("/company-context")
+async def save_company_context(
+    payload: dict,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Guarda el contexto de empresa compartido por todos los agentes."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión a la base de datos")
+    eid = _resolve_empresa(current_user, payload.get("empresa_id"))
+    if not eid:
+        raise HTTPException(status_code=400, detail="empresa_id requerido")
+    context = str(payload.get("company_context") or "").strip()
+    await sb_query(
+        lambda: supabase.table("empresas")
+        .update({"company_context": context})
+        .eq("id", eid)
+        .execute()
+    )
+    return {"status": "ok", "empresa_id": eid, "company_context": context}
+
+
 @router.get("/")
 async def list_knowledge(
     empresa_id: int | None = Query(None),
+    agent_id: int | None = Query(None, description="Si se omite, solo docs de empresa (agent_id NULL)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: CurrentUser = Depends(get_current_user),
@@ -73,9 +126,12 @@ async def list_knowledge(
 
     # Agrupamos por (titulo, source_type) para mostrar un doc = todos sus chunks
     res = await sb_query(
-        lambda eid=eid, lim=page_size, off=offset: supabase.table("knowledge_base")
-        .select("id, titulo, source_type, chunk_index, created_at, updated_at")
-        .eq("empresa_id", eid)
+        lambda eid=eid, aid=agent_id, lim=page_size, off=offset: _apply_agent_scope(
+            supabase.table("knowledge_base")
+            .select("id, titulo, source_type, chunk_index, created_at, updated_at")
+            .eq("empresa_id", eid),
+            aid,
+        )
         .order("created_at", desc=True)
         .range(off, off + lim - 1)
         .execute()
@@ -109,6 +165,7 @@ async def upload_knowledge(
     titulo: str = Form(...),
     source_type: str = Form("manual"),
     empresa_id: int | None = Form(None),
+    agent_id: int | None = Form(None),
     current_user: CurrentUser = Depends(require_admin),
 ):
     """
@@ -161,14 +218,17 @@ async def upload_knowledge(
             if isinstance(emb, Exception) or emb is None:
                 logger.warning("[knowledge] Embedding fallido chunk %d, se inserta sin vector", i + j)
                 emb = None
-            rows_to_insert.append({
+            row: dict = {
                 "empresa_id": eid,
                 "titulo": titulo,
                 "contenido": chunk,
                 "chunk_index": i + j,
                 "embedding": emb,
                 "source_type": source_type,
-            })
+            }
+            if agent_id is not None:
+                row["agent_id"] = int(agent_id)
+            rows_to_insert.append(row)
 
     # Insertar en Supabase
     try:
@@ -206,6 +266,7 @@ async def upload_knowledge_url(
     titulo: str = Form(...),
     source_type: str = Form("web"),
     empresa_id: int | None = Form(None),
+    agent_id: int | None = Form(None),
     current_user: CurrentUser = Depends(require_admin),
 ):
     """Indexa una URL remota como documento de la base de conocimiento."""
@@ -239,14 +300,17 @@ async def upload_knowledge_url(
         for j, (chunk, emb) in enumerate(zip(batch, embeddings)):
             if isinstance(emb, Exception) or emb is None:
                 emb = None
-            rows_to_insert.append({
+            row: dict = {
                 "empresa_id": eid,
                 "titulo": titulo,
                 "contenido": chunk,
                 "chunk_index": i + j,
                 "embedding": emb,
                 "source_type": source_type or "web",
-            })
+            }
+            if agent_id is not None:
+                row["agent_id"] = int(agent_id)
+            rows_to_insert.append(row)
 
     res = await sb_query(
         lambda rows=rows_to_insert: supabase.table("knowledge_base").insert(rows).execute()
@@ -376,6 +440,7 @@ async def _extract_text_from_url(url: str) -> str:
 async def delete_knowledge_by_title(
     titulo_encoded: str,
     empresa_id: int | None = Query(None),
+    agent_id: int | None = Query(None),
     current_user: CurrentUser = Depends(require_admin),
 ):
     """Elimina todos los chunks de un documento por título."""
@@ -390,11 +455,13 @@ async def delete_knowledge_by_title(
     titulo = unquote(titulo_encoded)
 
     await sb_query(
-        lambda eid=eid, t=titulo: supabase.table("knowledge_base")
-        .delete()
-        .eq("empresa_id", eid)
-        .eq("titulo", t)
-        .execute()
+        lambda eid=eid, aid=agent_id, t=titulo: _apply_agent_scope(
+            supabase.table("knowledge_base")
+            .delete()
+            .eq("empresa_id", eid)
+            .eq("titulo", t),
+            aid,
+        ).execute()
     )
     return
 
@@ -407,6 +474,7 @@ async def delete_knowledge_by_title(
 async def test_search(
     q: str = Query(..., min_length=2),
     empresa_id: int | None = Query(None),
+    agent_id: int | None = Query(None),
     limit: int = Query(5, ge=1, le=20),
     threshold: float = Query(0.7, ge=0.0, le=1.0),
     current_user: CurrentUser = Depends(get_current_user),
@@ -416,7 +484,9 @@ async def test_search(
     if not eid:
         raise HTTPException(status_code=400, detail="empresa_id requerido")
 
-    results = await search_knowledge(eid, q, limit=limit, threshold=threshold)
+    results = await search_knowledge(
+        eid, q, limit=limit, threshold=threshold, agent_id=agent_id
+    )
     return {"query": q, "results": results, "total": len(results)}
 
 

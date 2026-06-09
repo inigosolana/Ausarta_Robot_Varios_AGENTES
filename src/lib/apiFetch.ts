@@ -146,3 +146,14 @@ export async function fetchTrunks(empresaId?: number | null): Promise<TelephonyT
     }
     return res.json();
 }
+
+export function extractInboundPhoneNumbers(data: TelephonyTrunksResponse): string[] {
+    const numbers = [
+        ...(data.yeastar_trunks || []),
+        ...(data.livekit_trunks || []),
+    ]
+        .filter((trunk) => !trunk.direction || trunk.direction === 'inbound')
+        .flatMap((trunk) => trunk.phone_numbers || [])
+        .filter(Boolean);
+    return Array.from(new Set(numbers));
+}

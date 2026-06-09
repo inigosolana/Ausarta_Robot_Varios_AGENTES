@@ -826,12 +826,21 @@ class DynamicAgent(Agent):
         try:
             from services.embedding_service import search_knowledge
 
+            agent_id_int = None
+            try:
+                raw_agent_id = self.agent_config.get("agent_id")
+                if raw_agent_id is not None:
+                    agent_id_int = int(str(raw_agent_id))
+            except (TypeError, ValueError):
+                agent_id_int = None
+
             rows = await asyncio.wait_for(
                 search_knowledge(
                     empresa_id=empresa_id_int,
                     query=consulta.strip(),
                     limit=max(1, min(int(limite), 8)),
                     threshold=float(threshold),
+                    agent_id=agent_id_int,
                 ),
                 timeout=5,
             )

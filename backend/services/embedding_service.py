@@ -96,6 +96,7 @@ async def search_knowledge(
     query: str,
     limit: int = 5,
     threshold: float = 0.75,
+    agent_id: int | None = None,
 ) -> list[dict]:
     """
     Busca chunks relevantes en la base de conocimiento de una empresa.
@@ -112,16 +113,17 @@ async def search_knowledge(
         if not embedding:
             return []
 
+        rpc_args: dict = {
+            "p_empresa_id": empresa_id,
+            "p_embedding": embedding,
+            "p_limit": limit,
+            "p_threshold": threshold,
+        }
+        if agent_id is not None:
+            rpc_args["p_agent_id"] = agent_id
+
         result = await sb_query(
-            lambda eid=empresa_id, emb=embedding, lim=limit, thr=threshold: supabase.rpc(
-                "search_knowledge_base",
-                {
-                    "p_empresa_id": eid,
-                    "p_embedding": emb,
-                    "p_limit": lim,
-                    "p_threshold": thr,
-                },
-            ).execute()
+            lambda args=rpc_args: supabase.rpc("search_knowledge_base", args).execute()
         )
         return result.data or []
 
