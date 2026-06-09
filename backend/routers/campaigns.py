@@ -27,9 +27,10 @@ import asyncio
 import random
 import os
 import logging
+from config import settings
 
 logger = logging.getLogger("api-backend")
-DEFAULT_AUSARTA_VOICE_ID = "b5aa8098-49ef-475d-89b0-c9262ecf33fd"  # Chica castellano Cartesia
+DEFAULT_AUSARTA_VOICE_ID = settings.default_cartesia_voice
 
 router = APIRouter(prefix="/api", tags=["campaigns"])
 
@@ -73,8 +74,8 @@ class ScheduleRetryRequest(BaseModel):
 _empresas_en_llamada_fallback: set[int] = set()
 
 # Rango de cooldown entre llamadas de la misma empresa (segundos)
-_COOLDOWN_MIN = int(os.getenv("DRIP_COOLDOWN_MIN_SECONDS", "120"))  # 2 minutos
-_COOLDOWN_MAX = int(os.getenv("DRIP_COOLDOWN_MAX_SECONDS", "180"))  # 3 minutos
+_COOLDOWN_MIN = int(os.getenv("DRIP_COOLDOWN_MIN_SECONDS", str(settings.drip_cooldown_min)))
+_COOLDOWN_MAX = int(os.getenv("DRIP_COOLDOWN_MAX_SECONDS", str(settings.drip_cooldown_max)))
 
 # TTL del lock de empresa: cooldown máximo + tiempo máximo de llamada + margen
 _EMPRESA_LOCK_TTL = _COOLDOWN_MAX + 300 + 60  # ~540s
@@ -462,11 +463,11 @@ async def get_agent_config_by_survey(survey_id: int):
             "instructions": agent_data.get("instructions", "Eres un asistente"),
             "critical_rules": agent_data.get("critical_rules", ""),
             "voice_id": agent_data.get("voice_id") or ai_data.get("tts_voice") or DEFAULT_AUSARTA_VOICE_ID,
-            "tts_model": ai_data.get("tts_model") or "sonic-multilingual",
+            "tts_model": ai_data.get("tts_model") or settings.default_tts_model,
             "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
             "language": ai_data.get("language") or "es",
             "stt_provider": ai_data.get("stt_provider") or "deepgram",
-            "stt_model": ai_data.get("stt_model") or "nova-3",
+            "stt_model": ai_data.get("stt_model") or settings.default_stt_model,
             "extraction_schema": extraction_schema,
             "company_context": agent_data.get("company_context") or "",
             "enthusiasm_level": agent_data.get("enthusiasm_level") or "Normal",
@@ -619,11 +620,11 @@ async def get_agent_config_by_agent(agent_id: int, empresa_id: Optional[int] = N
             "instructions": agent_data.get("instructions", "Eres un asistente."),
             "critical_rules": agent_data.get("critical_rules", ""),
             "voice_id": agent_data.get("voice_id") or ai_data.get("tts_voice") or DEFAULT_AUSARTA_VOICE_ID,
-            "tts_model": ai_data.get("tts_model") or "sonic-multilingual",
+            "tts_model": ai_data.get("tts_model") or settings.default_tts_model,
             "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
             "language": ai_data.get("language") or "es",
             "stt_provider": ai_data.get("stt_provider") or "deepgram",
-            "stt_model": ai_data.get("stt_model") or "nova-3",
+            "stt_model": ai_data.get("stt_model") or settings.default_stt_model,
             "extraction_schema": [],
             "company_context": agent_data.get("company_context") or "",
             "enthusiasm_level": agent_data.get("enthusiasm_level") or "Normal",

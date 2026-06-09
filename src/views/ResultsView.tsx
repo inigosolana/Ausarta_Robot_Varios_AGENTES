@@ -200,6 +200,11 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
         setViewingTranscript({ ...row, transcription: freshTranscription });
     };
 
+    const openTranscriptPdf = (row: SurveyResult) => {
+        const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
+        window.open(`${API_URL}/api/calls/${row.id}/transcript.pdf`, '_blank', 'noopener,noreferrer');
+    };
+
     return (
         <div className="space-y-6">
             {!hideHeader && (
@@ -344,6 +349,12 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                 className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-blue-200 text-blue-700 bg-blue-50 rounded-lg text-sm font-semibold"
                             >
                                 <FileText size={16} /> {t('Transcript')}
+                            </button>
+                            <button
+                                onClick={() => openTranscriptPdf(row)}
+                                className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-gray-200 text-gray-700 bg-gray-50 rounded-lg text-sm font-semibold"
+                            >
+                                <Download size={16} /> Descargar PDF
                             </button>
                         </div>
                     </div>
@@ -598,6 +609,12 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                                 className="px-3 py-2 text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg transition-colors flex items-center gap-1 text-xs font-semibold whitespace-nowrap"
                                             >
                                                 <FileText size={16} /> {t('Transcript')}
+                                            </button>
+                                            <button
+                                                onClick={() => openTranscriptPdf(row)}
+                                                className="px-3 py-2 text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-1 text-xs font-semibold whitespace-nowrap"
+                                            >
+                                                <Download size={16} /> Descargar PDF
                                             </button>
                                         </div>
                                     </td>

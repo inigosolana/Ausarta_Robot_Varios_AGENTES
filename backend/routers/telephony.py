@@ -1142,6 +1142,35 @@ async def transfer_call_to_human(payload: CallTransferRequest):
     }
 
 
+@router.get("/api/calls/{encuesta_id}/briefing")
+async def get_call_transfer_briefing(
+    encuesta_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Devuelve el transfer_briefing asociado a una encuesta."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    res = await sb_query(
+        lambda sid=encuesta_id: supabase.table("encuestas")
+        .select("id, empresa_id, transfer_briefing, datos_extra")
+        .eq("id", sid)
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Encuesta no encontrada")
+
+    row = res.data[0]
+    empresa_id = int(row.get("empresa_id") or 0)
+    if not has_global_access(current_user) and int(current_user.empresa_id or 0) != empresa_id:
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+
+    datos_extra = _parse_datos_extra(row.get("datos_extra") or {})
+    briefing = row.get("transfer_briefing") or datos_extra.get("transfer_briefing") or ""
+    return {"encuesta_id": encuesta_id, "transfer_briefing": briefing}
+
+
 @router.post("/api/telephony/transfer")
 async def transfer_call_to_human_legacy(payload: TelephonyTransferRequest):
     """Alias legacy; prefiere call_id de Yeastar si está en BD."""

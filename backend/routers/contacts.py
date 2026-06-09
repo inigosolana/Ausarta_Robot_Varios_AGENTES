@@ -78,6 +78,21 @@ async def list_contacts(
     return res.data or []
 
 
+@router.get("", include_in_schema=False)
+async def list_contacts_alias(
+    empresa_id: int | None = Query(None),
+    q: str | None = Query(None),
+    telefono: str | None = Query(None),
+    disposicion: str | None = Query(None),
+    etiqueta: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    search = telefono or q
+    return await list_contacts(empresa_id, search, disposicion, etiqueta, page, page_size, current_user)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # DETALLE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -176,6 +191,17 @@ async def get_contact_calls(
     return calls
 
 
+@router.get("/{contact_id}/llamadas", include_in_schema=False)
+async def get_contact_calls_alias(
+    contact_id: str,
+    empresa_id: int | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=50),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    return await get_contact_calls(contact_id, empresa_id, page, page_size, current_user)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ACTUALIZAR CONTACTO
 # ─────────────────────────────────────────────────────────────────────────────
@@ -220,6 +246,46 @@ async def update_contact(
     if not res.data:
         raise HTTPException(status_code=404, detail="Contacto no encontrado")
     return res.data[0]
+
+
+@router.post("/")
+async def upsert_contact(
+    payload: dict,
+    empresa_id: int | None = Query(None),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión a la base de datos")
+
+    eid = _resolve_empresa(current_user, empresa_id)
+    telefono = str(payload.get("telefono") or "").strip()
+    if not eid or not telefono:
+        raise HTTPException(status_code=400, detail="empresa_id y telefono son obligatorios")
+
+    data = {
+        "empresa_id": eid,
+        "telefono": telefono,
+        "nombre": payload.get("nombre"),
+        "email": payload.get("email"),
+        "empresa_nombre": payload.get("empresa_nombre"),
+        "cargo": payload.get("cargo"),
+        "notas": payload.get("notas"),
+        "datos_crm": payload.get("datos_crm") or {},
+    }
+    await sb_query(
+        lambda d=data: supabase.table("contactos")
+        .upsert(d, on_conflict="empresa_id,telefono")
+        .execute()
+    )
+    res = await sb_query(
+        lambda eid=eid, tel=telefono: supabase.table("contactos")
+        .select("*")
+        .eq("empresa_id", eid)
+        .eq("telefono", tel)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else {"status": "ok"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

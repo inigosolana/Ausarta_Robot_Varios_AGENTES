@@ -87,3 +87,23 @@ async def enqueue_colgar_sala(room_name: str) -> str | None:
 
 async def enqueue_transfer_to_human(payload: dict) -> str | None:
     return await _enqueue("agent_post_transfer", payload)
+
+
+async def enqueue_transfer_briefing(payload: dict) -> str | None:
+    return await _enqueue("generate_transfer_briefing_task", payload)
+
+
+async def enqueue_briefing(encuesta_id: int, transcript: str, empresa_id: int) -> str | None:
+    return await enqueue_transfer_briefing(
+        {
+            "encuesta_id": encuesta_id,
+            "transcript": transcript,
+            "empresa_id": empresa_id,
+            "extension": "",
+            "room_name": "",
+        }
+    )
+
+
+async def enqueue_telegram_alert(message: str) -> str | None:
+    return await _enqueue("send_telegram_alert_task", message)

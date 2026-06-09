@@ -23,13 +23,14 @@ import os
 import json
 import logging
 from typing import Any
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import asyncio
 
 from arq import cron
 from arq.connections import ArqRedis, RedisSettings
 from utils.call_schedule import is_call_allowed
 from services.trunk_service import resolve_outbound_trunk_id
+from config import settings
 
 logger = logging.getLogger("arq-worker")
 
@@ -227,6 +228,237 @@ async def process_transcription_ai(
     except Exception as e:
         logger.error(f"[TranscriptionAI] Error guardando en Supabase encuesta {encuesta_id}: {e}")
         raise  # Propagar para reintento ARQ
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _next_retry_base(attempt: int, reference: datetime) -> datetime:
+    if attempt == 1:
+        return reference + timedelta(hours=2)
+    if attempt == 2:
+        return reference + timedelta(hours=24)
+    return reference + timedelta(hours=48)
+
+
+def _align_retry_to_allowed_slot(
+    target: datetime,
+    timezone_str: str,
+    allowed_hours: tuple[int, int],
+    forbidden_weekdays: set[int],
+) -> datetime:
+    candidate = target
+    for _ in range(24 * 14):
+        allowed, _ = is_call_allowed(
+            now=candidate,
+            timezone_str=timezone_str,
+            allowed_hours=allowed_hours,
+            forbidden_weekdays=forbidden_weekdays,
+        )
+        if allowed:
+            return candidate
+        candidate += timedelta(hours=1)
+        candidate = candidate.replace(minute=0, second=0, microsecond=0)
+    return candidate
+
+
+async def _schedule_failed_survey_retry(encuesta_row: dict[str, Any]) -> datetime | None:
+    from services.supabase_service import supabase, sb_query
+
+    if not supabase:
+        return None
+
+    encuesta_id = int(encuesta_row.get("id") or 0)
+    retry_count = int(encuesta_row.get("retry_count") or 0)
+    if not encuesta_id or retry_count >= 3:
+        return None
+
+    reference = _parse_iso_datetime(encuesta_row.get("scheduled_at")) or datetime.now(timezone.utc)
+    next_retry = _next_retry_base(retry_count + 1, reference)
+
+    timezone_str = "Europe/Madrid"
+    allowed_hours = (9, 21)
+    forbidden_weekdays = {6}
+
+    campaign_id = encuesta_row.get("campaign_id")
+    if campaign_id:
+        try:
+            campaign_res = await sb_query(
+                lambda: supabase.table("campaigns")
+                .select("call_start_hour, call_end_hour, call_timezone, forbidden_weekdays")
+                .eq("id", campaign_id)
+                .limit(1)
+                .execute()
+            )
+            if campaign_res.data:
+                campaign = campaign_res.data[0]
+                timezone_str = campaign.get("call_timezone") or timezone_str
+                allowed_hours = (
+                    int(campaign.get("call_start_hour") or allowed_hours[0]),
+                    int(campaign.get("call_end_hour") or allowed_hours[1]),
+                )
+                forbidden_weekdays = set(campaign.get("forbidden_weekdays") or list(forbidden_weekdays))
+        except Exception as exc:
+            logger.warning("⚠️ [worker] No se pudo cargar horario de campaña para retry: %s", exc)
+
+    retry_at = _align_retry_to_allowed_slot(
+        target=next_retry,
+        timezone_str=timezone_str,
+        allowed_hours=allowed_hours,
+        forbidden_weekdays=forbidden_weekdays,
+    )
+
+    await sb_query(
+        lambda: supabase.table("encuestas")
+        .update({
+            "status": "pending_retry",
+            "retry_count": retry_count + 1,
+            "scheduled_at": retry_at.isoformat(),
+        })
+        .eq("id", encuesta_id)
+        .execute()
+    )
+    try:
+        await sb_query(
+            lambda: supabase.table("campaign_leads")
+            .update({
+                "status": "pending_retry",
+                "next_retry_at": retry_at.isoformat(),
+            })
+            .eq("call_id", encuesta_id)
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning("⚠️ [worker] No se pudo sincronizar pending_retry en campaign_leads: %s", exc)
+    logger.info("✅ [worker] Retry programado encuesta=%s retry_count=%s", encuesta_id, retry_count + 1)
+    return retry_at
+
+
+async def generate_transfer_briefing_task(
+    ctx: dict[str, Any],
+    payload_or_encuesta_id: dict[str, Any] | int,
+    transcript: str | None = None,
+    empresa_id: int | None = None,
+    extension: str | None = None,
+    room_name: str | None = None,
+) -> None:
+    from services.supabase_service import supabase, sb_query
+    import openai
+
+    if isinstance(payload_or_encuesta_id, dict):
+        encuesta_id = int(payload_or_encuesta_id.get("encuesta_id") or 0)
+        transcript = str(payload_or_encuesta_id.get("transcript") or "")
+        empresa_id = int(payload_or_encuesta_id.get("empresa_id") or 0)
+        extension = str(payload_or_encuesta_id.get("extension") or "")
+        room_name = str(payload_or_encuesta_id.get("room_name") or "")
+    else:
+        encuesta_id = int(payload_or_encuesta_id or 0)
+        transcript = str(transcript or "")
+        empresa_id = int(empresa_id or 0)
+        extension = str(extension or "")
+        room_name = str(room_name or "")
+
+    if not supabase or not transcript.strip():
+        return
+
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        logger.warning("?? [worker] OPENAI_API_KEY no configurada para briefing.")
+        return
+
+    client = openai.AsyncOpenAI(api_key=openai_api_key)
+    system_prompt = (
+        "Genera un briefing con formato fijo para un agente humano. "
+        "Debes devolver exactamente estas secciones: SISTEMA, CLIENTE, MOTIVO, DATOS CLAVE, RESUMEN y TRANSCRIPCION COMPLETA."
+    )
+    user_prompt = (
+        "Usa este formato exacto:\n"
+        "SISTEMA: Transferencia de llamada IA -> Agente Humano\n"
+        "CLIENTE: {nombre_detectado o No identificado}\n"
+        "MOTIVO: {motivo de la llamada en 1 frase}\n"
+        "DATOS CLAVE: {maximo 3 datos relevantes}\n"
+        "RESUMEN: {2-3 frases}\n"
+        "TRANSCRIPCION COMPLETA:\n"
+        "{transcript completo}\n\n"
+        f"TRANSCRIPCION:\n{transcript[:7000]}"
+    )
+
+
+    try:
+        response = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=os.getenv("TRANSCRIPTION_LLM_MODEL", "gpt-4o-mini"),
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.2,
+                max_tokens=500,
+            ),
+            timeout=5,
+        )
+        briefing = (response.choices[0].message.content or "").strip()
+        if not briefing:
+            return
+
+        current = await sb_query(
+            lambda: supabase.table("encuestas")
+            .select("datos_extra")
+            .eq("id", encuesta_id)
+            .limit(1)
+            .execute()
+        )
+        datos_extra = {}
+        if current.data:
+            raw = current.data[0].get("datos_extra")
+            if isinstance(raw, dict):
+                datos_extra = raw
+
+        datos_extra["transfer_briefing"] = briefing
+        await sb_query(
+            lambda: supabase.table("encuestas")
+            .update({"datos_extra": datos_extra, "transfer_briefing": briefing})
+            .eq("id", encuesta_id)
+            .execute()
+        )
+
+        webhook_base = (os.getenv("N8N_WEBHOOK_BASE_URL") or "").strip().rstrip("/")
+        if webhook_base:
+            await process_n8n_webhook(
+                ctx,
+                {
+                    "url": f"{webhook_base}/transfer-briefing",
+                    "body": {
+                        "encuesta_id": encuesta_id,
+                        "empresa_id": empresa_id,
+                        "extension": extension,
+                        "room_name": room_name,
+                        "transcript": transcript,
+                        "resumen": briefing,
+                    },
+                },
+            )
+
+        logger.info("? [worker] Briefing guardado para encuesta=%s empresa=%s", encuesta_id, empresa_id)
+    except Exception as exc:
+        logger.warning("?? [worker] Error generando briefing para encuesta=%s: %s", encuesta_id, exc)
+
+
+async def send_telegram_alert_task(ctx: dict[str, Any], message: str) -> None:
+    """Tarea ARQ para enviar alertas sin bloquear el flujo principal."""
+    from services.telegram_service import send_telegram_alert
+
+    _ = ctx
+    await send_telegram_alert(message)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -660,7 +892,7 @@ async def campaign_scheduler_task(ctx: dict[str, Any]) -> None:
                 supabase.table("campaign_leads")
                 .select("*")
                 .eq("campaign_id", campaign_id)
-                .eq("status", "pending")
+                .in_("status", ["pending", "pending_retry"])
                 .or_(f"next_retry_at.is.null,next_retry_at.lte.{now_iso}")
                 .order("next_retry_at", desc=False, nullsfirst=True)
                 .limit(1)
@@ -773,11 +1005,78 @@ def _agent_bridge_url() -> str:
 async def agent_post_guardar_encuesta(ctx: dict[str, Any], payload: dict) -> None:
     """POST /guardar-encuesta desde el worker ARQ."""
     import aiohttp
+    from services.supabase_service import supabase, sb_query
 
     url = f"{_agent_bridge_url()}/guardar-encuesta"
     async with aiohttp.ClientSession() as sess:
         async with sess.post(url, json=payload, timeout=15) as resp:
             logger.info("[agent_bridge] guardar-encuesta HTTP %s encuesta=%s", resp.status, payload.get("id_encuesta"))
+
+    if not supabase:
+        return
+
+    encuesta_id = int(payload.get("id_encuesta") or 0)
+    if not encuesta_id:
+        return
+
+    try:
+        encuesta_res = await sb_query(
+            lambda: supabase.table("encuestas")
+            .select("id, empresa_id, campaign_id, status, retry_count, scheduled_at")
+            .eq("id", encuesta_id)
+            .limit(1)
+            .execute()
+        )
+        if not encuesta_res.data:
+            return
+        encuesta = encuesta_res.data[0]
+        empresa_id = int(encuesta.get("empresa_id") or 0)
+        status = (encuesta.get("status") or payload.get("status") or "").strip().lower()
+
+        if status == "failed":
+            await _schedule_failed_survey_retry(encuesta)
+
+        if empresa_id:
+            now = datetime.now(timezone.utc)
+            month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            empresa_res = await sb_query(
+                lambda: supabase.table("empresas")
+                .select("id, nombre, max_llamadas_mes")
+                .eq("id", empresa_id)
+                .limit(1)
+                .execute()
+            )
+            if empresa_res.data:
+                empresa = empresa_res.data[0]
+                max_llamadas_mes = int(empresa.get("max_llamadas_mes") or 0)
+                if max_llamadas_mes > 0:
+                    count_res = await sb_query(
+                        lambda: supabase.table("encuestas")
+                        .select("id", count="exact")
+                        .eq("empresa_id", empresa_id)
+                        .gte("fecha", month_start.isoformat())
+                        .execute()
+                    )
+                    consumed = int(count_res.count or 0)
+                    if consumed >= int(max_llamadas_mes * 0.8):
+                        await ctx["redis"].enqueue_job(
+                            "send_telegram_alert_task",
+                            f"[AUSARTA] Empresa {empresa.get('nombre') or empresa_id} ha superado el 80% de su cuota mensual ({consumed}/{max_llamadas_mes}).",
+                        )
+
+            streak_key = f"ausarta:failed_streak:{empresa_id}"
+            if status == "failed":
+                failed_streak = await ctx["redis"].incr(streak_key)
+                await ctx["redis"].expire(streak_key, 86400)
+                if failed_streak >= 3:
+                    await ctx["redis"].enqueue_job(
+                        "send_telegram_alert_task",
+                        f"[AUSARTA] La empresa {empresa_id} acumula {failed_streak} llamadas consecutivas con status='failed'.",
+                    )
+            elif status:
+                await ctx["redis"].delete(streak_key)
+    except Exception as exc:
+        logger.warning("⚠️ [worker] Post-procesado de guardar_encuesta falló: %s", exc)
 
 
 async def agent_post_colgar(ctx: dict[str, Any], room_name: str) -> None:
@@ -851,8 +1150,10 @@ class WorkerSettings:
         campaign_scheduler_task,
         dispatch_lead_drip_task,
         process_transcription_ai,
+        generate_transfer_briefing_task,
         process_n8n_webhook,
         process_system_alert,
+        send_telegram_alert_task,
         process_yeastar_webhook,
         campaign_orchestrator,
         agent_post_guardar_encuesta,

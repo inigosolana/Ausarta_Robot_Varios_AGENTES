@@ -26,6 +26,7 @@ from services.supabase_service import supabase, sb_query
 from services.auth import CurrentUser, require_admin, get_current_user
 from services.embedding_service import get_embedding, search_knowledge, _split_into_chunks
 from services.crypto_service import encrypt_data, decrypt_data
+from services.document_parser import parse_services_excel, stringify_json_document
 
 logger = logging.getLogger("api-backend")
 
@@ -126,7 +127,18 @@ async def upload_knowledge(
     filename = file.filename or ""
     content_type = (file.content_type or "").lower()
 
+    parsed_documents: list[dict[str, Any]] = []
+    ext = (filename or "").lower().rsplit(".", 1)[-1] if "." in (filename or "") else ""
+    if ext in {"xlsx", "xls"}:
+        parsed_documents = await parse_services_excel(content_bytes, eid)
+
     texto = _extract_text_from_uploaded_file(filename, content_type, content_bytes)
+    if parsed_documents:
+        texto = "\n\n".join(
+            str(doc.get("contenido") or "").strip()
+            for doc in parsed_documents
+            if str(doc.get("contenido") or "").strip()
+        )
 
     texto = texto.strip()
     if not texto:
@@ -178,6 +190,13 @@ async def upload_knowledge(
         "chunks_total": len(chunks),
         "chunks_con_embedding": sum(1 for r in rows_to_insert if r["embedding"]),
         "insertados": inserted,
+        "preview": [
+            {
+                "titulo": doc.get("titulo"),
+                "contenido_preview": str(doc.get("contenido") or "")[:240],
+            }
+            for doc in parsed_documents[:10]
+        ],
     }
 
 
@@ -293,11 +312,20 @@ def _extract_text_from_uploaded_file(filename: str, content_type: str, content_b
     is_excel = ext in {"xlsx", "xls"} or "spreadsheet" in content_type or "excel" in content_type
     is_csv = ext == "csv" or "csv" in content_type
     is_json = ext == "json" or "json" in content_type
+    is_docx = ext == "docx" or "word" in content_type
 
     if is_pdf:
         return _extract_text_from_pdf(content_bytes)
     if is_excel:
         return _extract_text_from_excel(content_bytes)
+    if is_docx:
+        try:
+            from docx import Document  # type: ignore
+
+            doc = Document(io.BytesIO(content_bytes))
+            return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        except Exception:
+            return ""
     if is_csv:
         try:
             decoded = content_bytes.decode("utf-8", errors="replace")
@@ -308,7 +336,7 @@ def _extract_text_from_uploaded_file(filename: str, content_type: str, content_b
     if is_json:
         try:
             parsed = json.loads(content_bytes.decode("utf-8", errors="replace"))
-            return json.dumps(parsed, ensure_ascii=False, indent=2)
+            return stringify_json_document(parsed)
         except Exception:
             return content_bytes.decode("utf-8", errors="replace")
 

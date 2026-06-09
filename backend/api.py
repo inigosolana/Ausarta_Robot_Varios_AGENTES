@@ -4,7 +4,8 @@ import logging
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -14,6 +15,7 @@ from services.rate_limiter import limiter
 from services.auth import get_supabase_jwt_secret
 from services.redis_service import get_redis, close_redis
 from services.queue_service import get_arq_pool, close_arq_pool
+from services.queue_service import enqueue_telegram_alert
 from middleware.tenant_context import TenantContextMiddleware
 
 # Routers
@@ -96,6 +98,18 @@ app = FastAPI(title="Ausarta Voice Agent API", version="2.0.0", lifespan=lifespa
 # Rate Limiting — límite global de 120 req/min por IP (instancia en services/rate_limiter.py)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("❌ [api] Error 500 no controlado en %s", request.url.path)
+    try:
+        await enqueue_telegram_alert(
+            f"[AUSARTA][500] {request.method} {request.url.path}: {type(exc).__name__}: {exc}"
+        )
+    except Exception:
+        pass
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 # CORS — orígenes explícitos en lugar de wildcard
 def _expand_dev_cors_origins(raw_origins: list[str]) -> list[str]:

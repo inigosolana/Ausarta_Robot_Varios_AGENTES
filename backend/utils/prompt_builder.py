@@ -156,6 +156,14 @@ def build_agent_prompt(
             "- PRIORIZA siempre la información de estos documentos sobre tu conocimiento general.\n"
             "- Si la información no aparece aquí, dilo con transparencia y ofrece buscar o derivar.\n\n"
         )
+        full_instructions += (
+            "REGLA DE CONSULTA DE SERVICIOS:\n"
+            "1. Cuando el cliente pregunte por tarifas, precios, servicios, cobertura o productos, usa SIEMPRE la herramienta 'consultar_conocimiento' antes de responder.\n"
+            "2. Responde SOLO con lo que encuentres en la base de conocimiento.\n"
+            "3. Si hay varios servicios parecidos, menciona los 2-3 más relevantes con sus precios.\n"
+            "4. Nunca inventes precios. Si no encuentras la info, di 'dejame consultarlo con nuestro equipo y te llamamos'.\n"
+            "5. Para precios, di siempre 'desde XEUR/mes' usando el PVP recomendado.\n\n"
+        )
 
     # Datos del cliente desde BD externa
     if customer_context:

@@ -37,3 +37,10 @@ cryptography==42.0.7
 
 # OpenAI SDK (livekit-plugins-openai 1.4.x requiere openai>=2)
 openai==2.15.0
+pydantic-settings==2.10.1
+fpdf2==2.8.3
+pytest==8.3.5
+pytest-asyncio==0.26.0
+openpyxl==3.1.5
+python-docx==1.1.2
+pypdf==5.6.0

@@ -22,6 +22,7 @@ async def upsert_contacto_post_call(
     nombre_detectado: str | None,
     disposicion: str | None,
     resumen: str | None,
+    datos_llamada: dict | None = None,
 ) -> None:
     """
     Crea o actualiza la ficha de contacto tras una llamada.
@@ -50,7 +51,7 @@ async def upsert_contacto_post_call(
         # Intentar actualizar contacto existente
         res = await sb_query(
             lambda eid=empresa_id, tel=telefono: supabase.table("contactos")
-            .select("id, total_llamadas, score, nombre")
+            .select("id, total_llamadas, score, nombre, historial_llamadas")
             .eq("empresa_id", eid)
             .eq("telefono", tel)
             .limit(1)
@@ -63,11 +64,23 @@ async def upsert_contacto_post_call(
             new_total = (existing.get("total_llamadas") or 0) + 1
             new_score = max(0, (existing.get("score") or 0) + score_delta)
 
+            historial = existing.get("historial_llamadas") or []
+            if not isinstance(historial, list):
+                historial = []
+            if datos_llamada:
+                historial.append({
+                    **datos_llamada,
+                    "disposicion": disposicion,
+                    "resumen": resumen,
+                })
+                historial = historial[-50:]
+
             update_data: dict = {
                 "ultima_llamada": now_iso,
                 "total_llamadas": new_total,
                 "ultima_disposicion": disposicion,
                 "score": new_score,
+                "historial_llamadas": historial,
             }
             # Solo sobreescribir nombre si se detectó uno y el existente está vacío
             if nombre_detectado and not existing.get("nombre"):
@@ -93,6 +106,11 @@ async def upsert_contacto_post_call(
                 "total_llamadas": 1,
                 "ultima_disposicion": disposicion,
                 "score": max(0, 50 + score_delta),  # base 50 para nuevos contactos
+                "historial_llamadas": ([{
+                    **(datos_llamada or {}),
+                    "disposicion": disposicion,
+                    "resumen": resumen,
+                }] if datos_llamada else []),
             }
             await sb_query(
                 lambda d=insert_data: supabase.table("contactos").insert(d).execute()
