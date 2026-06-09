@@ -128,7 +128,7 @@ const AppShell: React.FC = () => {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [t]);
+  }, []);
 
   const getRoleLabel = () => {
     switch (profile?.role) {
