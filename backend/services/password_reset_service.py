@@ -244,10 +244,21 @@ async def update_user_password_with_token(access_token: str, password: str) -> N
                     resp.status,
                     text[:300],
                 )
+                try:
+                    data = json.loads(text) if text else {}
+                except json.JSONDecodeError:
+                    data = {}
+
+                error_code = data.get("error_code", "")
+                if error_code == "same_password":
+                    raise ValueError("La nueva contraseña debe ser diferente a la actual.")
                 if resp.status in (401, 403):
                     raise ValueError(
                         "La sesión de recuperación ha expirado. Solicita un nuevo enlace."
                     )
+                if resp.status == 422:
+                    msg = data.get("msg") or data.get("error") or "Contraseña no válida"
+                    raise ValueError(msg)
                 raise RuntimeError("No se pudo actualizar la contraseña")
 
 
