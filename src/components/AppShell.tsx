@@ -23,7 +23,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Toaster, toast } from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -51,8 +51,6 @@ const AppShell: React.FC = () => {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isCalling, setIsCalling] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [hiddenAlerts, setHiddenAlerts] = useState<Set<number>>(new Set());
-  const queryClient = useQueryClient();
   const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
 
   const isRootUser =
@@ -93,15 +91,6 @@ const AppShell: React.FC = () => {
     localStorage.theme = nextDark ? 'dark' : 'light';
   };
 
-  const { data: alerts = [] } = useQuery({
-    queryKey: ['alerts'],
-    queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/alerts`);
-      if (!res.ok) throw new Error('Failed to fetch alerts');
-      return res.json();
-    },
-  });
-
   const { data: companies = [] } = useQuery({
     queryKey: ['companies'],
     queryFn: async () => {
@@ -112,37 +101,34 @@ const AppShell: React.FC = () => {
     enabled: canSimulation,
   });
 
-  // Auto-hide alert banners after 8 seconds
+  // Toast temporal (6 s) solo para llamadas fallidas nuevas — sin banners persistentes
   useEffect(() => {
-    if (!alerts.length) return;
-    const timers = alerts
-      .filter((a: any) => !hiddenAlerts.has(a.id))
-      .map((a: any) =>
-        setTimeout(() => setHiddenAlerts(prev => new Set([...prev, a.id])), 8000)
-      );
-    return () => timers.forEach(clearTimeout);
-  }, [alerts]);
+    const isFailed = (row: { status?: string }) =>
+      row.status === 'fallida' || row.status === 'failed';
 
-  useEffect(() => {
+    const notifyFailedCall = (row: { telefono?: string }) => {
+      const phone = row.telefono || 'desconocido';
+      toast.error(`Llamada fallida al número ${phone}`, {
+        icon: '⚠️',
+        duration: 6000,
+      });
+    };
+
     const channel = supabase
-      .channel('realtime_alerts')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alertas' }, payload => {
-        toast.error(`Nueva alerta: ${payload.new.message}`, { icon: '⚠️' });
-        queryClient.invalidateQueries({ queryKey: ['alerts'] });
+      .channel('realtime_failed_calls')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'encuestas' }, payload => {
+        if (isFailed(payload.new as { status?: string })) {
+          notifyFailedCall(payload.new as { telefono?: string });
+        }
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'alertas' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['alerts'] });
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'encuestas' }, payload => {
+        if (isFailed(payload.new as { status?: string })) {
+          notifyFailedCall(payload.new as { telefono?: string });
+        }
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [queryClient]);
-
-  const resolveAlert = async (id: number) => {
-    try {
-      await fetch(`${API_URL}/api/alerts/${id}/resolve`, { method: 'POST' });
-      queryClient.invalidateQueries({ queryKey: ['alerts'] });
-    } catch { }
-  };
+  }, [t]);
 
   const getRoleLabel = () => {
     switch (profile?.role) {
@@ -158,7 +144,10 @@ const AppShell: React.FC = () => {
     <>
       <Toaster
         position="bottom-right"
-        toastOptions={{ className: 'dark:bg-gray-800 dark:text-white border dark:border-gray-700' }}
+        toastOptions={{
+          duration: 6000,
+          className: 'dark:bg-gray-800 dark:text-white border dark:border-gray-700',
+        }}
       />
       <div className="flex min-h-screen w-full min-w-0 bg-[#fcfcfc] dark:bg-slate-950 dark:bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] dark:from-slate-900 dark:via-slate-950 dark:to-black overflow-hidden text-gray-900 dark:text-gray-100 transition-colors duration-200 flex-col md:flex-row relative">
         {/* Cyber-Ops decorative glow */}
@@ -343,35 +332,6 @@ const AppShell: React.FC = () => {
         {/* ── Main Content — renders the matched child route ── */}
         <main className={`flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 md:p-6 lg:p-8 relative transition-all duration-300 ${isChatOpen ? 'mr-0 sm:mr-[400px]' : 'mr-0'}`}>
           <div className="w-full min-w-0 max-w-[100%]">
-            {alerts.filter((a: any) => !hiddenAlerts.has(a.id)).length > 0 && (
-              <div className="mb-6 space-y-2">
-                {alerts
-                  .filter((a: any) => !hiddenAlerts.has(a.id))
-                  .map((alert: any) => (
-                    <div key={alert.id} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 p-4 rounded-xl flex items-center justify-between shadow-sm">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-red-100 dark:bg-red-800/40 p-2 rounded-full">
-                          <Zap className="w-5 h-5 text-red-600 dark:text-red-400" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-sm">{alert.type === 'error' ? t('Critical System Error', 'Error Crítico del Sistema') : t('System Alert', 'Alerta del Sistema')}</p>
-                          <p className="text-xs opacity-80">{alert.message}</p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          setHiddenAlerts(prev => new Set([...prev, alert.id]));
-                          resolveAlert(alert.id);
-                        }}
-                        className="text-xs font-bold hover:underline"
-                      >
-                        {t('Resolve', 'Resolver')}
-                      </button>
-                    </div>
-                  ))}
-              </div>
-            )}
-
             {/* Child route renders here */}
             <Suspense fallback={<ViewLoader />}>
               <Outlet />
