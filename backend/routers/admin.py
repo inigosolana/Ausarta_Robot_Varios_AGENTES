@@ -560,7 +560,7 @@ async def create_auth_user(request: Request, payload: dict, current_user: Curren
         "full_name": full_name,
         "role": role,
         "empresa_id": empresa_id,
-        "redirect_to": payload.get("redirect_to") or os.getenv("INVITE_REDIRECT_TO") or os.getenv("FRONTEND_URL", "http://15.218.15.30")
+        "redirect_to": payload.get("redirect_to") or os.getenv("INVITE_REDIRECT_TO") or os.getenv("FRONTEND_URL", "https://app.ausarta.net")
     }
 
     n8n_secret = os.getenv("N8N_PROXY_SECRET", "")

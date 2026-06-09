@@ -40,7 +40,7 @@ export async function requestPasswordReset(
 }
 
 export function passwordResetRedirectUrl(): string {
-    const productionUrl = 'http://15.218.15.30';
+    const productionUrl = 'https://app.ausarta.net';
     if (typeof window === 'undefined') return productionUrl;
     return window.location.origin.includes('localhost')
         ? productionUrl

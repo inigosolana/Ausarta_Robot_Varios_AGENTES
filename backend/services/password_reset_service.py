@@ -36,7 +36,7 @@ def _redirect_to(explicit: str | None = None) -> str:
     return (
         os.getenv("INVITE_REDIRECT_TO")
         or os.getenv("FRONTEND_URL")
-        or "http://15.218.15.30"
+        or "https://app.ausarta.net"
     ).strip().rstrip("/")
 
 
