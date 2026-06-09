@@ -10,7 +10,10 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from services.password_reset_service import send_password_reset_email
+from services.password_reset_service import (
+    send_password_reset_email,
+    update_user_password_with_token,
+)
 from services.rate_limiter import limiter
 
 logger = logging.getLogger("api-backend")
@@ -65,3 +68,43 @@ async def request_password_reset(request: Request):
             "para crear una nueva contraseña."
         ),
     }
+
+
+class PasswordUpdateRequest(BaseModel):
+    password: str = Field(..., min_length=6, max_length=128)
+
+
+@router.put("/password")
+@limiter.limit("10/minute")
+async def update_password(request: Request):
+    """Actualiza contraseña con el Bearer token de la sesión de recovery."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return JSONResponse(status_code=401, content={"error": "Sesión inválida"})
+
+    access_token = auth_header[7:].strip()
+    try:
+        raw = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Petición inválida"})
+
+    try:
+        body = PasswordUpdateRequest.model_validate(raw)
+    except ValidationError:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "La contraseña debe tener al menos 6 caracteres"},
+        )
+
+    try:
+        await update_user_password_with_token(access_token, body.password)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"error": str(exc)})
+    except Exception as exc:
+        logger.warning("[password-reset] Fallo al actualizar: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"error": "No se pudo actualizar la contraseña. Inténtalo de nuevo."},
+        )
+
+    return {"status": "ok", "message": "Contraseña actualizada correctamente"}

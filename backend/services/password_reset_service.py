@@ -212,6 +212,45 @@ async def _n8n_password_reset(email: str, redirect_to: str) -> None:
             logger.info("[password-reset] n8n OK para %s: %s", email, text[:120])
 
 
+async def update_user_password_with_token(access_token: str, password: str) -> None:
+    """Actualiza la contraseña usando el access_token de la sesión de recovery."""
+    base = _supabase_url()
+    anon = _anon_key()
+    if not base or not anon:
+        raise RuntimeError("Falta configuración de Supabase en el backend")
+
+    token = (access_token or "").strip()
+    if not token:
+        raise ValueError("Token de sesión inválido")
+    if len(password) < 6:
+        raise ValueError("La contraseña debe tener al menos 6 caracteres")
+
+    headers = {
+        "apikey": anon,
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.put(
+            f"{base}/auth/v1/user",
+            json={"password": password},
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as resp:
+            text = await resp.text()
+            if resp.status >= 400:
+                logger.warning(
+                    "[password-reset] update password HTTP %s: %s",
+                    resp.status,
+                    text[:300],
+                )
+                if resp.status in (401, 403):
+                    raise ValueError(
+                        "La sesión de recuperación ha expirado. Solicita un nuevo enlace."
+                    )
+                raise RuntimeError("No se pudo actualizar la contraseña")
+
+
 async def send_password_reset_email(email: str, redirect_to: str | None = None) -> None:
     """
     Envía el email de recuperación. No revela si el email existe en Supabase.

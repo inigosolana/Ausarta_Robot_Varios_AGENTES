@@ -160,12 +160,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             })
             .finally(() => window.clearTimeout(timeout));
 
+        // No usar async/await aquí: bloquea el lock interno de Supabase Auth
+        // y hace que updateUser() se quede colgado durante el recovery.
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            async (_event, s) => {
+            (_event, s) => {
                 setSession(s);
                 setUser(s?.user ?? null);
                 if (s?.user) {
-                    await loadUserData(s.user.id);
+                    setTimeout(() => {
+                        void loadUserData(s.user.id);
+                    }, 0);
                 } else {
                     setProfile(null);
                     setPermissions([]);

@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { passwordResetRedirectUrl, requestPasswordReset } from '../lib/passwordReset';
+import {
+    passwordResetRedirectUrl,
+    requestPasswordReset,
+    updatePasswordAfterRecovery,
+} from '../lib/passwordReset';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     Loader2,
@@ -203,25 +207,11 @@ const LoginView: React.FC = () => {
                 return;
             }
 
-            const updatePromise = supabase.auth.updateUser({ password: newPassword });
-            const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Tiempo de espera agotado. Solicita un nuevo enlace.')), 15000)
-            );
-            const { error: updateError } = await Promise.race([updatePromise, timeoutPromise]);
-            if (updateError) {
-                console.error('[AusartaAuth] updateUser error:', updateError);
-                if (updateError.message.includes('expired') || updateError.message.includes('invalid')) {
-                    sessionStorage.removeItem('ausarta_recovery_flow');
-                    setViewMode('forgot');
-                    setError('El enlace de recuperación ha expirado. Solicita uno nuevo.');
-                } else {
-                    setError(updateError.message);
-                }
-            } else {
-                sessionStorage.removeItem('ausarta_recovery_flow');
-                try { await supabase.auth.signOut(); } catch { /* ignorar */ }
-                window.location.replace('/login');
-            }
+            const accessToken = sessionData.session.access_token;
+            await updatePasswordAfterRecovery(accessToken, newPassword);
+            sessionStorage.removeItem('ausarta_recovery_flow');
+            try { await supabase.auth.signOut(); } catch { /* ignorar */ }
+            window.location.replace('/login');
         } catch (err: unknown) {
             console.error('[AusartaAuth] handleUpdatePassword exception:', err);
             setError(err instanceof Error ? err.message : 'Error al cambiar la contraseña');

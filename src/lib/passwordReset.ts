@@ -39,6 +39,32 @@ export async function requestPasswordReset(
     }
 }
 
+export async function updatePasswordAfterRecovery(
+    accessToken: string,
+    password: string,
+): Promise<void> {
+    const API_URL =
+        (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL || '';
+    const res = await fetch(`${API_URL}/api/auth/password`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ password }),
+    });
+    if (!res.ok) {
+        let detail = 'No se pudo actualizar la contraseña';
+        try {
+            const data = await res.json();
+            if (data?.error) detail = data.error;
+        } catch {
+            /* ignore */
+        }
+        throw new Error(detail);
+    }
+}
+
 export function passwordResetRedirectUrl(): string {
     const productionUrl = 'http://15.216.15.30/login';
     if (typeof window === 'undefined') return productionUrl;
