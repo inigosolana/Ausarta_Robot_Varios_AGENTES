@@ -131,13 +131,18 @@ async def get_agents(empresa_id: Optional[int] = None):
 
     if not supabase: return [{"name": "Dakota", "instructions": "Default"}]
     try:
-        query = supabase.table("agent_config").select("*")
+        query = supabase.table("agent_config").select("*, empresas:empresa_id(nombre), ai_config(*)")
         if empresa_id:
             query = query.eq("empresa_id", empresa_id)
-        
+
         res = query.execute()
         agents = []
         for agent in (res.data or []):
+            ai_rows = agent.pop("ai_config", None) or []
+            if isinstance(ai_rows, list) and ai_rows:
+                agent["ai_config"] = ai_rows[0]
+            elif isinstance(ai_rows, dict):
+                agent["ai_config"] = ai_rows
             prev_tipo = agent.get("tipo_resultados")
             prev_agent_type = agent.get("agent_type")
             prev_survey_type = agent.get("survey_type")

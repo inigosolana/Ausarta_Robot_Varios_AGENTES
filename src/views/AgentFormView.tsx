@@ -331,26 +331,31 @@ const AgentFormView: React.FC<Props> = ({ agent, empresaName, onSave, onCancel }
             )}
             {/* Empresa bar */}
             {(isPlatformOwner || activeEmpresaLabel) && (
-                <div className="agent-empresa-bar relative z-10 flex flex-col gap-3 rounded-xl px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                        <p className="agent-mono text-[10px] font-medium uppercase tracking-widest text-gray-500 dark:text-gray-400">
-                            {t('Company', 'Empresa')}
-                        </p>
-                        {!isPlatformOwner && (
-                            <p className="text-sm font-semibold text-gray-900 dark:text-white">{activeEmpresaLabel}</p>
-                        )}
-                        {isPlatformOwner && (
-                            <p className="text-sm text-gray-600 dark:text-gray-300">
-                                {t('Agent will belong to this company', 'El agente pertenecerá a esta empresa')}
+                <div className="agent-empresa-bar relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-4">
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-300">
+                            <span className="material-symbols-outlined text-3xl">apartment</span>
+                        </div>
+                        <div>
+                            <p className="agent-mono agent-empresa-bar__label text-indigo-600/80 dark:text-indigo-300/90">
+                                {t('Active tenant', 'Empresa activa')}
                             </p>
-                        )}
+                            <p className="agent-empresa-bar__name text-gray-900 dark:text-white">
+                                {activeEmpresaLabel || t('Select company...', 'Seleccionar empresa...')}
+                            </p>
+                            {isPlatformOwner && (
+                                <p className="agent-empresa-bar__hint mt-1 text-gray-500 dark:text-gray-400">
+                                    {t('Agent will belong to this company', 'El agente pertenecerá a esta empresa')}
+                                </p>
+                            )}
+                        </div>
                     </div>
                     {isPlatformOwner && (
                         <select
                             value={formData.empresa_id || ''}
                             onChange={e => setFormData({ ...formData, empresa_id: e.target.value ? Number(e.target.value) : null })}
                             disabled={isLoadingEmpresas}
-                            className="min-w-[220px] rounded-lg border border-indigo-500/30 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 focus:border-cyan-500 focus:outline-none dark:border-indigo-400/30 dark:bg-gray-900/80 dark:text-gray-100"
+                            className="agent-empresa-bar__select border border-cyan-500/40 bg-white text-gray-900 shadow-md focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 dark:border-cyan-400/40 dark:bg-gray-900/90 dark:text-white"
                         >
                             <option value="">{t('Select company...', 'Seleccionar empresa...')}</option>
                             {empresas.map(emp => (

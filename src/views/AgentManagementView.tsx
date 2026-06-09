@@ -20,7 +20,6 @@ const AgentManagementView: React.FC = () => {
     const [agents, setAgents] = useState<(AgentConfig & { ai_config?: AIConfig; empresas?: Empresa })[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState("");
-    const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
     const [isCreatingAgent, setIsCreatingAgent] = useState(false);
     const [showTemplateGallery, setShowTemplateGallery] = useState(false);
     const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | "all">("all");
@@ -154,9 +153,9 @@ const AgentManagementView: React.FC = () => {
         setShowTemplateGallery(true);
     };
 
-    if (isCreatingAgent || editingAgent) {
-        const empresaId = editingAgent?.empresa_id || getNewAgentEmpresaId();
-        const baseAgent = editingAgent || {
+    if (isCreatingAgent) {
+        const empresaId = getNewAgentEmpresaId();
+        const baseAgent = {
             name: "",
             use_case: "",
             description: "",
@@ -171,13 +170,11 @@ const AgentManagementView: React.FC = () => {
                 agent={baseAgent as AgentConfig}
                 empresaName={selectedEmpresaName ?? undefined}
                 onSave={async () => {
-                    setEditingAgent(null);
                     setIsCreatingAgent(false);
                     setTemplatePreload(null);
                     await loadData();
                 }}
                 onCancel={() => {
-                    setEditingAgent(null);
                     setIsCreatingAgent(false);
                     setTemplatePreload(null);
                 }}
@@ -245,22 +242,21 @@ const AgentManagementView: React.FC = () => {
 
             <div className="relative z-10 mx-auto max-w-7xl space-y-6">
                 {/* Empresa selector — prominent */}
-                <div className="agent-empresa-bar flex flex-col gap-3 rounded-xl px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-600 dark:text-indigo-300">
-                            <Building2 size={20} />
+                <div className="agent-empresa-bar flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-4">
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-600 shadow-sm dark:text-indigo-300">
+                            <Building2 size={28} />
                         </div>
                         <div>
-                            <p className="agent-mono text-[10px] font-medium uppercase tracking-widest text-gray-500 dark:text-gray-400">
+                            <p className="agent-mono agent-empresa-bar__label text-indigo-600/80 dark:text-indigo-300/90">
                                 {t("Active tenant", "Empresa activa")}
                             </p>
-                            {isSuperadmin ? (
-                                <p className="text-sm text-gray-600 dark:text-gray-300">
+                            <p className="agent-empresa-bar__name text-gray-900 dark:text-white">
+                                {selectedEmpresaName || profile?.empresas?.nombre || t("Your company", "Tu empresa")}
+                            </p>
+                            {isSuperadmin && (
+                                <p className="agent-empresa-bar__hint mt-1 text-gray-500 dark:text-gray-400">
                                     {t("Select the company to manage its voice agents", "Selecciona la empresa para gestionar sus agentes de voz")}
-                                </p>
-                            ) : (
-                                <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                                    {selectedEmpresaName || profile?.empresas?.nombre || t("Your company", "Tu empresa")}
                                 </p>
                             )}
                         </div>
@@ -269,7 +265,7 @@ const AgentManagementView: React.FC = () => {
                         <select
                             value={selectedEmpresaId === "all" ? "" : selectedEmpresaId}
                             onChange={e => setSelectedEmpresaId(Number(e.target.value))}
-                            className="min-w-[220px] rounded-lg border border-indigo-500/30 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 dark:border-indigo-400/30 dark:bg-gray-900/80 dark:text-gray-100"
+                            className="agent-empresa-bar__select border border-cyan-500/40 bg-white text-gray-900 shadow-md focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 dark:border-cyan-400/40 dark:bg-gray-900/90 dark:text-white"
                         >
                             {empresas.map(emp => (
                                 <option key={emp.id} value={emp.id}>{emp.nombre}</option>
@@ -361,10 +357,9 @@ const AgentManagementView: React.FC = () => {
                             {selectedAgent ? (
                                 <AgentWorkspacePanel
                                     agent={selectedAgent}
-                                    onEdit={() => setEditingAgent(selectedAgent)}
                                     onTest={() => setTestCallAgent(selectedAgent)}
                                     onDelete={() => setAgentToDelete(selectedAgent.id!)}
-                                    t={t}
+                                    onSaved={loadData}
                                 />
                             ) : (
                                 <div className="agent-glass flex min-h-[560px] flex-col items-center justify-center rounded-2xl p-12 text-center">
