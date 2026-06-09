@@ -16,7 +16,7 @@ Todas las llamadas backend → n8n deben incluir `X-N8N-Secret` (`N8N_PROXY_SECR
 
 ## URLs del backend (dominio nuevo)
 
-Los nodos HTTP Request apuntan a **`FRONTEND_URL`** (producción: `http://15.218.15.30`, mismo origen que nginx `/api/`).
+Los nodos HTTP Request apuntan a **`FRONTEND_URL`** (producción: `http://15.216.15.30`, mismo origen que nginx `/api/`).
 
 ## Migración de dominio
 

@@ -14,7 +14,7 @@ from pathlib import Path
 
 API_URL = os.getenv("N8N_API_URL", "https://n8n.ausarta.net").rstrip("/")
 API_KEY = os.getenv("N8N_API_KEY", "")
-DEFAULT_FRONTEND = "https://app.ausarta.net"
+DEFAULT_FRONTEND = "http://15.216.15.30"
 BACKEND = os.getenv("AUSARTA_BACKEND_URL", os.getenv("FRONTEND_URL", DEFAULT_FRONTEND)).rstrip("/")
 FRONTEND = os.getenv("FRONTEND_URL", DEFAULT_FRONTEND).rstrip("/")
 
@@ -26,13 +26,13 @@ REPLACEMENTS = [
     ("http://ausarta-v2-backend:8001", BACKEND),
     ("http://localhost:8003", BACKEND),
     ("http://localhost:8001", BACKEND),
-    ("https://app.ausarta.net", FRONTEND),
-    ("http://app.ausarta.net", FRONTEND),
+    ("http://15.216.15.30", FRONTEND),
+    ("http://15.216.15.30", FRONTEND),
     ("http://15.216.15.30:8080", FRONTEND),
     ("http://15.216.15.30", FRONTEND),
     ("https://15.216.15.30", FRONTEND),
-    ("http://15.218.15.30:8080", FRONTEND),
-    ("https://15.218.15.30", FRONTEND),
+    ("http://15.216.15.30:8080", FRONTEND),
+    ("http://15.216.15.30", FRONTEND),
     ("http://79.72.57.62:5678", "https://n8n.ausarta.net"),
     ("http://79.72.57.62", FRONTEND),
 ]
@@ -156,10 +156,10 @@ def _patch_named_nodes(wf: dict) -> list[str]:
             old = params["url"]
             if old != f"{BACKEND}/api/calls/outbound" and "calls/outbound" in old:
                 params["url"] = f"{BACKEND}/api/calls/outbound"
-                changes.append("URL outbound → app.ausarta.net")
+                changes.append(f"URL outbound → {FRONTEND}")
             if "webhook/call-result" in old:
                 params["url"] = f"{BACKEND}/api/campaigns/webhook/call-result"
-                changes.append("URL call-result → app.ausarta.net")
+                changes.append(f"URL call-result → {FRONTEND}")
 
     return changes
 

@@ -140,7 +140,7 @@ def _expand_dev_cors_origins(raw_origins: list[str]) -> list[str]:
 ALLOWED_ORIGINS = _expand_dev_cors_origins([
     o.strip() for o in os.getenv(
         "CORS_ALLOWED_ORIGINS",
-        "http://localhost:5173,http://localhost:3000,http://15.218.15.30,https://app.ausarta.net,https://www.ausarta.net"
+        "http://localhost:5173,http://localhost:3000,http://15.216.15.30,http://15.216.15.30,https://www.ausarta.net"
     ).split(",") if o.strip()
 ])
 
