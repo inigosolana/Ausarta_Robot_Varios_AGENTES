@@ -5,7 +5,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import type { AgentConfig, AIConfig, Empresa } from '../../types';
 import {
   AUSARTA_FEMALE_VOICE_ID,
+  TIPO_RESULTADOS_GROUPS,
   TIPO_RESULTADOS_OPTIONS,
+  getTipoResultadosLabel,
   ENTHUSIASM_LEVELS,
   getAgentCallDirection,
 } from '../../lib/agentVoiceOptions';
@@ -363,20 +365,26 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
                 </div>
               ))}
               <div>
-                <label className={labelCls}>Tipo resultados</label>
+                <label className={labelCls}>Tipo de agente / resultados</label>
                 {isEditing ? (
                   <select
                     value={formData.tipo_resultados || ''}
                     onChange={e => setFormData({ ...formData, tipo_resultados: e.target.value || undefined })}
                     className={inputCls}
                   >
-                    <option value="">—</option>
-                    {TIPO_RESULTADOS_OPTIONS.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    <option value="">— Selecciona tipo —</option>
+                    {TIPO_RESULTADOS_GROUPS.map(group => (
+                      <optgroup key={group} label={group}>
+                        {TIPO_RESULTADOS_OPTIONS.filter(o => o.group === group).map(opt => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                 ) : (
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{agent.tipo_resultados || '—'}</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {getTipoResultadosLabel(agent.tipo_resultados || agent.agent_type)}
+                  </p>
                 )}
               </div>
               {isEditing && (

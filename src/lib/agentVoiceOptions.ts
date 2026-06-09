@@ -1,12 +1,24 @@
 export const AUSARTA_FEMALE_VOICE_ID = 'b5aa8098-49ef-475d-89b0-c9262ecf33fd';
 
+/** Debe coincidir con ALLOWED_AGENT_TYPES en backend/routers/agents.py */
 export const TIPO_RESULTADOS_OPTIONS = [
-  { value: 'ENCUESTA_NUMERICA', label: 'Encuesta numérica' },
-  { value: 'ENCUESTA_MIXTA', label: 'Encuesta mixta' },
-  { value: 'CUALIFICACION_LEAD', label: 'Cualificación lead' },
-  { value: 'AGENDAMIENTO_CITA', label: 'Agendamiento cita' },
-  { value: 'SOPORTE_CLIENTE', label: 'Soporte cliente' },
+  { value: 'ENCUESTA_NUMERICA', label: 'Encuesta numérica', group: 'Encuestas' },
+  { value: 'ENCUESTA_MIXTA', label: 'Encuesta mixta', group: 'Encuestas' },
+  { value: 'PREGUNTAS_ABIERTAS', label: 'Preguntas abiertas', group: 'Encuestas' },
+  { value: 'CUALIFICACION_LEAD', label: 'Cualificación lead', group: 'Comercial' },
+  { value: 'AGENDAMIENTO_CITA', label: 'Agendamiento cita', group: 'Comercial' },
+  { value: 'SOPORTE_CLIENTE', label: 'Soporte cliente', group: 'Atención' },
 ] as const;
+
+export type TipoResultadosValue = (typeof TIPO_RESULTADOS_OPTIONS)[number]['value'];
+
+export const TIPO_RESULTADOS_GROUPS = ['Encuestas', 'Comercial', 'Atención'] as const;
+
+export function getTipoResultadosLabel(value?: string | null): string {
+  if (!value) return '—';
+  const found = TIPO_RESULTADOS_OPTIONS.find(o => o.value === value);
+  return found?.label ?? value.replace(/_/g, ' ');
+}
 
 export const ENTHUSIASM_LEVELS = ['Bajo', 'Normal', 'Alto', 'Extremo'] as const;
 

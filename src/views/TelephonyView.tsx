@@ -1,22 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  ChevronDown, AlertTriangle, Trash2, Building2,
-  Server, Eye, EyeOff, Wifi, WifiOff,
-  Save, Loader2, CheckCircle2, XCircle, Info, Copy, Check
+  Building2, Eye, EyeOff, Loader2, CheckCircle2, XCircle, Copy, Check,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/apiFetch';
 import { useAuth } from '../contexts/AuthContext';
 import type { Empresa } from '../types';
-
-// ── Types ─────────────────────────────────────────────────────────────────────
+import './telephony.css';
 
 interface YeastarConfig {
   empresa_id?: number;
   yeastar_pbx_url: string;
   yeastar_api_mode: 'pseries' | 'cloud_pbx';
   yeastar_client_id: string;
-  yeastar_client_secret?: string; // only for form input or '********'
+  yeastar_client_secret?: string;
   enabled_capabilities?: string[];
 }
 
@@ -38,14 +35,31 @@ const EMPTY_FORM: YeastarConfig = {
   enabled_capabilities: [],
 };
 
-// ── Component ─────────────────────────────────────────────────────────────────
+const CAP_ICONS: Record<string, string> = {
+  'extensions.read': 'contact_phone',
+  'extensions.write': 'person_add',
+  'calls.control': 'call_merge',
+  'events.webhooks': 'troubleshoot',
+  'trunks.read': 'settings_ethernet',
+  'trunks.write': 'hub',
+  'routes.read': 'route',
+  'routes.write': 'alt_route',
+  'contacts.manage': 'contacts',
+  'queues.manage': 'groups',
+  'cdr.recordings': 'mic',
+  'system.read': 'dns',
+};
+
+function MaterialIcon({ name, className = '' }: { name: string; className?: string }) {
+  return <span className={`material-symbols-outlined tel-icon ${className}`}>{name}</span>;
+}
 
 const formatApiError = (detail: unknown, fallback: string) => {
   if (!detail) return fallback;
   if (typeof detail === 'string') return detail;
   if (Array.isArray(detail)) {
     return detail
-      .map((item: any) => {
+      .map((item: { loc?: string[]; msg?: string; message?: string }) => {
         const path = Array.isArray(item?.loc) ? item.loc.join('.') : '';
         const msg = item?.msg || item?.message || JSON.stringify(item);
         return path ? `${path}: ${msg}` : msg;
@@ -53,7 +67,7 @@ const formatApiError = (detail: unknown, fallback: string) => {
       .join(' | ');
   }
   if (typeof detail === 'object') {
-    const data = detail as any;
+    const data = detail as Record<string, string>;
     return data.message || data.msg || data.error || JSON.stringify(data);
   }
   return String(detail);
@@ -63,7 +77,6 @@ const TelephonyView: React.FC = () => {
   const { t } = useTranslation();
   const { profile, isPlatformOwner } = useAuth();
 
-  // ── Yeastar state ──────────────────────────────────────────────────────────
   const [form, setForm] = useState<YeastarConfig>(EMPTY_FORM);
   const [savedConfig, setSavedConfig] = useState<YeastarConfig | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -76,19 +89,26 @@ const TelephonyView: React.FC = () => {
   const [capabilities, setCapabilities] = useState<YeastarCapability[]>([]);
   const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
 
-  // ── Multi-tenant state ─────────────────────────────────────────────────────
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | null>(null);
-  /** IP desde backend (.env AUSARTA_PUBLIC_IP) — no depende del build Vite */
   const [ausartaPublicIp, setAusartaPublicIp] = useState(
     () => (import.meta.env.VITE_AUSARTA_PUBLIC_IP as string | undefined)?.trim() || '',
   );
   const [yeastarWebhookUrl, setYeastarWebhookUrl] = useState('');
   const [webhookCopied, setWebhookCopied] = useState(false);
+  const [ipCopied, setIpCopied] = useState(false);
+
   const isCloudMode = form.yeastar_api_mode === 'cloud_pbx';
   const currentModeLabel = isCloudMode ? 'Cloud PBX' : 'P-Series';
   const currentCredentialLabel = isCloudMode ? 'API Username' : 'Client ID';
   const currentSecretLabel = isCloudMode ? 'API Password' : 'Client Secret';
+  const isConfigured = Boolean(savedConfig?.yeastar_pbx_url);
+
+  const selectedEmpresaName = useMemo(() => {
+    if (!selectedEmpresaId) return null;
+    return empresas.find(e => Number(e.id) === selectedEmpresaId)?.nombre
+      ?? (profile?.empresa_id === selectedEmpresaId ? profile?.empresas?.nombre : null);
+  }, [selectedEmpresaId, empresas, profile]);
 
   useEffect(() => {
     apiFetch('/api/telephony/platform-info')
@@ -98,9 +118,8 @@ const TelephonyView: React.FC = () => {
         const ip = String(data?.ausarta_public_ip || '').trim();
         if (ip) setAusartaPublicIp(ip);
         const webhook = String(data?.yeastar_webhook_url || '').trim();
-        if (webhook) {
-          setYeastarWebhookUrl(webhook);
-        } else if (typeof window !== 'undefined') {
+        if (webhook) setYeastarWebhookUrl(webhook);
+        else if (typeof window !== 'undefined') {
           setYeastarWebhookUrl(`${window.location.origin}/webhooks/yeastar`);
         }
       })
@@ -123,15 +142,13 @@ const TelephonyView: React.FC = () => {
       .finally(() => setCapabilitiesLoading(false));
   }, []);
 
-  const copyWebhookUrl = async () => {
-    if (!yeastarWebhookUrl) return;
+  const copyText = async (text: string, setter: (v: boolean) => void) => {
+    if (!text) return;
     try {
-      await navigator.clipboard.writeText(yeastarWebhookUrl);
-      setWebhookCopied(true);
-      setTimeout(() => setWebhookCopied(false), 2000);
-    } catch {
-      /* clipboard no disponible */
-    }
+      await navigator.clipboard.writeText(text);
+      setter(true);
+      setTimeout(() => setter(false), 2000);
+    } catch { /* ignore */ }
   };
 
   useEffect(() => {
@@ -147,9 +164,8 @@ const TelephonyView: React.FC = () => {
   }, [profile, isPlatformOwner]);
 
   useEffect(() => {
-    if (selectedEmpresaId) {
-      loadConfig(selectedEmpresaId);
-    } else {
+    if (selectedEmpresaId) loadConfig(selectedEmpresaId);
+    else {
       setForm(EMPTY_FORM);
       setSavedConfig(null);
     }
@@ -190,7 +206,7 @@ const TelephonyView: React.FC = () => {
           yeastar_pbx_url: data.yeastar_pbx_url || '',
           yeastar_api_mode: data.yeastar_api_mode || 'pseries',
           yeastar_client_id: data.yeastar_client_id || '',
-          yeastar_client_secret: '',   // handled dynamically on save
+          yeastar_client_secret: '',
           enabled_capabilities: data.enabled_capabilities || [],
         });
       }
@@ -220,7 +236,6 @@ const TelephonyView: React.FC = () => {
     setSaveSuccess(false);
   };
 
-  // ── Test connection ────────────────────────────────────────────────────────
   const handleTest = async () => {
     if (!form.yeastar_pbx_url || !form.yeastar_client_id || !selectedEmpresaId) return;
     setTesting(true);
@@ -239,14 +254,13 @@ const TelephonyView: React.FC = () => {
       });
       const data = await res.json();
       setTestResult({ ok: data.ok, message: data.message });
-    } catch (err) {
+    } catch {
       setTestResult({ ok: false, message: t('Connection error', 'Error de conexión con el servidor') });
     } finally {
       setTesting(false);
     }
   };
 
-  // ── Save config ────────────────────────────────────────────────────────────
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.yeastar_pbx_url || !form.yeastar_client_id || !selectedEmpresaId) return;
@@ -254,19 +268,16 @@ const TelephonyView: React.FC = () => {
     setSaveSuccess(false);
     setSaveError('');
     try {
-      const payload: any = {
+      const payload: Record<string, unknown> = {
         empresa_id: selectedEmpresaId,
         yeastar_pbx_url: form.yeastar_pbx_url,
         yeastar_api_mode: form.yeastar_api_mode,
         yeastar_client_id: form.yeastar_client_id,
         enabled_capabilities: form.enabled_capabilities || [],
       };
-
-      // UX: Only send the secret if it's not empty and not the masked placeholder
       if (form.yeastar_client_secret && form.yeastar_client_secret !== '********') {
         payload.yeastar_client_secret = form.yeastar_client_secret;
       }
-
       const res = await apiFetch('/api/telephony/yeastar', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -281,426 +292,381 @@ const TelephonyView: React.FC = () => {
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
     } catch (err) {
-      console.error('[Yeastar] Save error:', err);
       setSaveError(err instanceof Error ? err.message : t('Save error', 'Error al guardar la configuracion'));
     } finally {
       setSaving(false);
     }
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  const statusLabel = loadingConfig
+    ? 'SINCRONIZANDO'
+    : isConfigured
+      ? 'ENLACE ACTIVO'
+      : 'SIN CONFIGURAR';
+
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      {/* Header */}
-      <header>
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-          <Server size={24} className="text-indigo-600" />
-          {t('Telephony Configuration', 'Configuración de Telefonía PBX')}
-        </h1>
-        <p className="text-gray-500 text-sm mt-1">
-          {t('Configure your telephony provider for outbound calls and transfers.', 'Configura tu proveedor de telefonía para llamadas salientes y transferencias.')}
-        </p>
-      </header>
+    <div className="telephony-page relative min-h-full">
+      <div className="pointer-events-none absolute top-0 right-1/4 h-[420px] w-[420px] rounded-full bg-cyan-500/10 blur-[120px]" />
+      <div className="pointer-events-none absolute top-1/4 right-0 h-[360px] w-[360px] rounded-full bg-indigo-500/10 blur-[150px]" />
 
-      {/* Empresa Selector */}
-      {isPlatformOwner && (
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-            <Building2 size={15} />
-            {t('Company to configure', 'Empresa a configurar')}
-          </label>
-          <select
-            value={selectedEmpresaId || ''}
-            onChange={(e) => setSelectedEmpresaId(Number(e.target.value))}
-            className="w-full h-10 px-3 rounded-lg border border-gray-200 bg-white text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
-          >
-            <option value="" disabled>{t('Select a company', 'Selecciona una empresa')}</option>
-            {empresas.map(emp => (
-              <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* ── Yeastar PBX Integration card ─────────────────────────────────── */}
-      {!selectedEmpresaId ? (
-          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400 shadow-sm">
-              {t('Select a company to configure telephony.', 'Selecciona una empresa para configurar la telefonía.')}
-          </div>
-      ) : (
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        {/* Card header */}
-        <div className="px-8 py-5 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-blue-50 flex items-center justify-between">
+      <div className="relative z-10 mx-auto max-w-7xl space-y-6">
+        {/* Empresa bar */}
+        <div className="tel-empresa-bar flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            <div className="bg-indigo-100 p-2.5 rounded-xl">
-              <Server size={18} className="text-indigo-600" />
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-300">
+              <Building2 size={22} />
             </div>
             <div>
-              <h2 className="font-bold text-gray-900">
-                {t('Yeastar Integration', 'Integracion Yeastar')} {currentModeLabel}
-              </h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {t(
-                  'Connect your Yeastar PBX using the correct API mode for this tenant.',
-                  'Conecta la centralita Yeastar usando el modo de API correcto para esta empresa.'
-                )}
+              <p className="tel-mono text-xs font-bold uppercase tracking-widest text-indigo-600/80 dark:text-indigo-300/90">
+                {t('Company to configure', 'Empresa a configurar')}
+              </p>
+              <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                {selectedEmpresaName || (isPlatformOwner ? 'Selecciona una empresa' : 'Tu empresa')}
               </p>
             </div>
           </div>
-
-          {/* Connection status badge */}
-          {!loadingConfig && (
-            savedConfig?.yeastar_pbx_url ? (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
-                <Wifi size={13} /> {t('Configured', 'Configurado')}
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 bg-gray-50 border border-gray-200 px-3 py-1 rounded-full">
-                <WifiOff size={13} /> {t('Not configured', 'Sin configurar')}
-              </span>
-            )
+          {isPlatformOwner && (
+            <select
+              value={selectedEmpresaId || ''}
+              onChange={e => setSelectedEmpresaId(e.target.value ? Number(e.target.value) : null)}
+              className="tel-field min-w-[220px] px-3 py-2.5 font-medium"
+            >
+              <option value="">{t('Select a company', 'Selecciona una empresa')}</option>
+              {empresas.map(emp => (
+                <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+              ))}
+            </select>
           )}
         </div>
 
-        {/* Instrucciones API Yeastar — permisos mínimos (Extension GET + Call Control POST) */}
-        <div className="px-8 py-6 bg-blue-50 border-b border-blue-100">
-          <h3 className="flex items-center gap-2 text-sm font-bold text-blue-900 mb-3">
-            <Info size={16} className="text-blue-600 shrink-0" />
-            Instrucciones para el técnico de Yeastar
-          </h3>
-          <div className="text-sm text-blue-900/90 space-y-3 leading-relaxed">
-            <p>
-              {isCloudMode ? (
-                <>Modo legacy Cloud PBX. Usa usuario y contrasena API para el endpoint <strong>/api/v2.0.0/login</strong>.</>
-              ) : (
-                <>Entra al panel de administracion de Yeastar P-Series y ve a <strong>Integraciones / API</strong>. Crea una nueva conexion con esta configuracion:</>
-              )}
-            </p>
-            <ol className="list-decimal list-inside space-y-3 pl-0.5">
-              <li>
-                <strong>Privilegios (API Interfaces):</strong> Marca ÚNICAMENTE estas dos casillas (por
-                seguridad mínima):
-                <ul className="list-none mt-2 ml-4 space-y-1.5 text-blue-800/90">
-                  <li>
-                    • Fila <strong>Extension</strong>: Marca <strong>GET</strong>{' '}
-                    <em className="text-blue-700/80">(Para consultar si la extensión está libre).</em>
-                  </li>
-                  <li>
-                    • Fila <strong>Call Control</strong>: Marca <strong>POST</strong>{' '}
-                    <em className="text-blue-700/80">(Para ejecutar la transferencia de llamada).</em>
-                  </li>
-                </ul>
-              </li>
-              <li>
-                <strong>IP Permitida:</strong>{' '}
-                {ausartaPublicIp ? (
-                  <code className="bg-blue-100 px-2 py-0.5 rounded font-mono text-blue-950 font-semibold">
-                    {ausartaPublicIp}
-                  </code>
-                ) : (
-                  <code className="bg-amber-100 border border-amber-200 px-2 py-0.5 rounded font-mono text-amber-900 font-semibold">
-                    [PONER_AQUI_LA_IP_DE_AUSARTA]
-                  </code>
-                )}{' '}
-                <em className="text-blue-700/80">(La IP pública de este servidor)</em>
-                {!ausartaPublicIp && (
-                  <span className="block mt-1.5 text-xs text-amber-800/90">
-                    Añade <code className="bg-amber-50 px-1 rounded">AUSARTA_PUBLIC_IP=tu.ip.publica</code>{' '}
-                    en el <strong>.env del backend</strong> (contenedor <code>backend</code> en Portainer) y
-                    reinicia solo el backend. No hace falta rebuild del frontend.
-                  </span>
-                )}
-              </li>
-              <li>
-                <strong>Máscara de subred:</strong>{' '}
-                <code className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">255.255.255.255</code>
-              </li>
-            </ol>
-            <p className="pt-1 border-t border-blue-200/60">
-              Una vez guardado, copia el <strong>Client ID</strong> y <strong>Client Secret</strong>{' '}
-              generados y pégalos aquí abajo.
-            </p>
-          </div>
-        </div>
-
-        {/* Paso 2: Webhook Event Push (vincular callid ↔ encuesta / transferencias) */}
-        <div className="px-8 py-6 bg-violet-50 border-b border-violet-100">
-          <h3 className="flex items-center gap-2 text-sm font-bold text-violet-900 mb-3">
-            <Info size={16} className="text-violet-600 shrink-0" />
-            Paso 2 — Webhook Event Push (en el panel de Yeastar)
-          </h3>
-          <div className="text-sm text-violet-900/90 space-y-3 leading-relaxed">
-            <p className="bg-white/60 border border-violet-200 rounded-lg px-3 py-2 text-xs">
-              <strong>No confundas con el Paso 1 (API):</strong> el estado de extensión y la transferencia
-              se hacen con <strong>Extension GET</strong> y <strong>Call Control POST</strong> en{' '}
-              <em>Integraciones → API</em>. El webhook es solo para que Ausarta reciba el{' '}
-              <strong>ID de la llamada</strong> (<code className="font-mono">call_id</code>) y pueda
-              transferir correctamente.
-            </p>
-            <p>
-              En <strong>Integraciones → Webhook</strong> (o Event Push), activa el checkbox y crea una fila:
-            </p>
-            <ul className="list-none space-y-3">
-              <li>
-                <strong>URL del webhook:</strong>
-                <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                  <code className="flex-1 min-w-0 break-all bg-violet-100 px-2 py-1.5 rounded font-mono text-xs text-violet-950 font-semibold">
-                    {yeastarWebhookUrl || 'https://tu-dominio-ausarta.com/webhooks/yeastar'}
-                  </code>
-                  {yeastarWebhookUrl && (
-                    <button
-                      type="button"
-                      onClick={copyWebhookUrl}
-                      className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold text-violet-800 bg-white border border-violet-200 px-3 py-1.5 rounded-lg hover:bg-violet-100 transition-colors"
-                    >
-                      {webhookCopied ? <Check size={14} /> : <Copy size={14} />}
-                      {webhookCopied ? 'Copiado' : 'Copiar URL'}
-                    </button>
-                  )}
-                </div>
-                <span className="block mt-1 text-xs text-violet-700/80">
-                  Debe ser accesible desde Internet. Si tu Yeastar Cloud exige HTTPS, usa `https://...` en vez de `http://...`.
+        {/* Header */}
+        <header className="flex flex-col gap-4 border-b border-gray-200 pb-6 dark:border-white/10 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              {isConfigured && !loadingConfig ? (
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
                 </span>
-              </li>
-              <li>
-                <strong>Secret:</strong> deja el que genere Yeastar (no hace falta pegarlo en Ausarta).
-              </li>
-              <li>
-                <strong>Request Method:</strong>{' '}
-                <code className="bg-violet-100 px-1.5 py-0.5 rounded font-mono">POST</code>
-              </li>
-              <li>
-                <strong>Event (obligatorio):</strong> busca y marca{' '}
-                <strong>30011 — Call State Changed</strong> (cambio de estado de llamada; trae{' '}
-                <code className="font-mono text-xs">call_id</code>). Si el panel permite varias filas, una
-                sola con 30011 basta.
-                <ul className="list-none mt-2 ml-1 space-y-1 text-xs text-violet-800/90">
-                  <li>
-                    • <strong>30008 — Extension Call State Changed</strong> → solo Ringing/Busy/Idle de la
-                    extensión; <em>no sustituye</em> la consulta Extension GET del Paso 1.
-                  </li>
-                  <li>
-                    • <strong>30007 / 30009</strong> → registro y presencia; <em>no los necesitas</em> para
-                    Ausarta.
-                  </li>
-                </ul>
-              </li>
-            </ul>
-
-            <div className="pt-3 border-t border-violet-200/60">
-              <p className="text-xs text-violet-900/80 font-semibold mb-2">
-                Cómo confirmar que Ausarta está recibiendo el webhook
-              </p>
-              <ol className="list-decimal list-inside space-y-2 text-xs text-violet-900/80">
-                <li>
-                  En Yeastar, guarda la fila del webhook con evento <strong>30011</strong> y URL <strong>/webhooks/yeastar</strong>.
-                  Si Yeastar tiene botón <em>Send test</em>, úsalo; si no, haz una llamada de prueba desde la extensión configurada.
-                </li>
-                <li>
-                  En la tabla del webhook de Yeastar, revisa el <strong>historial/operaciones</strong>:
-                  debe aparecer al menos un envío correcto (habitualmente respuesta OK).
-                </li>
-                <li>
-                  En Ausarta, abre el contenedor <code>backend</code> en Portainer → <strong>Logs</strong>
-                  y busca líneas como <code className="font-mono">[Yeastar Background] Evento</code>.
-                </li>
-                <li>
-                  Si no aparece nada: verifica que la URL tenga exactamente <code className="font-mono">/webhooks/yeastar</code>
-                  y que el firewall/router permita tráfico entrante por el puerto donde está Nginx (80/443).
-                </li>
-              </ol>
+              ) : (
+                <span className="h-2.5 w-2.5 rounded-full bg-gray-300 dark:bg-gray-600" />
+              )}
+              <span className={`tel-mono text-xs font-bold uppercase tracking-wider ${
+                isConfigured ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'
+              }`}>
+                {statusLabel}
+              </span>
             </div>
-            <p className="text-xs text-violet-700/80 pt-1 border-t border-violet-200/60">
-              Si la URL no coincide con tu dominio, define{' '}
-              <code className="bg-violet-100/80 px-1 rounded">FRONTEND_URL=https://app.tudominio.com</code>{' '}
-              o <code className="bg-violet-100/80 px-1 rounded">AUSARTA_PUBLIC_WEBHOOK_BASE_URL</code> en el
-              .env del backend y reinicia el contenedor.
+            <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+              PBX Yeastar API
+            </h1>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {t(
+                'Configure your telephony provider for outbound calls and transfers.',
+                'Consola de integración para Yeastar P-Series y Cloud — llamadas, transferencias y webhooks.',
+              )}
             </p>
           </div>
-        </div>
+          <div className="flex items-center gap-2">
+            <span className="tel-glass rounded-full px-3 py-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+              {currentModeLabel}
+            </span>
+            {selectedEmpresaId && (
+              <button
+                type="button"
+                onClick={() => loadConfig(selectedEmpresaId)}
+                className="tel-glass rounded-lg border border-gray-200 p-2 text-gray-500 transition-colors hover:text-cyan-600 dark:border-white/10 dark:hover:text-cyan-400"
+                title="Recargar"
+              >
+                <MaterialIcon name="sync" className="!text-xl" />
+              </button>
+            )}
+          </div>
+        </header>
 
-        {/* Form body */}
-        <form onSubmit={handleSave} className="p-8 space-y-5">
-          {loadingConfig ? (
-            <div className="flex items-center justify-center py-12 gap-3 text-gray-400">
-              <Loader2 size={22} className="animate-spin" />
-              <span className="text-sm">{t('Loading configuration...', 'Cargando configuración...')}</span>
-            </div>
-          ) : (
-            <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                    {t('API Mode', 'Modo de API')} *
-                  </label>
-                  <select
-                    value={form.yeastar_api_mode}
-                    onChange={e => handleChange('yeastar_api_mode', e.target.value)}
-                    className="w-full h-10 px-4 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
-                  >
-                    <option value="pseries">Yeastar P-Series OpenAPI</option>
-                    <option value="cloud_pbx">Yeastar Cloud PBX legacy</option>
-                  </select>
-                </div>
-                <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-xs text-blue-900">
-                  {isCloudMode ? (
-                    <>Cloud PBX legacy usa <code>/api/v2.0.0/login</code> y <code>/api/v2.0.0/extension/list</code>.</>
-                  ) : (
-                    <>P-Series OpenAPI usa <code>/openapi/v1.0/get_token</code> y endpoints <code>/openapi/v1.0</code>.</>
-                  )}
-                </div>
-              </div>
-
-              {/* Row 1: Host URL */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                  {t('PBX URL', 'URL de la Centralita')} *
-                </label>
-                <input
-                  type="url"
-                  required
-                  value={form.yeastar_pbx_url}
-                  onChange={e => handleChange('yeastar_pbx_url', e.target.value)}
-                  placeholder={isCloudMode ? "https://pbx.empresa.cloud:443" : "https://pbx.empresa.com:8088"}
-                  className="w-full h-10 px-4 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
-                />
-                <p className="text-[11px] text-gray-400 mt-1">
-                  {isCloudMode ? 'URL completa de la instancia Cloud PBX. Si no indicas puerto, se usara 443.' : t('Full URL including protocol and port.', 'URL completa incluyendo protocolo (http/https) y puerto.')}
-                </p>
-              </div>
-
-              {/* Row 2: Client ID + Secret */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                    {currentCredentialLabel} *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    autoComplete="off"
-                    value={form.yeastar_client_id}
-                    onChange={e => handleChange('yeastar_client_id', e.target.value)}
-                    placeholder={isCloudMode ? "api" : "xxxxxxxxxxxxxxxx"}
-                    className="w-full h-10 px-4 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
-                  />
+        {!selectedEmpresaId ? (
+          <div className="tel-glass rounded-2xl p-12 text-center text-gray-500 dark:text-gray-400">
+            {t('Select a company to configure telephony.', 'Selecciona una empresa para configurar la telefonía.')}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+            {/* Left column */}
+            <div className="space-y-6 lg:col-span-7">
+              {/* Credentials */}
+              <section className="tel-glass tel-glass-glow relative overflow-hidden rounded-xl p-6">
+                <div className="mb-6 flex items-center gap-3">
+                  <MaterialIcon name="admin_panel_settings" className="text-indigo-600 dark:text-indigo-300" />
+                  <h2 className="tel-mono text-sm font-bold uppercase tracking-widest text-gray-900 dark:text-white">
+                    Consola de credenciales
+                  </h2>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                    {currentSecretLabel}
-                    {savedConfig?.yeastar_pbx_url && (
-                      <span className="ml-2 text-gray-400 normal-case font-normal">
-                        ({t('leave blank to keep current', 'déjala vacía para conservar el actual')})
-                      </span>
+                {loadingConfig ? (
+                  <div className="flex items-center justify-center gap-3 py-16 text-gray-400">
+                    <Loader2 size={22} className="animate-spin" />
+                    <span className="text-sm">{t('Loading configuration...', 'Cargando configuración...')}</span>
+                  </div>
+                ) : (
+                  <form onSubmit={handleSave} className="space-y-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                          {t('PBX URL', 'URL de la centralita')} *
+                        </label>
+                        <input
+                          type="url"
+                          required
+                          value={form.yeastar_pbx_url}
+                          onChange={e => handleChange('yeastar_pbx_url', e.target.value)}
+                          placeholder={isCloudMode ? 'https://pbx.empresa.cloud:443' : 'https://pbx.empresa.com:8088'}
+                          className="tel-field tel-mono px-3 py-2.5"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                          {t('API Mode', 'Modo de API')} *
+                        </label>
+                        <select
+                          value={form.yeastar_api_mode}
+                          onChange={e => handleChange('yeastar_api_mode', e.target.value)}
+                          className="tel-field px-3 py-2.5"
+                        >
+                          <option value="pseries">Yeastar P-Series OpenAPI</option>
+                          <option value="cloud_pbx">Yeastar Cloud PBX legacy</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                          {currentCredentialLabel} *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          autoComplete="off"
+                          value={form.yeastar_client_id}
+                          onChange={e => handleChange('yeastar_client_id', e.target.value)}
+                          className="tel-field tel-mono px-3 py-2.5"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                          {currentSecretLabel}
+                          {savedConfig?.yeastar_pbx_url && (
+                            <span className="ml-1 font-normal text-gray-400">
+                              ({t('leave blank to keep current', 'vacío = conservar')})
+                            </span>
+                          )}
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showPassword ? 'text' : 'password'}
+                            autoComplete="new-password"
+                            value={form.yeastar_client_secret}
+                            onChange={e => handleChange('yeastar_client_secret', e.target.value)}
+                            placeholder={savedConfig?.yeastar_pbx_url ? '********' : ''}
+                            required={!savedConfig?.yeastar_pbx_url}
+                            className="tel-field tel-mono w-full px-3 py-2.5 pr-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword(v => !v)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                          >
+                            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {testResult && (
+                      <div className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm ${
+                        testResult.ok
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300'
+                          : 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300'
+                      }`}>
+                        {testResult.ok ? <CheckCircle2 size={16} className="shrink-0 mt-0.5" /> : <XCircle size={16} className="shrink-0 mt-0.5" />}
+                        <span>{testResult.message}</span>
+                      </div>
                     )}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      autoComplete="new-password"
-                      value={form.yeastar_client_secret}
-                      onChange={e => handleChange('yeastar_client_secret', e.target.value)}
-                      placeholder={savedConfig?.yeastar_pbx_url ? '********' : isCloudMode ? 'Introduce la API Password' : t('Enter client secret', 'Introduce el secreto')}
-                      required={!savedConfig?.yeastar_pbx_url}
-                      className="w-full h-10 pl-4 pr-11 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/20 focus:border-indigo-400 transition-all"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(v => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
-                </div>
-              </div>
 
-              {/* Test result banner */}
-              {testResult && (
-                <div className={`flex items-start gap-3 p-4 rounded-xl border text-sm ${
-                  testResult.ok
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                    : 'bg-red-50 border-red-200 text-red-700'
-                }`}>
-                  {testResult.ok
-                    ? <CheckCircle2 size={18} className="text-emerald-500 shrink-0 mt-0.5" />
-                    : <XCircle size={18} className="text-red-500 shrink-0 mt-0.5" />
-                  }
-                  <span>{testResult.message}</span>
-                </div>
-              )}
+                    {saveSuccess && (
+                      <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                        <CheckCircle2 size={16} />
+                        {t('Configuration saved successfully.', 'Configuración guardada correctamente.')}
+                      </div>
+                    )}
 
-              {/* Save success banner */}
-              {saveSuccess && (
-                <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
-                  <CheckCircle2 size={18} className="text-emerald-500 shrink-0" />
-                  {t('Configuration saved successfully.', 'Configuración guardada correctamente.')}
-                </div>
-              )}
+                    {saveError && (
+                      <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+                        <XCircle size={16} className="shrink-0 mt-0.5" />
+                        <span>{saveError}</span>
+                      </div>
+                    )}
 
-              <div className="space-y-3 pt-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-bold text-gray-900">Funciones API Yeastar</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      Selecciona las capacidades que quieres habilitar para esta empresa.
+                    <div className="flex flex-wrap justify-end gap-3 border-t border-gray-100 pt-4 dark:border-white/10">
+                      <button
+                        type="button"
+                        onClick={handleTest}
+                        disabled={testing || !form.yeastar_pbx_url || !form.yeastar_client_id}
+                        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-40 dark:border-white/10 dark:bg-gray-900/50 dark:text-gray-200 dark:hover:bg-gray-800"
+                      >
+                        {testing ? <Loader2 size={16} className="animate-spin" /> : <MaterialIcon name="network_ping" className="!text-lg" />}
+                        {testing ? t('Testing...', 'Probando...') : t('Test Connection', 'Probar conexión')}
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={saving || !form.yeastar_pbx_url || !form.yeastar_client_id}
+                        className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition-colors hover:bg-indigo-500 disabled:opacity-40 dark:bg-indigo-500 dark:hover:bg-indigo-400"
+                      >
+                        {saving ? <Loader2 size={16} className="animate-spin" /> : <MaterialIcon name="save" className="!text-lg" />}
+                        {saving ? t('Saving...', 'Guardando...') : t('Save Configuration', 'Guardar configuración')}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </section>
+
+              {/* Technical briefing */}
+              <section className="tel-glass rounded-xl p-6">
+                <div className="mb-6 flex items-center gap-3 border-b border-gray-100 pb-4 dark:border-white/10">
+                  <MaterialIcon name="integration_instructions" className="text-cyan-600 dark:text-cyan-400" />
+                  <h2 className="tel-mono text-sm font-bold uppercase tracking-widest text-gray-900 dark:text-white">
+                    Guía técnica
+                  </h2>
+                </div>
+
+                <div className="relative space-y-8 before:absolute before:inset-y-0 before:left-[15px] before:w-0.5 before:bg-gray-200 dark:before:bg-white/10">
+                  {/* Step 1 */}
+                  <div className="relative pl-10">
+                    <div className="absolute left-0 top-1 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-cyan-400 bg-white text-sm font-bold text-cyan-600 shadow-sm dark:border-cyan-500/50 dark:bg-gray-900 dark:text-cyan-400">
+                      1
+                    </div>
+                    <h3 className="font-semibold text-gray-900 dark:text-white">Crear conexión API</h3>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      En Yeastar: <strong>Integraciones → API</strong>. Permisos mínimos:
                     </p>
+                    <div className="tel-mono mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600 dark:border-white/10 dark:bg-gray-900/50 dark:text-gray-300">
+                      <p>• <span className="text-cyan-600 dark:text-cyan-400">Extension GET</span> — consultar si la extensión está libre</p>
+                      <p>• <span className="text-cyan-600 dark:text-cyan-400">Call Control POST</span> — ejecutar transferencias</p>
+                    </div>
                   </div>
-                  <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-semibold text-gray-500">
+
+                  {/* Step 2 */}
+                  <div className="relative pl-10">
+                    <div className="absolute left-0 top-1 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-gray-300 bg-white text-sm font-bold text-gray-500 dark:border-white/20 dark:bg-gray-900 dark:text-gray-400">
+                      2
+                    </div>
+                    <h3 className="font-semibold text-gray-900 dark:text-white">IP permitida</h3>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      Añade la IP pública de Ausarta en la whitelist de Yeastar. Máscara: <code className="tel-mono">255.255.255.255</code>
+                    </p>
+                    <div className="mt-3 flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-white/10 dark:bg-gray-900/50">
+                      <code className="tel-mono text-sm text-indigo-600 dark:text-indigo-300">
+                        {ausartaPublicIp || '[AUSARTA_PUBLIC_IP en .env del backend]'}
+                      </code>
+                      {ausartaPublicIp && (
+                        <button
+                          type="button"
+                          onClick={() => copyText(ausartaPublicIp, setIpCopied)}
+                          className="text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-300"
+                        >
+                          {ipCopied ? <Check size={14} /> : <Copy size={14} />}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Step 3 */}
+                  <div className="relative pl-10">
+                    <div className="absolute left-0 top-1 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-gray-300 bg-white text-sm font-bold text-gray-500 dark:border-white/20 dark:bg-gray-900 dark:text-gray-400">
+                      3
+                    </div>
+                    <h3 className="font-semibold text-gray-900 dark:text-white">Webhook (evento 30011)</h3>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      En <strong>Integraciones → Webhook</strong>. Evento obligatorio: <strong>30011 — Call State Changed</strong>
+                    </p>
+                    <div className="mt-3 space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-white/10 dark:bg-gray-900/50">
+                      <div className="flex items-center justify-between gap-2">
+                        <code className="tel-mono break-all text-xs text-gray-600 dark:text-gray-300">
+                          {yeastarWebhookUrl || 'https://tu-dominio/webhooks/yeastar'}
+                        </code>
+                        {yeastarWebhookUrl && (
+                          <button
+                            type="button"
+                            onClick={() => copyText(yeastarWebhookUrl, setWebhookCopied)}
+                            className="shrink-0 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-300"
+                          >
+                            {webhookCopied ? <Check size={14} /> : <Copy size={14} />}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            {/* Right column */}
+            <div className="space-y-6 lg:col-span-5">
+              {/* Capability matrix */}
+              <section className="tel-glass tel-glass-cyan rounded-xl p-6">
+                <div className="mb-4 flex items-center justify-between border-b border-gray-100 pb-4 dark:border-white/10">
+                  <div className="flex items-center gap-3">
+                    <MaterialIcon name="memory" className="text-cyan-600 dark:text-cyan-400" />
+                    <h2 className="tel-mono text-sm font-bold uppercase tracking-widest text-gray-900 dark:text-white">
+                      Matriz de capacidades
+                    </h2>
+                  </div>
+                  <span className="rounded-md border border-cyan-200 bg-cyan-50 px-2 py-1 text-[10px] font-bold text-cyan-700 dark:border-cyan-500/30 dark:bg-cyan-950/30 dark:text-cyan-300">
                     {(form.enabled_capabilities || []).length} activas
                   </span>
                 </div>
 
                 {capabilitiesLoading ? (
-                  <div className="flex items-center gap-2 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-400">
-                    <Loader2 size={15} className="animate-spin" />
-                    Cargando funciones API...
+                  <div className="flex items-center gap-2 py-8 text-sm text-gray-400">
+                    <Loader2 size={16} className="animate-spin" />
+                    Cargando capacidades…
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
                     {capabilities.map(cap => {
-                      const checked = (form.enabled_capabilities || []).includes(cap.id);
-                      const badgeClass = cap.status === 'implemented'
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      const active = (form.enabled_capabilities || []).includes(cap.id);
+                      const icon = CAP_ICONS[cap.id] || 'api';
+                      const endpoint = cap.endpoints[0] || cap.permission;
+                      const statusCls = cap.status === 'implemented'
+                        ? 'text-emerald-600 dark:text-emerald-400'
                         : cap.status === 'planned'
-                          ? 'bg-amber-50 text-amber-700 border-amber-200'
-                          : 'bg-blue-50 text-blue-700 border-blue-200';
+                          ? 'text-amber-600 dark:text-amber-400'
+                          : 'text-gray-500 dark:text-gray-400';
                       return (
                         <label
                           key={cap.id}
-                          className={`block rounded-xl border p-4 cursor-pointer transition-colors ${
-                            checked ? 'border-indigo-300 bg-indigo-50' : 'border-gray-100 hover:border-gray-200 bg-white'
-                          }`}
+                          className={`tel-cap-card flex cursor-pointer gap-3 rounded-lg p-4 ${active ? 'tel-cap-card--active' : ''}`}
                         >
-                          <div className="flex items-start gap-3">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleCapability(cap.id)}
-                              className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                            />
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={() => toggleCapability(cap.id)}
+                            className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500"
+                          />
+                          <div className="flex min-w-0 flex-1 gap-3">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white dark:border-white/10 dark:bg-gray-900">
+                              <MaterialIcon name={icon} className="!text-lg text-indigo-600 dark:text-indigo-300" />
+                            </div>
                             <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="text-sm font-bold text-gray-900">{cap.label}</span>
-                                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${badgeClass}`}>
-                                  {cap.status === 'implemented' ? 'listo' : cap.status === 'planned' ? 'plan' : 'disponible'}
+                              <div className="flex flex-wrap items-center justify-between gap-1">
+                                <span className="text-sm font-semibold text-gray-900 dark:text-white">{cap.label}</span>
+                                <span className={`tel-mono text-[10px] font-medium ${statusCls}`}>
+                                  {cap.status === 'implemented' ? 'listo' : cap.status === 'planned' ? 'plan' : 'disp.'}
                                 </span>
                               </div>
-                              <p className="mt-1 text-xs text-gray-500">{cap.description}</p>
-                              <p className="mt-2 text-[11px] font-semibold text-gray-500">
-                                Permiso Yeastar: <span className="font-mono">{cap.permission}</span>
-                              </p>
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                {cap.endpoints.slice(0, 3).map(endpoint => (
-                                  <code key={endpoint} className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">
-                                    {endpoint}
-                                  </code>
-                                ))}
-                                {cap.endpoints.length > 3 && (
-                                  <span className="text-[10px] text-gray-400">+{cap.endpoints.length - 3}</span>
-                                )}
-                              </div>
+                              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{cap.description}</p>
+                              <code className="tel-mono mt-1.5 inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600 dark:bg-gray-900 dark:text-gray-400">
+                                {endpoint}
+                              </code>
                             </div>
                           </div>
                         </label>
@@ -708,91 +674,54 @@ const TelephonyView: React.FC = () => {
                     })}
                   </div>
                 )}
-              </div>
+              </section>
 
-              {/* Action buttons */}
-              {saveError && (
-                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  <XCircle size={16} className="mt-0.5 shrink-0" />
-                  <span>{saveError}</span>
+              {/* Hazard zone */}
+              <section className="tel-glass tel-glass-danger rounded-xl border border-red-200/80 p-6 dark:border-red-900/40">
+                <div className="mb-4 flex items-center gap-3">
+                  <MaterialIcon name="warning" className="text-red-500" />
+                  <h2 className="tel-mono text-sm font-bold uppercase tracking-widest text-red-600 dark:text-red-400">
+                    Zona de riesgo
+                  </h2>
                 </div>
-              )}
-
-              <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                <button
-                  type="button"
-                  onClick={handleTest}
-                  disabled={testing || !form.yeastar_pbx_url || !form.yeastar_client_id}
-                  className="flex items-center gap-2 px-5 h-10 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {testing ? (
-                    <><Loader2 size={15} className="animate-spin" /> {t('Testing...', 'Probando...')}</>
-                  ) : (
-                    <><Wifi size={15} /> {t('Test Connection', 'Probar Conexión')}</>
-                  )}
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={saving || !form.yeastar_pbx_url || !form.yeastar_client_id}
-                  className="flex items-center gap-2 px-6 h-10 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-sm shadow-indigo-200"
-                >
-                  {saving ? (
-                    <><Loader2 size={15} className="animate-spin" /> {t('Saving...', 'Guardando...')}</>
-                  ) : (
-                    <><Save size={15} /> {t('Save Configuration', 'Guardar Configuración')}</>
-                  )}
-                </button>
-              </div>
-            </>
-          )}
-        </form>
-      </div>
-      )}
-
-      {/* ── System maintenance card ───────────────────────────────────────── */}
-      <div className="bg-red-50 rounded-xl border border-red-100 p-8 space-y-4">
-        <div>
-          <h3 className="text-sm font-bold text-red-800 flex items-center gap-2">
-            <AlertTriangle size={18} />
-            {t('System Maintenance', 'Mantenimiento del Sistema')}
-          </h3>
-          <p className="text-xs text-red-600 mt-1 uppercase tracking-wider font-bold opacity-70">
-            {t('Extreme Cleanup', 'Limpieza Extrema')}
-          </p>
-        </div>
-        <p className="text-sm text-red-700">
-          {t(
-            'If the system hangs with the message "Calls in progress" and the agent does not respond, you can force the cleanup of all active rooms. This will hang up all current calls.',
-            'Si el sistema se queda bloqueado con el mensaje "Hay llamadas en curso" y el agente no responde, puedes forzar la limpieza de todas las salas activas. Esto colgará todas las llamadas actuales.'
-          )}
-        </p>
-        <div className="flex justify-start">
-          <button
-            onClick={async () => {
-              if (window.confirm(t(
-                'Are you sure you want to force close ALL active calls? This will unlock the system.',
-                '¿Estás seguro de que quieres forzar el cierre de TODAS las llamadas activas? Esto desbloqueará el sistema.'
-              ))) {
-                try {
-                  const res = await fetch(`${(import.meta as any).env.VITE_API_URL || '/api'}/calls/cleanup`, { method: 'POST' });
-                  if (res.ok) alert(t('✅ System cleaned successfully. All rooms have been cleared.', '✅ Sistema limpiado correctamente. Todas las salas han sido borradas.'));
-                  else alert(t('❌ Error cleaning the rooms.', '❌ Error al limpiar las salas.'));
-                } catch {
-                  alert(t('Server connection error.', 'Error de conexión con el servidor.'));
-                }
-              }
-            }}
-            className="flex items-center gap-2 px-6 py-2.5 bg-red-600 text-white text-sm font-bold rounded-lg hover:bg-red-700 transition-colors shadow-sm"
-          >
-            <Trash2 size={18} />
-            {t('Reset Rooms and Unlock System', 'Resetear Salas y Desbloquear Sistema')}
-          </button>
-        </div>
+                <div className="rounded-lg border border-red-100 bg-red-50/50 p-4 dark:border-red-900/30 dark:bg-red-950/20">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                    {t('Reset Rooms and Unlock System', 'Resetear salas y desbloquear')}
+                  </h3>
+                  <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                    {t(
+                      'If the system hangs with the message "Calls in progress" and the agent does not respond, you can force the cleanup of all active rooms.',
+                      'Si el sistema se queda bloqueado con "Hay llamadas en curso", fuerza la limpieza de todas las salas activas. Colgará las llamadas en curso.',
+                    )}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!window.confirm(t(
+                        'Are you sure you want to force close ALL active calls?',
+                        '¿Forzar el cierre de TODAS las llamadas activas?',
+                      ))) return;
+                      try {
+                        const res = await fetch(`${(import.meta.env.VITE_API_URL as string) || '/api'}/calls/cleanup`, { method: 'POST' });
+                        if (res.ok) alert(t('✅ System cleaned successfully.', '✅ Sistema limpiado correctamente.'));
+                        else alert(t('❌ Error cleaning the rooms.', '❌ Error al limpiar las salas.'));
+                      } catch {
+                        alert(t('Server connection error.', 'Error de conexión con el servidor.'));
+                      }
+                    }}
+                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-red-300 bg-red-100/80 py-2.5 text-sm font-bold text-red-700 transition-colors hover:bg-red-200/80 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
+                  >
+                    <MaterialIcon name="delete_forever" className="!text-lg" />
+                    {t('Extreme Cleanup', 'Limpieza extrema')}
+                  </button>
+                </div>
+              </section>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
 export default TelephonyView;
-

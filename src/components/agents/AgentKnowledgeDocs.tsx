@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2, Plus, Trash2, ExternalLink } from 'lucide-react';
+import { Loader2, Plus, Trash2, ExternalLink, FileText, Upload } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import {
+  KNOWLEDGE_FILE_ACCEPT,
+  KNOWLEDGE_FORMATS_LABEL,
+  knowledgeSourceTypeFromFile,
+  textFileFromContent,
+} from '../../lib/knowledgeUpload';
 
 interface KBDoc {
   titulo: string;
@@ -11,6 +17,8 @@ interface KBDoc {
 }
 
 const API_BASE = (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL ?? '';
+
+type UploadMode = 'file' | 'text';
 
 type Props = {
   agentId: number;
@@ -26,10 +34,19 @@ export const AgentKnowledgeDocs: React.FC<Props> = ({ agentId, empresaId, isEdit
   const [docs, setDocs] = useState<KBDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadMode, setUploadMode] = useState<UploadMode>('file');
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [textContent, setTextContent] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+  const [msg, setMsg] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
   const [deletingTitle, setDeletingTitle] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const flash = (type: 'ok' | 'error', text: string) => {
+    setMsg({ type, text });
+    setTimeout(() => setMsg(null), 5000);
+  };
 
   const load = useCallback(async () => {
     if (!empresaId || !agentId) {
@@ -54,29 +71,69 @@ export const AgentKnowledgeDocs: React.FC<Props> = ({ agentId, empresaId, isEdit
 
   useEffect(() => { load(); }, [load]);
 
+  const applyFile = (file: File) => {
+    setUploadFile(file);
+    if (!uploadTitle) {
+      setUploadTitle(file.name.replace(/\.[^.]+$/, ''));
+    }
+  };
+
+  const uploadDocument = async (file: File, titulo: string) => {
+    if (!empresaId) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('titulo', titulo.trim());
+    fd.append('source_type', knowledgeSourceTypeFromFile(file));
+    fd.append('empresa_id', String(empresaId));
+    fd.append('agent_id', String(agentId));
+
+    const res = await fetch(`${API_BASE}/api/knowledge/upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: fd,
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      const detail = err.detail;
+      const message = Array.isArray(detail)
+        ? detail.map((d: { msg?: string }) => d.msg || '').join(' ')
+        : (detail || 'Error al indexar documento');
+      throw new Error(message);
+    }
+
+    const data = await res.json();
+    return data as { titulo: string; chunks_total?: number };
+  };
+
   const handleUpload = async () => {
-    if (!uploadFile || !uploadTitle.trim() || !empresaId) return;
+    if (!uploadTitle.trim() || !empresaId) return;
+
+    let fileToUpload: File | null = uploadFile;
+    if (uploadMode === 'text') {
+      if (!textContent.trim()) {
+        flash('error', 'Escribe el contenido del documento');
+        return;
+      }
+      fileToUpload = textFileFromContent(uploadTitle, textContent);
+    }
+
+    if (!fileToUpload) {
+      flash('error', 'Selecciona un archivo o pega texto');
+      return;
+    }
+
     setUploading(true);
     try {
-      const fd = new FormData();
-      fd.append('file', uploadFile);
-      fd.append('titulo', uploadTitle.trim());
-      fd.append('source_type', uploadFile.name.endsWith('.pdf') ? 'pdf' : 'manual');
-      fd.append('empresa_id', String(empresaId));
-      fd.append('agent_id', String(agentId));
-      const res = await fetch(`${API_BASE}/api/knowledge/upload`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      });
-      if (res.ok) {
-        setUploadFile(null);
-        setUploadTitle('');
-        await load();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        alert(err.detail || 'Error al subir documento');
-      }
+      const data = await uploadDocument(fileToUpload, uploadTitle);
+      flash('ok', `"${data.titulo}" indexado${data.chunks_total ? ` (${data.chunks_total} chunks)` : ''}`);
+      setUploadFile(null);
+      setUploadTitle('');
+      setTextContent('');
+      if (fileRef.current) fileRef.current.value = '';
+      await load();
+    } catch (e) {
+      flash('error', e instanceof Error ? e.message : 'Error al subir documento');
     } finally {
       setUploading(false);
     }
@@ -94,11 +151,18 @@ export const AgentKnowledgeDocs: React.FC<Props> = ({ agentId, empresaId, isEdit
         `${API_BASE}/api/knowledge/${encodeURIComponent(titulo)}?${params}`,
         { method: 'DELETE', headers },
       );
-      if (res.ok || res.status === 204) await load();
+      if (res.ok || res.status === 204) {
+        flash('ok', `"${titulo}" eliminado`);
+        await load();
+      }
     } finally {
       setDeletingTitle(null);
     }
   };
+
+  const canUpload =
+    uploadTitle.trim() &&
+    (uploadMode === 'file' ? !!uploadFile : !!textContent.trim());
 
   return (
     <div className="mt-6 space-y-3 border-t border-gray-100 pt-5 dark:border-white/10">
@@ -108,7 +172,10 @@ export const AgentKnowledgeDocs: React.FC<Props> = ({ agentId, empresaId, isEdit
             Conocimiento del agente
           </p>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            Documentos RAG solo para este agente (ventas, scripts, catálogo…).
+            Documentos RAG solo para este agente: scripts, catálogo, objeciones, guías de venta…
+          </p>
+          <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">
+            Formatos: {KNOWLEDGE_FORMATS_LABEL}
           </p>
         </div>
         <Link
@@ -120,6 +187,18 @@ export const AgentKnowledgeDocs: React.FC<Props> = ({ agentId, empresaId, isEdit
         </Link>
       </div>
 
+      {msg && (
+        <div
+          className={`rounded-lg px-3 py-2 text-xs ${
+            msg.type === 'ok'
+              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+              : 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+          }`}
+        >
+          {msg.text}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center gap-2 text-xs text-gray-400">
           <Loader2 size={14} className="animate-spin" />
@@ -127,7 +206,7 @@ export const AgentKnowledgeDocs: React.FC<Props> = ({ agentId, empresaId, isEdit
         </div>
       ) : docs.length === 0 ? (
         <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-3 py-4 text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-900/30 dark:text-gray-400">
-          Sin documentos propios. Sube PDF o texto con información específica de este agente.
+          Sin documentos propios. Sube un archivo o pega texto con información que solo este agente deba usar en llamadas.
         </p>
       ) : (
         <div className="space-y-2">
@@ -162,45 +241,106 @@ export const AgentKnowledgeDocs: React.FC<Props> = ({ agentId, empresaId, isEdit
       )}
 
       {isEditing && (
-        <div className="rounded-xl border border-gray-100 bg-gray-50/50 p-3 dark:border-white/5 dark:bg-gray-900/30">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <input
-              type="text"
-              value={uploadTitle}
-              onChange={e => setUploadTitle(e.target.value)}
-              placeholder="Título del documento"
-              className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
-            />
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".pdf,.txt,.md,.csv"
-              className="hidden"
-              onChange={e => {
-                const f = e.target.files?.[0];
-                if (f) {
-                  setUploadFile(f);
-                  if (!uploadTitle) setUploadTitle(f.name.replace(/\.[^.]+$/, ''));
-                }
-              }}
-            />
+        <div className="rounded-xl border border-gray-100 bg-gray-50/50 p-4 dark:border-white/5 dark:bg-gray-900/30">
+          <div className="mb-3 flex gap-2">
             <button
               type="button"
-              onClick={() => fileRef.current?.click()}
-              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+              onClick={() => setUploadMode('file')}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                uploadMode === 'file'
+                  ? 'bg-cyan-600 text-white'
+                  : 'bg-white text-gray-600 border border-gray-200 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300'
+              }`}
             >
-              {uploadFile ? uploadFile.name : 'Elegir archivo'}
+              <Upload size={13} />
+              Archivo
             </button>
             <button
               type="button"
-              onClick={handleUpload}
-              disabled={uploading || !uploadFile || !uploadTitle.trim()}
-              className="inline-flex items-center justify-center gap-1 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              onClick={() => setUploadMode('text')}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                uploadMode === 'text'
+                  ? 'bg-cyan-600 text-white'
+                  : 'bg-white text-gray-600 border border-gray-200 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300'
+              }`}
             >
-              {uploading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-              Añadir
+              <FileText size={13} />
+              Texto directo
             </button>
           </div>
+
+          <input
+            type="text"
+            value={uploadTitle}
+            onChange={e => setUploadTitle(e.target.value)}
+            placeholder="Título del documento (ej: Script ventas Q2)"
+            className="mb-3 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+          />
+
+          {uploadMode === 'file' ? (
+            <>
+              <div
+                role="button"
+                tabIndex={0}
+                onDrop={e => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  const file = e.dataTransfer.files[0];
+                  if (file) applyFile(file);
+                }}
+                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onClick={() => fileRef.current?.click()}
+                onKeyDown={e => e.key === 'Enter' && fileRef.current?.click()}
+                className={`mb-3 cursor-pointer rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors ${
+                  dragOver
+                    ? 'border-cyan-400 bg-cyan-50 dark:bg-cyan-950/30'
+                    : uploadFile
+                      ? 'border-cyan-300 bg-cyan-50/50 dark:border-cyan-700 dark:bg-cyan-950/20'
+                      : 'border-gray-200 hover:border-cyan-300 hover:bg-gray-50 dark:border-gray-700 dark:hover:border-cyan-700'
+                }`}
+              >
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept={KNOWLEDGE_FILE_ACCEPT}
+                  className="hidden"
+                  onChange={e => {
+                    const f = e.target.files?.[0];
+                    if (f) applyFile(f);
+                  }}
+                />
+                {uploadFile ? (
+                  <p className="text-sm font-medium text-cyan-700 dark:text-cyan-300">{uploadFile.name}</p>
+                ) : (
+                  <>
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                      Arrastra un archivo o haz clic para elegir
+                    </p>
+                    <p className="mt-1 text-[11px] text-gray-400">{KNOWLEDGE_FORMATS_LABEL}</p>
+                  </>
+                )}
+              </div>
+            </>
+          ) : (
+            <textarea
+              value={textContent}
+              onChange={e => setTextContent(e.target.value)}
+              rows={6}
+              placeholder="Pega aquí el contenido: guion de llamada, argumentario, lista de precios, FAQs del producto…"
+              className="mb-3 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-mono leading-relaxed dark:border-gray-700 dark:bg-gray-900"
+            />
+          )}
+
+          <button
+            type="button"
+            onClick={handleUpload}
+            disabled={uploading || !canUpload}
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-cyan-500 disabled:opacity-50 sm:w-auto"
+          >
+            {uploading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+            {uploading ? 'Indexando…' : 'Añadir al agente'}
+          </button>
         </div>
       )}
     </div>

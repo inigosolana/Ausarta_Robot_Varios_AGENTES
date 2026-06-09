@@ -10,6 +10,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { Empresa } from '../types';
+import { KNOWLEDGE_FILE_ACCEPT } from '../lib/knowledgeUpload';
 import './knowledge-base.css';
 
 interface KBDoc {
@@ -552,7 +553,7 @@ export function KnowledgeBaseView() {
                     ref={fileInputRef}
                     type="file"
                     className="hidden"
-                    accept=".txt,.md,.pdf,.csv,.json,.xlsx,.xls,.docx"
+                    accept={KNOWLEDGE_FILE_ACCEPT}
                     onChange={e => { const f = e.target.files?.[0]; if (f) applyFile(f); }}
                   />
                   <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 transition-transform group-hover:scale-110 group-hover:bg-emerald-100 dark:bg-gray-800 dark:group-hover:bg-primary/15">

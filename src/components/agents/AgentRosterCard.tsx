@@ -1,7 +1,7 @@
 import React from 'react';
 import { ChevronRight } from 'lucide-react';
 import type { AgentConfig, AIConfig, Empresa } from '../../types';
-import { getAgentCallDirection } from '../../lib/agentVoiceOptions';
+import { getAgentCallDirection, getTipoResultadosLabel } from '../../lib/agentVoiceOptions';
 
 type AgentRow = AgentConfig & { ai_config?: AIConfig; empresas?: Empresa };
 
@@ -40,7 +40,8 @@ type Props = {
 
 export const AgentRosterCard: React.FC<Props> = ({ agent, selected, onClick }) => {
   const lang = (agent.ai_config?.language || 'es').toUpperCase();
-  const useCase = agent.use_case || agent.tipo_resultados?.replace(/_/g, ' ') || 'General';
+  const tipoLabel = getTipoResultadosLabel(agent.tipo_resultados || agent.agent_type);
+  const useCase = agent.use_case || (tipoLabel !== '—' ? tipoLabel : 'General');
   const isActive = true;
   const direction = getAgentCallDirection(agent);
   const dirStyle = direction ? DIRECTION_STYLES[direction] : null;
