@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-05T10:33:35.121Z",
+  "updatedAt": "2026-06-09T05:54:21.218Z",
   "createdAt": "2026-02-24T13:49:09.664Z",
   "id": "MkglONaefdeNTLrm",
   "name": "Invitacion_Usuarios_Ausarta_Robot_v3",
@@ -8,30 +8,76 @@
   "isArchived": false,
   "nodes": [
     {
-      "id": "webhook-123456789",
-      "name": "Webhook",
-      "onError": "continueRegularOutput",
       "parameters": {
         "httpMethod": "POST",
-        "options": {},
         "path": "d0952789-a4a1-4eae-b0db-494356a9e3fa",
-        "respondWith": "text",
-        "responseMode": "responseNode"
+        "responseMode": "responseNode",
+        "options": {}
       },
+      "id": "webhook-123456789",
+      "name": "Webhook",
       "position": [
         112,
         208
       ],
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
-      "webhookId": "d0952789-a4a1-4eae-b0db-494356a9e3fa"
+      "webhookId": "d0952789-a4a1-4eae-b0db-494356a9e3fa",
+      "onError": "continueRegularOutput"
     },
     {
-      "credentials": {},
-      "id": "supabase-auth-123",
-      "name": "Supabase_Auth",
       "parameters": {
-        "authentication": "none",
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-n8n-secret",
+              "leftValue": "={{ $('Webhook').item.json.headers['x-n8n-secret'] }}",
+              "rightValue": "ausarta-n8n-secret-2026-XkP9mQ7r",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "validate-secret-invite",
+      "name": "ValidateSecret",
+      "position": [
+        290,
+        208
+      ],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"error\": \"Unauthorized\", \"message\": \"X-N8N-Secret invalido o ausente.\" }",
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "id": "respond-unauthorized-invite",
+      "name": "Respond_Unauthorized",
+      "position": [
+        490,
+        400
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://afrrxeibtrwjaiqmhytu.supabase.co/auth/v1/admin/users",
+        "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
@@ -44,103 +90,99 @@
             }
           ]
         },
-        "jsonBody": "={\n  \"email\": \"{{ $('Webhook').item.json.body.email }}\",\n  \"password\": \"{{ $('Webhook').item.json.body.password || 'Robot2025!' }}\",\n  \"email_confirm\": true\n}",
-        "method": "POST",
         "sendBody": true,
-        "sendHeaders": true,
         "specifyBody": "json",
-        "url": "https://afrrxeibtrwjaiqmhytu.supabase.co/auth/v1/admin/users"
+        "jsonBody": "={\n  \"email\": \"{{ $('Webhook').item.json.body.email }}\",\n  \"password\": \"{{ $('Webhook').item.json.body.password || 'Robot2025!' }}\",\n  \"email_confirm\": true\n}",
+        "options": {}
       },
+      "id": "supabase-auth-123",
+      "name": "Supabase_Auth",
       "position": [
-        352,
+        490,
         208
       ],
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1
     },
     {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const authResponse = $input.item.json;\nconst webhookBody = $('Webhook').first().json.body;\n\nreturn {\n  json: {\n    id: authResponse.id,\n    email: webhookBody.email,\n    full_name: webhookBody.full_name,\n    role: webhookBody.role || 'user',\n    empresa_id: webhookBody.empresa_id || null,\n    is_active: true\n  }\n};"
+      },
       "id": "map-profile-data",
       "name": "MapProfileData",
-      "parameters": {
-        "jsCode": "const authResponse = .item.json;\nconst webhookBody = .first().json.body;\n\nreturn {\n  json: {\n    id: authResponse.id,\n    email: webhookBody.email,\n    full_name: webhookBody.full_name,\n    role: webhookBody.role || 'user',\n    empresa_id: webhookBody.empresa_id || null,\n    is_active: true\n  }\n};",
-        "mode": "runOnceForEachItem"
-      },
       "position": [
-        528,
+        680,
         208
       ],
       "type": "n8n-nodes-base.code",
       "typeVersion": 2
     },
     {
+      "parameters": {
+        "operation": "update",
+        "tableId": "user_profiles",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "dataToSend": "autoMapInputData"
+      },
+      "id": "supabase-profile-123",
+      "name": "Supabase_Profile",
+      "position": [
+        880,
+        208
+      ],
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
       "credentials": {
         "supabaseApi": {
           "id": "v8Epggpt6LC5dFEf",
           "name": "Supabase API Auto"
         }
-      },
-      "id": "supabase-profile-123",
-      "name": "Supabase_Profile",
-      "parameters": {
-        "dataToSend": "autoMapInputData",
-        "filterType": "manual",
-        "filters": {
-          "conditions": [
-            {
-              "condition": "eq",
-              "keyName": "id",
-              "keyValue": "={{ $json.id }}"
-            }
-          ]
-        },
-        "inputsToIgnore": "",
-        "matchType": "anyFilter",
-        "operation": "update",
-        "resource": "row",
-        "tableId": "user_profiles",
-        "useCustomSchema": false
-      },
-      "position": [
-        720,
-        208
-      ],
-      "type": "n8n-nodes-base.supabase",
-      "typeVersion": 1
+      }
     },
     {
+      "parameters": {
+        "fromEmail": "instalaciones@ausarta.es",
+        "html": "=<div style=\\\"font-family: Arial, Helvetica, sans-serif; color: #1a1a1a; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;\\\">\\n  <div style=\\\"background: linear-gradient(135deg, #004a99 0%, #0066cc 100%); padding: 28px 24px; text-align: center;\\\">\\n    <p style=\\\"margin: 0; color: #ffffff; font-size: 22px; font-weight: bold;\\\">Ausarta Robot</p>\\n    <p style=\\\"margin: 8px 0 0; color: #cce0ff; font-size: 14px;\\\">Plataforma de voz empresarial</p>\\n  </div>\\n  <div style=\\\"padding: 32px 28px; background: #ffffff;\\\">\\n    <h2 style=\\\"color: #004a99; margin: 0 0 16px;\\\">Bienvenido a Ausarta Robot</h2>\\n    <p>Hola <strong>{{ $('Webhook').item.json.body.full_name }}</strong>,</p>\\n    <p>Tu cuenta en <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\\n    <div style=\\\"background: #f0f6ff; border-radius: 8px; padding: 20px; margin: 24px 0;\\\">\\n      <p style=\\\"margin: 0 0 8px; font-weight: bold; color: #004a99;\\\">Credenciales de acceso</p>\\n      <p style=\\\"margin: 4px 0;\\\"><strong>Usuario:</strong> {{ $('Webhook').item.json.body.email }}</p>\\n      <p style=\\\"margin: 4px 0;\\\"><strong>Contraseña temporal:</strong> {{ $('Webhook').item.json.body.password || 'Robot2025!' }}</p>\\n    </div>\\n    <p><strong>Próximos pasos:</strong></p>\\n    <ol style=\\\"line-height: 1.8;\\\">\\n      <li>Accede a <a href=\\\"https://app.ausarta.net\\\" style=\\\"color: #004a99; font-weight: bold;\\\">https://app.ausarta.net</a></li>\\n      <li>Inicia sesión con las credenciales indicadas</li>\\n      <li>Cambia tu contraseña en Configuración</li>\\n    </ol>\\n    <p style=\\\"font-size: 13px; color: #666;\\\">¿Dudas? <a href=\\\"mailto:clientes@ausarta.es\\\" style=\\\"color: #004a99;\\\">clientes@ausarta.es</a></p>\\n  </div>\\n</div>",
+        "options": {},
+        "toEmail": "={{ $json.email }}",
+        "subject": "Bienvenido a Ausarta Robot"
+      },
+      "id": "email-123456789",
+      "name": "Enviar_Email_Bienvenida",
+      "position": [
+        1080,
+        208
+      ],
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
       "credentials": {
         "smtp": {
           "id": "D1gBpu0AEp8AueAF",
           "name": "SMTP account"
         }
-      },
-      "id": "email-123456789",
-      "name": "Enviar_Email_Bienvenida",
-      "parameters": {
-        "toEmail": "={{ $json.email }}",
-        "subject": "Bienvenido a Ausarta Robot!",
-        "html": "=<div style=\"font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;\">\n    <div style=\"background-color: #004a99; padding: 20px; text-align: center;\">\n        <img src=\"http://15.216.15.30/ausarta.png\" alt=\"Ausarta\" style=\"height: 50px;\">\n    </div>\n    <div style=\"padding: 30px;\">\n        <h2 style=\"color: #004a99;\">Bienvenido a Ausarta Robot!</h2>\n        <p>Hola <strong>{{ $('Webhook').item.json.body.full_name }}</strong>,</p>\n        <p>Tu cuenta de acceso a la plataforma <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\n        <p>A continuacion tienes tus credenciales de acceso temporales:</p>\n        <div style=\"background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd;\">\n            <p style=\"margin: 5px 0;\"><strong>Usuario:</strong> {{ $('Webhook').item.json.body.email }}</p>\n            <p style=\"margin: 5px 0;\"><strong>Contrašeña temporal:</strong> {{ $('Webhook').item.json.body.password || 'Robot2025!' }}</p>\n        </div>\n        <p><strong>Pasos para comenzar:</strong></p>\n        <ol>\n            <li>Accede a la plataforma en <a href=\"http://15.216.15.30\" style=\"color: #004a99; font-weight: bold;\">15.216.15.30</a>.</li>\n            <li>Inicia sesion con las credenciales indicadas arriba.</li>\n            <li>Por seguridad, te recomendamos cambiar tu contrasena en el apartado de configuracion una vez dentro.</li>\n        </ol>\n        <p style=\"font-size: 13px; color: #666;\">\n            Si tienes cualquier duda tecnica, escribe a <a href=\"mailto:clientes@ausarta.es\" style=\"color: #004a99;\">clientes@ausarta.es</a>.\n        </p>\n    </div>\n</div>"
-      },
-      "position": [
-        940,
-        208
-      ],
-      "type": "n8n-nodes-base.emailSend",
-      "typeVersion": 2.1,
-      "webhookId": "4bfc5867-139e-4ca2-a773-3eafbc6a284a"
+      }
     },
     {
-      "id": "respond-node-123",
-      "name": "Respond_to_Frontend",
       "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"user_id\": \"{{ $('Supabase_Auth').item.json.id }}\",\n  \"message\": \"Usuario invitado y perfil creado.\"\n}",
         "options": {
           "responseCode": 200
-        },
-        "respondWith": "json",
-        "responseBody": "={\n  \"status\": \"success\",\n  \"user_id\": \"{{ $('Supabase_Auth').item.json.id }}\",\n  \"message\": \"Usuario invitado y perfil creado.\"\n}"
+        }
       },
+      "id": "respond-node-123",
+      "name": "Respond_to_Frontend",
       "position": [
-        1200,
+        1280,
         208
       ],
       "type": "n8n-nodes-base.respondToWebhook",
@@ -148,24 +190,31 @@
     }
   ],
   "connections": {
-    "Enviar_Email_Bienvenida": {
+    "Webhook": {
       "main": [
         [
           {
-            "index": 0,
-            "node": "Respond_to_Frontend",
-            "type": "main"
+            "node": "ValidateSecret",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
     },
-    "MapProfileData": {
+    "ValidateSecret": {
       "main": [
         [
           {
-            "index": 0,
-            "node": "Supabase_Profile",
-            "type": "main"
+            "node": "Supabase_Auth",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond_Unauthorized",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -174,9 +223,20 @@
       "main": [
         [
           {
-            "index": 0,
             "node": "MapProfileData",
-            "type": "main"
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MapProfileData": {
+      "main": [
+        [
+          {
+            "node": "Supabase_Profile",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -185,20 +245,20 @@
       "main": [
         [
           {
-            "index": 0,
             "node": "Enviar_Email_Bienvenida",
-            "type": "main"
+            "type": "main",
+            "index": 0
           }
         ]
       ]
     },
-    "Webhook": {
+    "Enviar_Email_Bienvenida": {
       "main": [
         [
           {
-            "index": 0,
-            "node": "Supabase_Auth",
-            "type": "main"
+            "node": "Respond_to_Frontend",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -218,9 +278,9 @@
     "templateCredsSetupCompleted": true
   },
   "pinData": {},
-  "versionId": "1aedcc9a-e442-48cb-aa19-d1a2fbf24d3b",
-  "activeVersionId": "1aedcc9a-e442-48cb-aa19-d1a2fbf24d3b",
-  "versionCounter": 87,
+  "versionId": "5e7eeb14-0af3-46dc-93e6-7af1556607c5",
+  "activeVersionId": "5e7eeb14-0af3-46dc-93e6-7af1556607c5",
+  "versionCounter": 97,
   "triggerCount": 1,
   "shared": [
     {
@@ -244,7 +304,7 @@
             "userId": "770335f9-a6c2-46ca-824f-d6bc6859540e",
             "projectId": "ijbwk55HPKJ5DPss",
             "user": {
-              "updatedAt": "2026-03-05T07:22:31.943Z",
+              "updatedAt": "2026-06-09T05:45:22.000Z",
               "createdAt": "2025-12-10T13:46:26.442Z",
               "id": "770335f9-a6c2-46ca-824f-d6bc6859540e",
               "email": "inigo.solana@ausarta.es",
@@ -266,13 +326,13 @@
                 "userActivatedAt": 1772015350689,
                 "npsSurvey": {
                   "waitingForResponse": true,
-                  "ignoredCount": 1,
-                  "lastShownAt": 1772695349488
+                  "ignoredCount": 2,
+                  "lastShownAt": 1773324965238
                 }
               },
               "disabled": false,
               "mfaEnabled": false,
-              "lastActiveAt": "2026-03-05",
+              "lastActiveAt": "2026-06-09",
               "isPending": false
             }
           }
@@ -282,36 +342,82 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-03-05T10:33:35.122Z",
-    "createdAt": "2026-03-05T10:33:35.122Z",
-    "versionId": "1aedcc9a-e442-48cb-aa19-d1a2fbf24d3b",
+    "updatedAt": "2026-06-09T05:54:21.218Z",
+    "createdAt": "2026-06-09T05:54:21.218Z",
+    "versionId": "5e7eeb14-0af3-46dc-93e6-7af1556607c5",
     "workflowId": "MkglONaefdeNTLrm",
     "nodes": [
       {
-        "id": "webhook-123456789",
-        "name": "Webhook",
-        "onError": "continueRegularOutput",
         "parameters": {
           "httpMethod": "POST",
-          "options": {},
           "path": "d0952789-a4a1-4eae-b0db-494356a9e3fa",
-          "respondWith": "text",
-          "responseMode": "responseNode"
+          "responseMode": "responseNode",
+          "options": {}
         },
+        "id": "webhook-123456789",
+        "name": "Webhook",
         "position": [
           112,
           208
         ],
         "type": "n8n-nodes-base.webhook",
         "typeVersion": 1,
-        "webhookId": "d0952789-a4a1-4eae-b0db-494356a9e3fa"
+        "webhookId": "d0952789-a4a1-4eae-b0db-494356a9e3fa",
+        "onError": "continueRegularOutput"
       },
       {
-        "credentials": {},
-        "id": "supabase-auth-123",
-        "name": "Supabase_Auth",
         "parameters": {
-          "authentication": "none",
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "check-n8n-secret",
+                "leftValue": "={{ $('Webhook').item.json.headers['x-n8n-secret'] }}",
+                "rightValue": "ausarta-n8n-secret-2026-XkP9mQ7r",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          }
+        },
+        "id": "validate-secret-invite",
+        "name": "ValidateSecret",
+        "position": [
+          290,
+          208
+        ],
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={ \"error\": \"Unauthorized\", \"message\": \"X-N8N-Secret invalido o ausente.\" }",
+          "options": {
+            "responseCode": 403
+          }
+        },
+        "id": "respond-unauthorized-invite",
+        "name": "Respond_Unauthorized",
+        "position": [
+          490,
+          400
+        ],
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://afrrxeibtrwjaiqmhytu.supabase.co/auth/v1/admin/users",
+          "sendHeaders": true,
           "headerParameters": {
             "parameters": [
               {
@@ -324,103 +430,99 @@
               }
             ]
           },
-          "jsonBody": "={\n  \"email\": \"{{ $('Webhook').item.json.body.email }}\",\n  \"password\": \"{{ $('Webhook').item.json.body.password || 'Robot2025!' }}\",\n  \"email_confirm\": true\n}",
-          "method": "POST",
           "sendBody": true,
-          "sendHeaders": true,
           "specifyBody": "json",
-          "url": "https://afrrxeibtrwjaiqmhytu.supabase.co/auth/v1/admin/users"
+          "jsonBody": "={\n  \"email\": \"{{ $('Webhook').item.json.body.email }}\",\n  \"password\": \"{{ $('Webhook').item.json.body.password || 'Robot2025!' }}\",\n  \"email_confirm\": true\n}",
+          "options": {}
         },
+        "id": "supabase-auth-123",
+        "name": "Supabase_Auth",
         "position": [
-          352,
+          490,
           208
         ],
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.1
       },
       {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const authResponse = $input.item.json;\nconst webhookBody = $('Webhook').first().json.body;\n\nreturn {\n  json: {\n    id: authResponse.id,\n    email: webhookBody.email,\n    full_name: webhookBody.full_name,\n    role: webhookBody.role || 'user',\n    empresa_id: webhookBody.empresa_id || null,\n    is_active: true\n  }\n};"
+        },
         "id": "map-profile-data",
         "name": "MapProfileData",
-        "parameters": {
-          "jsCode": "const authResponse = $input.item.json;\nconst webhookBody = $('Webhook').first().json.body;\n\nreturn {\n  json: {\n    id: authResponse.id,\n    email: webhookBody.email,\n    full_name: webhookBody.full_name,\n    role: webhookBody.role || 'user',\n    empresa_id: webhookBody.empresa_id || null,\n    is_active: true\n  }\n};",
-          "mode": "runOnceForEachItem"
-        },
         "position": [
-          528,
+          680,
           208
         ],
         "type": "n8n-nodes-base.code",
         "typeVersion": 2
       },
       {
+        "parameters": {
+          "operation": "update",
+          "tableId": "user_profiles",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "id",
+                "condition": "eq",
+                "keyValue": "={{ $json.id }}"
+              }
+            ]
+          },
+          "dataToSend": "autoMapInputData"
+        },
+        "id": "supabase-profile-123",
+        "name": "Supabase_Profile",
+        "position": [
+          880,
+          208
+        ],
+        "type": "n8n-nodes-base.supabase",
+        "typeVersion": 1,
         "credentials": {
           "supabaseApi": {
             "id": "v8Epggpt6LC5dFEf",
             "name": "Supabase API Auto"
           }
-        },
-        "id": "supabase-profile-123",
-        "name": "Supabase_Profile",
-        "parameters": {
-          "dataToSend": "autoMapInputData",
-          "filterType": "manual",
-          "filters": {
-            "conditions": [
-              {
-                "condition": "eq",
-                "keyName": "id",
-                "keyValue": "={{ $json.id }}"
-              }
-            ]
-          },
-          "inputsToIgnore": "",
-          "matchType": "anyFilter",
-          "operation": "update",
-          "resource": "row",
-          "tableId": "user_profiles",
-          "useCustomSchema": false
-        },
-        "position": [
-          720,
-          208
-        ],
-        "type": "n8n-nodes-base.supabase",
-        "typeVersion": 1
+        }
       },
       {
+        "parameters": {
+          "fromEmail": "instalaciones@ausarta.es",
+          "html": "=<div style=\\\"font-family: Arial, Helvetica, sans-serif; color: #1a1a1a; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;\\\">\\n  <div style=\\\"background: linear-gradient(135deg, #004a99 0%, #0066cc 100%); padding: 28px 24px; text-align: center;\\\">\\n    <p style=\\\"margin: 0; color: #ffffff; font-size: 22px; font-weight: bold;\\\">Ausarta Robot</p>\\n    <p style=\\\"margin: 8px 0 0; color: #cce0ff; font-size: 14px;\\\">Plataforma de voz empresarial</p>\\n  </div>\\n  <div style=\\\"padding: 32px 28px; background: #ffffff;\\\">\\n    <h2 style=\\\"color: #004a99; margin: 0 0 16px;\\\">Bienvenido a Ausarta Robot</h2>\\n    <p>Hola <strong>{{ $('Webhook').item.json.body.full_name }}</strong>,</p>\\n    <p>Tu cuenta en <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\\n    <div style=\\\"background: #f0f6ff; border-radius: 8px; padding: 20px; margin: 24px 0;\\\">\\n      <p style=\\\"margin: 0 0 8px; font-weight: bold; color: #004a99;\\\">Credenciales de acceso</p>\\n      <p style=\\\"margin: 4px 0;\\\"><strong>Usuario:</strong> {{ $('Webhook').item.json.body.email }}</p>\\n      <p style=\\\"margin: 4px 0;\\\"><strong>Contraseña temporal:</strong> {{ $('Webhook').item.json.body.password || 'Robot2025!' }}</p>\\n    </div>\\n    <p><strong>Próximos pasos:</strong></p>\\n    <ol style=\\\"line-height: 1.8;\\\">\\n      <li>Accede a <a href=\\\"https://app.ausarta.net\\\" style=\\\"color: #004a99; font-weight: bold;\\\">https://app.ausarta.net</a></li>\\n      <li>Inicia sesión con las credenciales indicadas</li>\\n      <li>Cambia tu contraseña en Configuración</li>\\n    </ol>\\n    <p style=\\\"font-size: 13px; color: #666;\\\">¿Dudas? <a href=\\\"mailto:clientes@ausarta.es\\\" style=\\\"color: #004a99;\\\">clientes@ausarta.es</a></p>\\n  </div>\\n</div>",
+          "options": {},
+          "toEmail": "={{ $json.email }}",
+          "subject": "Bienvenido a Ausarta Robot"
+        },
+        "id": "email-123456789",
+        "name": "Enviar_Email_Bienvenida",
+        "position": [
+          1080,
+          208
+        ],
+        "type": "n8n-nodes-base.emailSend",
+        "typeVersion": 2.1,
         "credentials": {
           "smtp": {
             "id": "D1gBpu0AEp8AueAF",
             "name": "SMTP account"
           }
-        },
-        "id": "email-123456789",
-        "name": "Enviar_Email_Bienvenida",
-        "parameters": {
-          "toEmail": "={{ $json.email }}",
-          "subject": "Bienvenido a Ausarta Robot!",
-          "html": "=<div style=\"font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;\">\n    <div style=\"background-color: #004a99; padding: 20px; text-align: center;\">\n        <img src=\"http://15.216.15.30/ausarta.png\" alt=\"Ausarta\" style=\"height: 50px;\">\n    </div>\n    <div style=\"padding: 30px;\">\n        <h2 style=\"color: #004a99;\">Bienvenido a Ausarta Robot!</h2>\n        <p>Hola <strong>{{ $('Webhook').item.json.body.full_name }}</strong>,</p>\n        <p>Tu cuenta de acceso a la plataforma <strong>Ausarta Robot Voice AI</strong> ha sido creada correctamente.</p>\n        <p>A continuacion tienes tus credenciales de acceso temporales:</p>\n        <div style=\"background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd;\">\n            <p style=\"margin: 5px 0;\"><strong>Usuario:</strong> {{ $('Webhook').item.json.body.email }}</p>\n            <p style=\"margin: 5px 0;\"><strong>Contrašeña temporal:</strong> {{ $('Webhook').item.json.body.password || 'Robot2025!' }}</p>\n        </div>\n        <p><strong>Pasos para comenzar:</strong></p>\n        <ol>\n            <li>Accede a la plataforma en <a href=\"http://15.216.15.30\" style=\"color: #004a99; font-weight: bold;\">15.216.15.30</a>.</li>\n            <li>Inicia sesion con las credenciales indicadas arriba.</li>\n            <li>Por seguridad, te recomendamos cambiar tu contrasena en el apartado de configuracion una vez dentro.</li>\n        </ol>\n        <p style=\"font-size: 13px; color: #666;\">\n            Si tienes cualquier duda tecnica, escribe a <a href=\"mailto:clientes@ausarta.es\" style=\"color: #004a99;\">clientes@ausarta.es</a>.\n        </p>\n    </div>\n</div>"
-        },
-        "position": [
-          940,
-          208
-        ],
-        "type": "n8n-nodes-base.emailSend",
-        "typeVersion": 2.1,
-        "webhookId": "4bfc5867-139e-4ca2-a773-3eafbc6a284a"
+        }
       },
       {
-        "id": "respond-node-123",
-        "name": "Respond_to_Frontend",
         "parameters": {
+          "respondWith": "json",
+          "responseBody": "={\n  \"status\": \"success\",\n  \"user_id\": \"{{ $('Supabase_Auth').item.json.id }}\",\n  \"message\": \"Usuario invitado y perfil creado.\"\n}",
           "options": {
             "responseCode": 200
-          },
-          "respondWith": "json",
-          "responseBody": "={\n  \"status\": \"success\",\n  \"user_id\": \"{{ $('Supabase_Auth').item.json.id }}\",\n  \"message\": \"Usuario invitado y perfil creado.\"\n}"
+          }
         },
+        "id": "respond-node-123",
+        "name": "Respond_to_Frontend",
         "position": [
-          1200,
+          1280,
           208
         ],
         "type": "n8n-nodes-base.respondToWebhook",
@@ -428,24 +530,31 @@
       }
     ],
     "connections": {
-      "Enviar_Email_Bienvenida": {
+      "Webhook": {
         "main": [
           [
             {
-              "index": 0,
-              "node": "Respond_to_Frontend",
-              "type": "main"
+              "node": "ValidateSecret",
+              "type": "main",
+              "index": 0
             }
           ]
         ]
       },
-      "MapProfileData": {
+      "ValidateSecret": {
         "main": [
           [
             {
-              "index": 0,
-              "node": "Supabase_Profile",
-              "type": "main"
+              "node": "Supabase_Auth",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Respond_Unauthorized",
+              "type": "main",
+              "index": 0
             }
           ]
         ]
@@ -454,9 +563,20 @@
         "main": [
           [
             {
-              "index": 0,
               "node": "MapProfileData",
-              "type": "main"
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "MapProfileData": {
+        "main": [
+          [
+            {
+              "node": "Supabase_Profile",
+              "type": "main",
+              "index": 0
             }
           ]
         ]
@@ -465,20 +585,20 @@
         "main": [
           [
             {
-              "index": 0,
               "node": "Enviar_Email_Bienvenida",
-              "type": "main"
+              "type": "main",
+              "index": 0
             }
           ]
         ]
       },
-      "Webhook": {
+      "Enviar_Email_Bienvenida": {
         "main": [
           [
             {
-              "index": 0,
-              "node": "Supabase_Auth",
-              "type": "main"
+              "node": "Respond_to_Frontend",
+              "type": "main",
+              "index": 0
             }
           ]
         ]

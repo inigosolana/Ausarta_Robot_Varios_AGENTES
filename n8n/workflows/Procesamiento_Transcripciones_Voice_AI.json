@@ -1,0 +1,426 @@
+{
+  "updatedAt": "2026-06-09T05:54:21.492Z",
+  "createdAt": "2026-03-03T07:33:12.847Z",
+  "id": "ja9QYHNbqS3grvKJ",
+  "name": "Procesamiento de Transcripciones - Ausarta Voice AI",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "transcripciones-voice-ai",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook_node_123",
+      "name": "Webhook",
+      "position": [
+        112,
+        304
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "webhookId": "dbd05767-4b7d-46bc-8410-b59c549bf98c",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"processing\",\n  \"survey_id\": \"{{ $json.body.survey_id }}\"\n}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond_node",
+      "name": "RespondProcessing",
+      "position": [
+        304,
+        304
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const body = $input.item.json.body || {};\nif (!body.messages || body.messages.length === 0) {\n  throw new Error(\"Faltan mensajes en la transcripción\");\n}\nif (!body.survey_id) {\n  throw new Error(\"Falta survey_id\");\n}\nlet transcript = \"\";\nfor (const msg of body.messages) {\n  const role = msg.role === 'user' ? 'Cliente' : 'Agente';\n  transcript += `${role}: ${msg.content}\\n`;\n}\nreturn [{\n  id: body.survey_id,\n  transcription: transcript.trim()\n}];"
+      },
+      "id": "code_format_input",
+      "name": "FormatTranscription",
+      "position": [
+        512,
+        304
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "encuestas",
+        "filters": {
+          "conditions": [
+            {}
+          ]
+        }
+      },
+      "id": "supabase_get_encuesta",
+      "name": "GetEncuesta",
+      "position": [
+        704,
+        304
+      ],
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "v8Epggpt6LC5dFEf",
+          "name": "Supabase API Auto"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "agent_config",
+        "filters": {
+          "conditions": [
+            {}
+          ]
+        }
+      },
+      "id": "supabase_get_agent",
+      "name": "GetAgentConfig",
+      "position": [
+        912,
+        304
+      ],
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "v8Epggpt6LC5dFEf",
+          "name": "Supabase API Auto"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const agent = $input.item.json;\nconst transcriptNode = $('FormatTranscription').first().json;\nconst isNumeric = agent.name && agent.name.toLowerCase().includes('dakota');\nlet prompt = `Eres un asistente supervisor que audita y extrae información de transcripciones de llamadas comerciales.\\nDebes devolver OBLIGATORIAMENTE un objeto JSON estructurado:\\n\\nSi la encuesta es de TIPO NUMÉRICO (evaluaciones de 1 a 10):\\n{\\n  \"nota_comercial\": (número del 1 al 10 o null),\\n  \"nota_instalador\": (número del 1 al 10 o null),\\n  \"nota_rapidez\": (número del 1 al 10 o null),\\n  \"comentarios\": \"Breve resumen.\"\\n}\\n\\nSi la encuesta es de TIPO ABIERTO (no piden notas del 1 al 10):\\n{\\n  \"nota_comercial\": null,\\n  \"nota_instalador\": null,\\n  \"nota_rapidez\": null,\\n  \"comentarios\": \"Resumen detallado.\"\\n}\\nTen en cuenta que el tipo de esta evaluación se considera: ${isNumeric ? 'NUMÉRICO' : 'ABIERTO'}.\\nInstrucciones originales del agente:\\n\"\"\"\\n${agent.instructions}\\n\"\"\"`;\n\nreturn [{\n  survey_id: transcriptNode.id,\n  transcription: transcriptNode.transcription,\n  prompt: prompt\n}];"
+      },
+      "id": "code_prompt",
+      "name": "FormatPrompt",
+      "position": [
+        1104,
+        304
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"{{ $json.prompt }}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.transcription }}\"\n    }\n  ],\n  \"response_format\": { \"type\": \"json_object\" }\n}",
+        "method": "POST",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "sendHeaders": false,
+        "specifyBody": "json",
+        "url": "https://api.groq.com/openai/v1/chat/completions"
+      },
+      "id": "http_llm",
+      "name": "EvaluateTranscript",
+      "position": [
+        1312,
+        304
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "NeWFqQVXICbbvpHi",
+          "name": "Header Auth account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "llm_success_check",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "is_success_llm",
+      "name": "IsSuccessLLM",
+      "position": [
+        1504,
+        304
+      ],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const response = $input.item.json.choices[0].message.content;\nconst promptNode = $('FormatPrompt').first().json;\nconst survey_id = promptNode.survey_id;\nconst transcription = promptNode.transcription;\nlet parsed = {};\nlet isError = false;\nlet errorMsg = null;\ntry {\n  let cleanJson = response.replace(/```json/g, '').replace(/```/g, '').trim();\n  parsed = JSON.parse(cleanJson);\n} catch (e) {\n  isError = true;\n  errorMsg = \"Parse JSON error: \" + response;\n}\nif (isError) {\n  return [{\n    id: survey_id,\n    status: \"failed_parsing\",\n    comentarios: errorMsg\n  }];\n}\nreturn [{\n  id: survey_id,\n  transcription: transcription,\n  nota_comercial: parsed.nota_comercial || null,\n  nota_instalador: parsed.nota_instalador || null,\n  nota_rapidez: parsed.nota_rapidez || null,\n  comentarios: parsed.comentarios || null,\n  llm_model: \"Groq Llama 3.3\",\n  status: \"completed\"\n}];"
+      },
+      "id": "code_parse",
+      "name": "ParseLLMResponse",
+      "position": [
+        1712,
+        208
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const promptNode = $('FormatPrompt').first().json;\nreturn [{\n  id: promptNode.survey_id,\n  status: \"failed_parsing\",\n  comentarios: \"Error from Groq: \" + JSON.stringify($input.item.json.error)\n}];"
+      },
+      "id": "format_error",
+      "name": "FormatErrorDB",
+      "position": [
+        1712,
+        400
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsonBody": "={\\n  \\\"lead_id\\\": {{ $('FormatPrompt').first().json.lead_id || 0 }},\\n  \\\"status\\\": \\\"{{ $json.status }}\\\",\\n  \\\"duration\\\": {{ $json.duration || 0 }},\\n  \\\"transcription\\\": \\\"{{ $json.transcription }}\\\"\\n}",
+        "method": "POST",
+        "sendBody": true,
+        "type": "n8n-nodes-base.httpRequest",
+        "url": "https://app.ausarta.net/api/campaigns/webhook/call-result",
+        "specifyBody": "json",
+        "sendHeaders": false
+      },
+      "id": "supabase_update_node",
+      "name": "NotifyBackendWebhook",
+      "position": [
+        1904,
+        304
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "credentials": {}
+    }
+  ],
+  "connections": {
+    "EvaluateTranscript": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "IsSuccessLLM",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "FormatErrorDB": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "NotifyBackendWebhook",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "FormatPrompt": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "EvaluateTranscript",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "FormatTranscription": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "GetEncuesta",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "GetAgentConfig": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "FormatPrompt",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "GetEncuesta": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "GetAgentConfig",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "IsSuccessLLM": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "ParseLLMResponse",
+            "type": "main"
+          }
+        ],
+        [
+          {
+            "index": 0,
+            "node": "FormatErrorDB",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "ParseLLMResponse": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "NotifyBackendWebhook",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "RespondProcessing": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "FormatTranscription",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "RespondProcessing",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "ffe39c54-93b2-4333-b228-5948b0fcda4d",
+  "activeVersionId": null,
+  "versionCounter": 54,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-03-03T07:33:12.849Z",
+      "createdAt": "2026-03-03T07:33:12.849Z",
+      "role": "workflow:owner",
+      "workflowId": "ja9QYHNbqS3grvKJ",
+      "projectId": "ijbwk55HPKJ5DPss",
+      "project": {
+        "updatedAt": "2025-12-11T08:54:51.702Z",
+        "createdAt": "2025-12-10T13:46:26.449Z",
+        "id": "ijbwk55HPKJ5DPss",
+        "name": "inigo solana <inigo.solana@ausarta.es>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "projectRelations": [
+          {
+            "updatedAt": "2025-12-10T13:46:26.452Z",
+            "createdAt": "2025-12-10T13:46:26.452Z",
+            "userId": "770335f9-a6c2-46ca-824f-d6bc6859540e",
+            "projectId": "ijbwk55HPKJ5DPss",
+            "user": {
+              "updatedAt": "2026-06-09T05:45:22.000Z",
+              "createdAt": "2025-12-10T13:46:26.442Z",
+              "id": "770335f9-a6c2-46ca-824f-d6bc6859540e",
+              "email": "inigo.solana@ausarta.es",
+              "firstName": "inigo",
+              "lastName": "solana",
+              "personalizationAnswers": {
+                "version": "v4",
+                "personalization_survey_submitted_at": "2025-12-11T08:55:07.101Z",
+                "personalization_survey_n8n_version": "1.123.4",
+                "companySize": "100-499",
+                "companyType": "saas",
+                "role": "business-owner",
+                "reportedSource": "google"
+              },
+              "settings": {
+                "easyAIWorkflowOnboarded": true,
+                "firstSuccessfulWorkflowId": "MkglONaefdeNTLrm",
+                "userActivated": true,
+                "userActivatedAt": 1772015350689,
+                "npsSurvey": {
+                  "waitingForResponse": true,
+                  "ignoredCount": 2,
+                  "lastShownAt": 1773324965238
+                }
+              },
+              "disabled": false,
+              "mfaEnabled": false,
+              "lastActiveAt": "2026-06-09",
+              "isPending": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": null
+}

@@ -1,5 +1,5 @@
 /**
- * Solicitud de recuperación de contraseña — email Ausarta en español vía n8n.
+ * Solicitud de recuperación de contraseña (backend → Supabase Auth o SMTP Ausarta).
  */
 export async function requestPasswordReset(
     email: string,
@@ -40,8 +40,9 @@ export async function requestPasswordReset(
 }
 
 export function passwordResetRedirectUrl(): string {
-    if (typeof window === 'undefined') return 'https://app.ausarta.net';
+    const productionUrl = 'http://15.218.15.30';
+    if (typeof window === 'undefined') return productionUrl;
     return window.location.origin.includes('localhost')
-        ? 'https://app.ausarta.net'
+        ? productionUrl
         : window.location.origin;
 }

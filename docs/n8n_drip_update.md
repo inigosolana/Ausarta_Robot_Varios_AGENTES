@@ -29,8 +29,8 @@ Después de que la llamada termine, recupera los datos de la transcripción y el
 Este es el paso crucial para cerrar el ciclo y que el backend sepa que la llamada ha terminado (y que el frontend se actualice).
 
 - **Method**: POST
-- **URL**: `http://localhost:8003/api/campaigns/webhook/call-result` 
-  *(Nota: Si n8n corre en Docker y el backend también, usa el nombre del contenedor o la IP de la red interna, ej: `http://api-backend:8003/...`)*
+- **URL**: `http://15.218.15.30/api/campaigns/webhook/call-result`
+  *(mismo origen que el frontend; nginx hace proxy a `/api/`)*
 - **Body Parameters (JSON)**:
   - `lead_id`: `{{ $json.leadId }}` (el recibido en el paso 1)
   - `status`: `{{ $json.status }}` (ej: "completed", "failed", "voicemail")
