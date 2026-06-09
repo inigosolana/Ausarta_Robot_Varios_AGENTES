@@ -30,6 +30,11 @@ const isPasswordResetFlow = () => {
 // Capturado al momento de cargar el módulo (antes de que Supabase limpie el hash)
 const initialIsRecovery = isPasswordResetFlow();
 
+// Persistimos en sessionStorage para sobrevivir la limpieza del hash por Supabase
+if (initialIsRecovery) {
+    sessionStorage.setItem('ausarta_recovery_flow', '1');
+}
+
 /** Logo grande, fondo transparente, colores claros para UI oscura */
 const LOGO_SRC = '/ausarta-logo-light.png';
 
@@ -106,11 +111,25 @@ const LoginView: React.FC = () => {
     const [rememberMe, setRememberMe] = useState(false);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+
+    // Detectamos flujo de recovery: URL hash (antes de que Supabase lo limpie) o sessionStorage
+    const inRecoveryFlow = initialIsRecovery || sessionStorage.getItem('ausarta_recovery_flow') === '1';
     const [viewMode, setViewMode] = useState<ViewMode>(() =>
-        initialIsRecovery ? 'update-password' : 'login'
+        inRecoveryFlow ? 'update-password' : 'login'
     );
     const redirectTo =
         (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/';
+
+    // Escuchar el evento PASSWORD_RECOVERY de Supabase (la forma oficial y fiable)
+    useEffect(() => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+            if (event === 'PASSWORD_RECOVERY') {
+                sessionStorage.setItem('ausarta_recovery_flow', '1');
+                setViewMode('update-password');
+            }
+        });
+        return () => subscription.unsubscribe();
+    }, []);
 
     useEffect(() => {
         document.documentElement.classList.add('dark');
@@ -122,11 +141,11 @@ const LoginView: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        // Solo redirigir al dashboard si no estamos en un flujo de recuperación/invitación
-        if (!authLoading && user && profile && !initialIsRecovery && viewMode !== 'update-password') {
+        // Solo redirigir al dashboard si no estamos en flujo de recuperación
+        if (!authLoading && user && profile && !inRecoveryFlow && viewMode !== 'update-password') {
             navigate(redirectTo, { replace: true });
         }
-    }, [authLoading, user, profile, navigate, redirectTo, viewMode]);
+    }, [authLoading, user, profile, navigate, redirectTo, viewMode, inRecoveryFlow]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -177,7 +196,7 @@ const LoginView: React.FC = () => {
         if (updateError) {
             setError(updateError.message);
         } else {
-            // Sign out so the user logs in fresh with the new password
+            sessionStorage.removeItem('ausarta_recovery_flow');
             await supabase.auth.signOut();
             window.location.replace('/login');
         }
