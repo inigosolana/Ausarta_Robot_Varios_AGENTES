@@ -1,26 +1,38 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 
-/** Detects Supabase magic-link / invite / recovery flows via URL params */
-const isSupabaseAuthFlow = () =>
-  (window.location.hash + window.location.search).includes('type=recovery') ||
-  (window.location.hash + window.location.search).includes('type=signup') ||
-  (window.location.hash + window.location.search).includes('type=invite');
+// Capture BEFORE Supabase clears the hash (runs once at module load)
+const RECOVERY_STORAGE_KEY = 'ausarta_recovery_flow';
+(() => {
+  const params = window.location.hash + window.location.search;
+  if (
+    params.includes('type=recovery') ||
+    params.includes('type=signup') ||
+    params.includes('type=invite')
+  ) {
+    sessionStorage.setItem(RECOVERY_STORAGE_KEY, '1');
+  }
+})();
 
-/**
- * Layout-route guard. Wraps all authenticated routes.
- * - While auth is resolving: shows a full-screen spinner.
- * - If Supabase auth-flow URL detected: redirects to /login so LoginView
- *   can handle the token exchange (password reset, invite accept, etc.).
- * - If no authenticated user/profile: redirects to /login, preserving
- *   the intended destination in `location.state.from` for post-login redirect.
- * - Otherwise: renders child routes via <Outlet />.
- */
 const ProtectedRoute: React.FC = () => {
   const { user, profile, loading } = useAuth();
   const location = useLocation();
+  const [pendingRecovery, setPendingRecovery] = useState(
+    () => sessionStorage.getItem(RECOVERY_STORAGE_KEY) === '1'
+  );
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        sessionStorage.setItem(RECOVERY_STORAGE_KEY, '1');
+        setPendingRecovery(true);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   if (loading) {
     return (
@@ -33,7 +45,7 @@ const ProtectedRoute: React.FC = () => {
     );
   }
 
-  if (!user || !profile || isSupabaseAuthFlow()) {
+  if (!user || !profile || pendingRecovery) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
