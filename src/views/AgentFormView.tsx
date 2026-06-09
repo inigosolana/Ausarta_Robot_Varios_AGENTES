@@ -8,11 +8,13 @@ import DashboardView from './DashboardView';
 import ResultsView from './ResultsView';
 import { TestCallModal } from '../components/TestCallModal';
 import WorkflowEditor from '../components/WorkflowEditor';
+import './agents.css';
 
 const AUSARTA_FEMALE_VOICE_ID = 'b5aa8098-49ef-475d-89b0-c9262ecf33fd';  // Chica castellano Cartesia
 
 interface Props {
     agent?: AgentConfig;
+    empresaName?: string;
     onSave: () => void;
     onCancel: () => void;
 }
@@ -29,7 +31,7 @@ const defaultAIConfig: AIConfig = {
     language: 'es'
 };
 
-const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
+const AgentFormView: React.FC<Props> = ({ agent, empresaName, onSave, onCancel }) => {
     const { isRole, hasPermission, profile, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
 
@@ -306,8 +308,13 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
         }
     };
 
+    const activeEmpresaLabel = empresaName
+        || empresas.find(e => Number(e.id) === Number(formData.empresa_id))?.nombre
+        || profile?.empresas?.nombre;
+
     return (
-        <div className="space-y-6 max-w-4xl mx-auto pb-20">
+        <div className="agent-page relative mx-auto max-w-7xl space-y-6 pb-20">
+            <div className="pointer-events-none absolute right-0 top-0 h-[200px] w-[200px] rounded-full bg-indigo-500/10 blur-[80px]" />
             {/* Test Call Simulator Modal */}
             {showTestCallModal && agent?.id && (
                 <TestCallModal
@@ -322,27 +329,63 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                     {t('Loading configuration...', 'Cargando configuración...')}
                 </div>
             )}
+            {/* Empresa bar */}
+            {(isPlatformOwner || activeEmpresaLabel) && (
+                <div className="agent-empresa-bar relative z-10 flex flex-col gap-3 rounded-xl px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <p className="agent-mono text-[10px] font-medium uppercase tracking-widest text-gray-500 dark:text-gray-400">
+                            {t('Company', 'Empresa')}
+                        </p>
+                        {!isPlatformOwner && (
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white">{activeEmpresaLabel}</p>
+                        )}
+                        {isPlatformOwner && (
+                            <p className="text-sm text-gray-600 dark:text-gray-300">
+                                {t('Agent will belong to this company', 'El agente pertenecerá a esta empresa')}
+                            </p>
+                        )}
+                    </div>
+                    {isPlatformOwner && (
+                        <select
+                            value={formData.empresa_id || ''}
+                            onChange={e => setFormData({ ...formData, empresa_id: e.target.value ? Number(e.target.value) : null })}
+                            disabled={isLoadingEmpresas}
+                            className="min-w-[220px] rounded-lg border border-indigo-500/30 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 focus:border-cyan-500 focus:outline-none dark:border-indigo-400/30 dark:bg-gray-900/80 dark:text-gray-100"
+                        >
+                            <option value="">{t('Select company...', 'Seleccionar empresa...')}</option>
+                            {empresas.map(emp => (
+                                <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                            ))}
+                        </select>
+                    )}
+                </div>
+            )}
+
             {/* Header */}
-            <header className="flex justify-between items-center bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+            <header className="agent-glass relative z-10 flex flex-col justify-between gap-4 rounded-xl p-6 sm:flex-row sm:items-center">
                 <div className="flex items-center gap-4">
                     <button
                         onClick={onCancel}
-                        className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600 transition-colors"
+                        className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200"
                     >
                         <ArrowLeft size={20} />
                     </button>
                     <div>
-                        <h1 className="text-2xl font-bold text-gray-900">
+                        <div className="mb-1 flex items-center gap-2 text-cyan-600 dark:text-cyan-400">
+                            <span className="material-symbols-outlined text-sm">settings_voice</span>
+                            <span className="agent-mono text-[10px] font-bold uppercase tracking-widest">Voice Agent</span>
+                        </div>
+                        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
                             {isEditing ? `${t('Edit', 'Editar')}: ${agent?.name}` : t('Create New Agent', 'Crear Nuevo Agente')}
                         </h1>
-                        <p className="text-gray-500 text-sm">{t('Agent and AI Models Configuration', 'Configuración del Agente y Modelos AI')}</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">{t('Agent and AI Models Configuration', 'Configuración del Agente y Modelos AI')}</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
                     {isEditing && agent?.id && (
                         <button
                             onClick={() => setShowTestCallModal(true)}
-                            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-green-500 text-white font-medium rounded-xl hover:from-emerald-500 hover:to-green-400 transition-all shadow-lg shadow-green-500/20"
+                            className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 font-medium text-white shadow-lg shadow-emerald-500/20 transition-all hover:brightness-110"
                         >
                             <FlaskConical size={17} />
                             {t('Probar Agente', 'Probar Agente')}
@@ -351,7 +394,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                     <button
                         onClick={handleSave}
                         disabled={isSaving}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-medium rounded-xl hover:from-blue-500 hover:to-blue-400 transition-all disabled:opacity-50 shadow-lg shadow-blue-500/20"
+                        className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 font-medium text-white shadow-lg shadow-indigo-500/25 transition-all hover:brightness-110 disabled:opacity-50 dark:bg-indigo-500"
                     >
                         {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
                         {isEditing ? t('Save Changes', 'Guardar Cambios') : t('Create Agent', 'Crear Agente')}
@@ -361,25 +404,20 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
             {/* Tabs (Only if editing) */}
             {isEditing && (
-                <div className="flex border-b border-gray-100 mb-6 bg-white rounded-xl shadow-sm overflow-hidden p-1 gap-1">
-                    <button
-                        onClick={() => setActiveTab('config')}
-                        className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeTab === 'config' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
-                    >
-                        {t('Configuration', 'Configuración')}
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('overview')}
-                        className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeTab === 'overview' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
-                    >
-                        {t('Overview')}
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('results')}
-                        className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeTab === 'results' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
-                    >
-                        {t('Results', 'Resultados')}
-                    </button>
+                <div className="agent-glass relative z-10 flex gap-1 overflow-hidden rounded-xl p-1">
+                    {(['config', 'overview', 'results'] as const).map(tab => (
+                        <button
+                            key={tab}
+                            onClick={() => setActiveTab(tab)}
+                            className={`flex-1 rounded-lg py-2 text-sm font-semibold transition-all ${
+                                activeTab === tab
+                                    ? 'bg-cyan-600 text-white shadow-md dark:bg-cyan-500'
+                                    : 'text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'
+                            }`}
+                        >
+                            {tab === 'config' ? t('Configuration', 'Configuración') : tab === 'overview' ? t('Overview') : t('Results', 'Resultados')}
+                        </button>
+                    ))}
                 </div>
             )}
 
@@ -403,7 +441,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
                     {/* Column 1: Identity & Voice */}
                     <div className="space-y-6">
-                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                        <section className="agent-form-section space-y-4">
                             <div className="flex items-center gap-2 mb-2">
                                 <Bot size={20} className="text-blue-500" />
                                 <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('Identity', 'Identidad')}</h2>
@@ -445,27 +483,11 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                                     </div>
                                 )}
 
-                                {isPlatformOwner && (
-                                    <div>
-                                        <label className="block text-xs font-medium text-gray-500 mb-1 ml-1">{t('Company', 'Empresa')} *</label>
-                                        <select
-                                            value={formData.empresa_id || ''}
-                                            onChange={(e) => setFormData({ ...formData, empresa_id: e.target.value ? Number(e.target.value) : null })}
-                                            disabled={isLoadingEmpresas}
-                                            className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
-                                        >
-                                            <option value="">{isLoadingEmpresas ? t('Loading...', 'Cargando...') : `-- ${t('Select', 'Seleccionar')} --`}</option>
-                                            {empresas.map(emp => (
-                                                <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                )}
                             </div>
                         </section>
 
                         {/* Voice Section moved to Column 1 */}
-                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                        <section className="agent-form-section space-y-4">
                             <div className="flex items-center gap-2 mb-2">
                                 <Speaker size={20} className="text-purple-500" />
                                 <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('Voice', 'Voz')}</h2>
@@ -528,7 +550,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
                     {/* Column 2: Personality & Context */}
                     <div className="space-y-6">
-                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                        <section className="agent-form-section space-y-4">
                             <div className="flex items-center gap-2 mb-2">
                                 <Brain size={20} className="text-indigo-500" />
                                 <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('Personality', 'Personalidad')}</h2>
@@ -580,7 +602,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                             </div>
                         </section>
 
-                        <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4">
+                        <section className="agent-form-section space-y-4">
                             <div className="flex items-center gap-2 mb-2">
                                 <Brain size={20} className="text-green-500" />
                                 <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('Knowledge Base', 'Base de Conocimiento')}</h2>
@@ -616,7 +638,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
                     {/* Column 3: Agent Mode + System Prompt / Workflow Editor */}
                     <div className="space-y-6">
                         {/* Mode selector */}
-                        <section className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                        <section className="agent-form-section p-4">
                             <div className="flex items-center gap-2 mb-3">
                                 <GitBranch size={18} className="text-violet-500" />
                                 <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500">{t('Agent Mode', 'Modo de Agente')}</h2>
@@ -660,7 +682,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
                         {/* Prompt editor (modo prompt) */}
                         {agentMode === 'prompt' && (
-                            <section className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4 flex flex-col">
+                            <section className="agent-form-section flex flex-col space-y-4">
                                 <div className="flex justify-between items-center mb-2">
                                     <div className="flex items-center gap-2">
                                         <Sparkles size={20} className="text-amber-500" />
@@ -713,7 +735,7 @@ const AgentFormView: React.FC<Props> = ({ agent, onSave, onCancel }) => {
 
                         {/* Workflow editor (modos workflow y mixed) */}
                         {(agentMode === 'workflow' || agentMode === 'mixed') && (
-                            <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                            <section className="agent-form-section overflow-hidden p-0">
                                 <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
                                     <div className="flex items-center gap-2">
                                         <GitBranch size={18} className="text-violet-500" />

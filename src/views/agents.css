@@ -1,0 +1,98 @@
+.agent-page {
+  font-family: 'Geist', 'Inter', system-ui, sans-serif;
+}
+
+.agent-glass {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.dark .agent-glass {
+  background: rgba(23, 31, 51, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.agent-roster-card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  transition: all 0.2s ease;
+}
+
+.dark .agent-roster-card {
+  background: rgba(23, 31, 51, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.agent-roster-card:hover {
+  border-color: rgba(6, 182, 212, 0.35);
+}
+
+.agent-roster-card.selected {
+  border-left-width: 4px;
+  border-left-color: #06b6d4;
+  box-shadow: 0 0 24px rgba(6, 182, 212, 0.12);
+}
+
+.dark .agent-roster-card.selected {
+  border-left-color: #4cd7f6;
+  box-shadow: 0 0 24px rgba(76, 215, 246, 0.1);
+}
+
+.agent-pulse-ring {
+  animation: agent-pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+@keyframes agent-pulse-ring {
+  0% { transform: scale(0.85); opacity: 0.7; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+.agent-mono {
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+}
+
+.agent-page .agent-form-section {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+}
+
+.dark .agent-page .agent-form-section {
+  background: rgba(23, 31, 51, 0.55);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.agent-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: rgba(249, 250, 251, 1);
+  font-size: 0.875rem;
+  color: #111827;
+  outline: none;
+}
+
+.agent-input:focus {
+  border-color: #06b6d4;
+  box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.2);
+}
+
+.dark .agent-input {
+  background: rgba(6, 14, 32, 0.8);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #dae2fd;
+}
+
+.agent-empresa-bar {
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.08), rgba(6, 182, 212, 0.08));
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.dark .agent-empresa-bar {
+  background: linear-gradient(90deg, rgba(128, 131, 255, 0.12), rgba(76, 215, 246, 0.08));
+  border-color: rgba(128, 131, 255, 0.25);
+}

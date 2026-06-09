@@ -1,0 +1,141 @@
+.camp-page {
+  font-family: 'Geist', 'Inter', system-ui, sans-serif;
+}
+
+.camp-glass {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.dark .camp-glass {
+  background: rgba(11, 19, 38, 0.72);
+  border: 1px solid rgba(70, 69, 84, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.camp-mission-card {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  transition: all 0.25s ease;
+}
+
+.dark .camp-mission-card {
+  background: rgba(23, 31, 51, 0.6);
+  border: 1px solid rgba(70, 69, 84, 0.3);
+}
+
+.camp-mission-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(6, 182, 212, 0.35);
+  box-shadow: 0 12px 24px -8px rgba(0, 0, 0, 0.12);
+}
+
+.dark .camp-mission-card:hover {
+  border-color: rgba(76, 215, 246, 0.35);
+  box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.35), 0 0 15px -5px rgba(76, 215, 246, 0.08);
+  background: rgba(23, 31, 51, 0.82);
+}
+
+.camp-progress-gradient {
+  background: linear-gradient(90deg, #6366f1 0%, #06b6d4 100%);
+}
+
+.dark .camp-progress-gradient {
+  background: linear-gradient(90deg, #8083ff 0%, #4cd7f6 100%);
+}
+
+.camp-status-pulse {
+  animation: camp-pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes camp-pulse-glow {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px 2px rgba(6, 182, 212, 0.35); }
+  50% { opacity: 0.55; box-shadow: 0 0 2px 0 rgba(6, 182, 212, 0.15); }
+}
+
+.dark .camp-status-pulse {
+  animation-name: camp-pulse-glow-dark;
+}
+
+@keyframes camp-pulse-glow-dark {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px 2px rgba(76, 215, 246, 0.45); }
+  50% { opacity: 0.5; box-shadow: 0 0 2px 0 rgba(76, 215, 246, 0.2); }
+}
+
+.camp-badge-running {
+  background: rgba(6, 182, 212, 0.12);
+  color: #0891b2;
+  border: 1px solid rgba(6, 182, 212, 0.25);
+}
+
+.dark .camp-badge-running {
+  background: rgba(76, 215, 246, 0.1);
+  color: #4cd7f6;
+  border-color: rgba(76, 215, 246, 0.25);
+}
+
+.camp-badge-pending {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.dark .camp-badge-pending {
+  background: rgba(224, 226, 255, 0.1);
+  color: #e1e0ff;
+  border-color: rgba(224, 226, 255, 0.2);
+}
+
+.camp-badge-completed {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.dark .camp-badge-completed {
+  background: rgba(78, 222, 163, 0.1);
+  color: #4edea3;
+  border-color: rgba(78, 222, 163, 0.25);
+}
+
+.camp-badge-paused {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.dark .camp-badge-paused {
+  background: rgba(251, 191, 36, 0.1);
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.25);
+}
+
+.camp-wave-bar {
+  width: 3px;
+  border-radius: 2px;
+  animation: camp-waveform 1s infinite ease-in-out alternate;
+}
+
+@keyframes camp-waveform {
+  0% { height: 4px; }
+  100% { height: 16px; }
+}
+
+.camp-wave-bar:nth-child(1) { animation-delay: 0s; background: #6366f1; }
+.camp-wave-bar:nth-child(2) { animation-delay: 0.2s; background: #06b6d4; }
+.camp-wave-bar:nth-child(3) { animation-delay: 0.4s; background: #6366f1; }
+.camp-wave-bar:nth-child(4) { animation-delay: 0.6s; background: #06b6d4; }
+.camp-wave-bar:nth-child(5) { animation-delay: 0.8s; background: #6366f1; }
+
+.dark .camp-wave-bar:nth-child(1),
+.dark .camp-wave-bar:nth-child(3),
+.dark .camp-wave-bar:nth-child(5) { background: #8083ff; }
+.dark .camp-wave-bar:nth-child(2),
+.dark .camp-wave-bar:nth-child(4) { background: #4cd7f6; }
+
+.camp-mono {
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+}
