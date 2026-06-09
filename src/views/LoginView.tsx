@@ -192,15 +192,24 @@ const LoginView: React.FC = () => {
         }
         setError('');
         setLoading(true);
-        const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
-        if (updateError) {
-            setError(updateError.message);
-        } else {
-            sessionStorage.removeItem('ausarta_recovery_flow');
-            await supabase.auth.signOut();
-            window.location.replace('/login');
+        try {
+            const updatePromise = supabase.auth.updateUser({ password: newPassword });
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Tiempo de espera agotado. Intenta de nuevo.')), 10000)
+            );
+            const { error: updateError } = await Promise.race([updatePromise, timeoutPromise]);
+            if (updateError) {
+                setError(updateError.message);
+            } else {
+                sessionStorage.removeItem('ausarta_recovery_flow');
+                await supabase.auth.signOut();
+                window.location.replace('/login');
+            }
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Error al cambiar la contraseña');
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     const title =
