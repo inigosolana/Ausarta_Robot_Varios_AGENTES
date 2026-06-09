@@ -27,6 +27,9 @@ const isPasswordResetFlow = () => {
     );
 };
 
+// Capturado al momento de cargar el módulo (antes de que Supabase limpie el hash)
+const initialIsRecovery = isPasswordResetFlow();
+
 /** Logo grande, fondo transparente, colores claros para UI oscura */
 const LOGO_SRC = '/ausarta-logo-light.png';
 
@@ -103,7 +106,9 @@ const LoginView: React.FC = () => {
     const [rememberMe, setRememberMe] = useState(false);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-    const [viewMode, setViewMode] = useState<ViewMode>('login');
+    const [viewMode, setViewMode] = useState<ViewMode>(() =>
+        initialIsRecovery ? 'update-password' : 'login'
+    );
     const redirectTo =
         (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/';
 
@@ -117,14 +122,8 @@ const LoginView: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        if (isPasswordResetFlow()) {
-            setViewMode('update-password');
-        }
-    }, []);
-
-    useEffect(() => {
-        // Tras recovery Supabase crea sesión; no redirigir al dashboard hasta cambiar contraseña
-        if (!authLoading && user && profile && !isPasswordResetFlow() && viewMode !== 'update-password') {
+        // Solo redirigir al dashboard si no estamos en un flujo de recuperación/invitación
+        if (!authLoading && user && profile && !initialIsRecovery && viewMode !== 'update-password') {
             navigate(redirectTo, { replace: true });
         }
     }, [authLoading, user, profile, navigate, redirectTo, viewMode]);
@@ -178,8 +177,9 @@ const LoginView: React.FC = () => {
         if (updateError) {
             setError(updateError.message);
         } else {
-            window.location.hash = '';
-            window.location.reload();
+            // Sign out so the user logs in fresh with the new password
+            await supabase.auth.signOut();
+            window.location.replace('/login');
         }
         setLoading(false);
     };
