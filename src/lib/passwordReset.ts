@@ -40,9 +40,8 @@ export async function requestPasswordReset(
 }
 
 export function passwordResetRedirectUrl(): string {
-    const productionUrl = 'http://15.216.15.30';
+    const productionUrl = 'http://15.216.15.30/login';
     if (typeof window === 'undefined') return productionUrl;
-    return window.location.origin.includes('localhost')
-        ? productionUrl
-        : window.location.origin;
+    if (window.location.origin.includes('localhost')) return productionUrl;
+    return `${window.location.origin}/login`;
 }

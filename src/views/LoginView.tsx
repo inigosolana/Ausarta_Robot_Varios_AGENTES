@@ -18,6 +18,15 @@ import './login.css';
 
 type ViewMode = 'login' | 'forgot' | 'forgot-sent' | 'update-password';
 
+const isPasswordResetFlow = () => {
+    const params = window.location.hash + window.location.search;
+    return (
+        params.includes('type=recovery') ||
+        params.includes('type=signup') ||
+        params.includes('type=invite')
+    );
+};
+
 /** Logo grande, fondo transparente, colores claros para UI oscura */
 const LOGO_SRC = '/ausarta-logo-light.png';
 
@@ -108,22 +117,17 @@ const LoginView: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        const urlParams = window.location.hash + window.location.search;
-        if (
-            urlParams &&
-            (urlParams.includes('type=recovery') ||
-                urlParams.includes('type=signup') ||
-                urlParams.includes('type=invite'))
-        ) {
+        if (isPasswordResetFlow()) {
             setViewMode('update-password');
         }
     }, []);
 
     useEffect(() => {
-        if (!authLoading && user && profile) {
+        // Tras recovery Supabase crea sesión; no redirigir al dashboard hasta cambiar contraseña
+        if (!authLoading && user && profile && !isPasswordResetFlow() && viewMode !== 'update-password') {
             navigate(redirectTo, { replace: true });
         }
-    }, [authLoading, user, profile, navigate, redirectTo]);
+    }, [authLoading, user, profile, navigate, redirectTo, viewMode]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();

@@ -32,12 +32,14 @@ _DEFAULT_RECOVERY_WEBHOOK_PATH = "fbdb6333-c473-493a-a1da-6c1756d5ae04"
 
 def _redirect_to(explicit: str | None = None) -> str:
     if explicit and explicit.strip():
-        return explicit.strip().rstrip("/")
-    return (
-        os.getenv("INVITE_REDIRECT_TO")
-        or os.getenv("FRONTEND_URL")
-        or "http://15.216.15.30"
-    ).strip().rstrip("/")
+        base = explicit.strip().rstrip("/")
+    else:
+        base = (
+            os.getenv("INVITE_REDIRECT_TO")
+            or os.getenv("FRONTEND_URL")
+            or "http://15.216.15.30"
+        ).strip().rstrip("/")
+    return base if base.endswith("/login") else f"{base}/login"
 
 
 def _service_role_key() -> str:
