@@ -949,6 +949,7 @@ async def _auto_configure_yeastar(empresa_id: int, ddi: str | None) -> dict:
                     trunk_name=livekit_trunk_name,
                     host=livekit_sip_host,
                     port=livekit_sip_port,
+                    ddi=ddi,
                 )
             except Exception as exc:
                 msg = f"Troncal SIP LiveKit falló: {exc}"

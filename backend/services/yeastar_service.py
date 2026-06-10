@@ -407,12 +407,17 @@ class YeastarClient:
         host: str,
         port: int = 5060,
         transport: str = "udp",
+        ddi: str | None = None,
     ) -> dict[str, Any]:
         """
-        Crea (o reutiliza) una troncal SIP VoIP en el Yeastar del cliente
+        Crea (o reutiliza) una troncal SIP peer_did en el Yeastar del cliente
         apuntando al servidor SIP de LiveKit.
 
-        - Si ya existe una troncal con ese nombre (errcode 110011), no hace nada.
+        Usa type=peer_did con country=XX (sin plantilla ITSP específica → equivale
+        a "General" en la UI, lo que permite activar la troncal sin restricciones
+        de plan).  La troncal se activa automáticamente al crearse.
+
+        - errcode 70103: hostname ya ocupado → buscamos la troncal existente por host y la reutilizamos.
         - Solo soportado en modo pseries.
         """
         if self.api_mode == "cloud_pbx":
@@ -422,25 +427,48 @@ class YeastarClient:
             )
             return {"skipped": True, "reason": "cloud_pbx_not_supported"}
 
-        host_port = f"{host}:{port}" if port != 5060 else host
+        host_port = f"{host}:{port}"
 
+        # did_list obligatorio para peer_did; si no hay DDI usamos placeholder
+        did_entry = ddi.strip() if ddi else "+000000000"
         payload: dict[str, Any] = {
             "name": trunk_name,
-            "type": "VoIP",
-            "host_port": host_port,
-            "transport": transport.upper(),
-            "trunk_type": "peer",
-            "from_user": "",
-            "enable": True,
+            "type": "peer_did",
+            "hostname": host,
+            "port": port,
+            "domain": host,
+            "transport": transport.lower(),
+            # XX = código de país inexistente → Yeastar aplica plantilla "General"
+            # (evita la plantilla ES que deja la troncal desactivada en planes cloud)
+            "country": "XX",
+            "codec_sel": "ulaw",
+            "did_list": [{"did": did_entry}],
         }
         response = await self._authenticated_pseries_request(
             "POST",
-            "trunk/add_voip_trunk",
+            "trunk/create",
             payload=payload,
         )
 
-        # errcode 110011 → ya existe con ese nombre: OK, reutilizamos
-        if response.get("errcode") == 110011:
+        # errcode 70103 → hostname:port ya usado por otra troncal → la reutilizamos
+        if response.get("errcode") == 70103:
+            trunks = await self.list_trunks()
+            existing = next(
+                (t for t in trunks if str(t.get("address", "")).startswith(host)),
+                None,
+            )
+            if existing:
+                logger.info(
+                    "[Yeastar] [%s] Host %s:%d ya está en troncal '%s' — reutilizando",
+                    self.tenant_label, host, port, existing["name"],
+                )
+                return {"skipped": False, "name": existing["name"], "reused": True, "id": existing["id"]}
+            raise YeastarConnectionError(
+                f"[{self.tenant_label}] Host {host_port} ya ocupado pero no se encontró la troncal: {response}"
+            )
+
+        # errcode 40003 → nombre duplicado → la troncal ya existe con ese nombre
+        if response.get("errcode") == 40003:
             logger.info(
                 "[Yeastar] [%s] Troncal SIP '%s' ya existe — reutilizando",
                 self.tenant_label,
@@ -453,11 +481,21 @@ class YeastarClient:
                 f"[{self.tenant_label}] Error creando troncal SIP '{trunk_name}': {response}"
             )
 
+        trunk_id = response.get("id")
+
+        # Activar la troncal tras crearla (hostname + port = campos permitidos en update)
+        try:
+            await self._authenticated_pseries_request(
+                "POST",
+                "trunk/update",
+                payload={"id": trunk_id, "hostname": host, "port": port, "domain": host},
+            )
+        except Exception as exc:
+            logger.warning("[Yeastar] [%s] No se pudo hacer update post-creación: %s", self.tenant_label, exc)
+
         logger.info(
-            "[Yeastar] [%s] Troncal SIP '%s' creada OK (host=%s)",
-            self.tenant_label,
-            trunk_name,
-            host_port,
+            "[Yeastar] [%s] Troncal SIP '%s' creada OK (host=%s:%d, id=%s)",
+            self.tenant_label, trunk_name, host, port, trunk_id,
         )
         return {**response, "name": trunk_name, "host_port": host_port, "reused": False}
 
