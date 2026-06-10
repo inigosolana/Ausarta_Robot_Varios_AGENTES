@@ -130,6 +130,7 @@ class YeastarPSeriesConfigCreate(YeastarPSeriesConfigBase):
     """Used on POST — includes the secret (write-only)."""
     yeastar_client_secret: Optional[str] = None
     empresa_id: Optional[int] = None
+    ddi: Optional[str] = None  # DDI/número entrante del cliente, ej: "+34911234501"
 
 
 class YeastarPSeriesConfigTest(BaseModel):
@@ -144,8 +145,9 @@ class YeastarPSeriesConfigTest(BaseModel):
 class YeastarPSeriesConfigResponse(YeastarPSeriesConfigBase):
     """Returned by GET — secret is masked."""
     empresa_id: int
-    yeastar_client_secret: str # Will return '********' if set
+    yeastar_client_secret: str  # Will return '********' if set
     enabled_capabilities: list[str] = []
+    ddi: Optional[str] = None  # DDI/número entrante del cliente
 
     class Config:
         from_attributes = True

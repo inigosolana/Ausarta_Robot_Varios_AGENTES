@@ -401,4 +401,99 @@ class YeastarClient:
             raise
 
 
+    async def create_inbound_route(
+        self,
+        ddi: str,
+        trunk_name: str,
+    ) -> dict[str, Any]:
+        """
+        Crea ruta entrante en Yeastar: DDI del cliente → troncal SIP hacia LiveKit.
+        Si ya existe una ruta con ese nombre, la sobreescribe.
+        Solo soportado en modo pseries (P-Series OpenAPI).
+        """
+        route_name = f"ausarta_{ddi.replace('+', '').replace(' ', '')}"
+        if self.api_mode == "cloud_pbx":
+            logger.warning(
+                "[Yeastar] [%s] create_inbound_route no soportado en cloud_pbx — omitiendo",
+                self.tenant_label,
+            )
+            return {"skipped": True, "reason": "cloud_pbx_not_supported"}
+
+        response = await self._authenticated_pseries_request(
+            "POST",
+            "inbound_route/create",
+            payload={
+                "name": route_name,
+                "did_number": ddi,
+                "trunk": trunk_name,
+                "destination_type": "trunk",
+            },
+        )
+        # errcode 110011 = ya existe → hacer update en su lugar
+        if response.get("errcode") == 110011:
+            logger.info(
+                "[Yeastar] [%s] Ruta '%s' ya existe — actualizando",
+                self.tenant_label,
+                route_name,
+            )
+            response = await self._authenticated_pseries_request(
+                "POST",
+                "inbound_route/update",
+                payload={
+                    "name": route_name,
+                    "did_number": ddi,
+                    "trunk": trunk_name,
+                    "destination_type": "trunk",
+                },
+            )
+        if response.get("errcode") not in (None, 0):
+            raise YeastarConnectionError(
+                f"[{self.tenant_label}] Error creando ruta entrante DDI={ddi}: {response}"
+            )
+        logger.info(
+            "[Yeastar] [%s] Ruta entrante '%s' creada/actualizada OK (DDI=%s → trunk=%s)",
+            self.tenant_label,
+            route_name,
+            ddi,
+            trunk_name,
+        )
+        return response
+
+    async def configure_event_push(self, webhook_url: str) -> dict[str, Any]:
+        """
+        Configura Event Push en Yeastar para que envíe eventos de llamada
+        al webhook de Ausarta (/webhooks/yeastar).
+        Activa el evento 30011 (Call State Changed), que es el que ya procesa el backend.
+        Solo soportado en modo pseries.
+        """
+        if self.api_mode == "cloud_pbx":
+            logger.warning(
+                "[Yeastar] [%s] configure_event_push no soportado en cloud_pbx — omitiendo",
+                self.tenant_label,
+            )
+            return {"skipped": True, "reason": "cloud_pbx_not_supported"}
+
+        response = await self._authenticated_pseries_request(
+            "POST",
+            "advanced_setting/event_push",
+            payload={
+                "enable": True,
+                "url": webhook_url,
+                "events": ["30011"],
+                "method": "POST",
+                "content_type": "application/json",
+            },
+        )
+        if response.get("errcode") not in (None, 0):
+            raise YeastarConnectionError(
+                f"[{self.tenant_label}] Error configurando event push → {webhook_url}: {response}"
+            )
+        logger.info(
+            "[Yeastar] [%s] Event Push configurado OK → %s",
+            self.tenant_label,
+            webhook_url,
+        )
+        return response
+
+
 YeastarPSeriesClient = YeastarClient

@@ -275,6 +275,7 @@ def _yeastar_config_to_response(row: dict) -> dict:
         "yeastar_client_id": row.get("api_username") or "",
         "yeastar_client_secret": "********" if row.get("api_password") else "",
         "enabled_capabilities": list(row.get("enabled_capabilities") or []),
+        "ddi": row.get("ddi") or "",
     }
 
 
@@ -655,6 +656,8 @@ async def save_yeastar_config(
         "is_active": True,
         "enabled_capabilities": payload.enabled_capabilities or [],
     }
+    if payload.ddi:
+        update_data["ddi"] = payload.ddi.strip()
 
     if payload.yeastar_client_secret and payload.yeastar_client_secret != "********":
         try:
@@ -688,7 +691,33 @@ async def save_yeastar_config(
             exc,
         )
 
-    return _yeastar_config_to_response(row)
+    # Configurar automáticamente el Yeastar del cliente por API
+    auto_config_result: dict = {}
+    try:
+        auto_config_result = await _auto_configure_yeastar(
+            empresa_id=int(target_empresa_id),
+            ddi=payload.ddi,
+        )
+        if auto_config_result.get("errors"):
+            logger.warning(
+                "[auto-config] empresa=%s configuración parcial: %s",
+                target_empresa_id,
+                auto_config_result["errors"],
+            )
+        else:
+            logger.info(
+                "[auto-config] empresa=%s configuración Yeastar completada OK",
+                target_empresa_id,
+            )
+    except Exception as exc:
+        logger.warning(
+            "[auto-config] empresa=%s error inesperado: %s",
+            target_empresa_id,
+            exc,
+        )
+
+    response_data = _yeastar_config_to_response(row)
+    return {**response_data, "auto_config_result": auto_config_result}
 
 
 @router.post("/api/telephony/yeastar/test")
@@ -860,6 +889,85 @@ async def _sync_yeastar_inbound_to_livekit(empresa_id: int, source_trunk_id: str
         .execute()
     )
     return {**inbound, "source_trunk": trunk, "candidate_addresses": addresses}
+
+
+async def _auto_configure_yeastar(empresa_id: int, ddi: str | None) -> dict:
+    """
+    Configura automáticamente el Yeastar del cliente:
+      1. Lee las troncales para encontrar la que apunta a LiveKit/Ausarta.
+      2. Crea la ruta entrante DDI → esa troncal.
+      3. Configura Event Push → /webhooks/yeastar de Ausarta.
+
+    Se llama tras save_yeastar_config. Fallos no bloquean el guardado
+    (se loguean como warning y se devuelven en auto_config_result.errors).
+    """
+    result: dict = {"inbound_route": None, "event_push": None, "errors": []}
+
+    config = await _get_yeastar_config(int(empresa_id))
+    if not config:
+        result["errors"].append("Config Yeastar no encontrada tras guardar")
+        return result
+
+    webhook_url = _resolve_yeastar_webhook_url()
+    if not webhook_url:
+        result["errors"].append(
+            "AUSARTA_PUBLIC_WEBHOOK_BASE_URL o FRONTEND_URL no configurados — "
+            "no se puede apuntar el Event Push"
+        )
+
+    async with _yeastar_client_from_config(config) as client:
+        # --- Event Push ---
+        if webhook_url:
+            try:
+                result["event_push"] = await client.configure_event_push(webhook_url)
+            except Exception as exc:
+                msg = f"Event Push falló: {exc}"
+                logger.warning("[auto-config] empresa=%s %s", empresa_id, msg)
+                result["errors"].append(msg)
+
+        # --- Ruta entrante ---
+        if not ddi:
+            # Intentar leer DDI guardado en BD si no viene en el payload
+            try:
+                ddi = str(config.get("ddi") or "").strip() or None
+            except Exception:
+                pass
+
+        if ddi:
+            try:
+                trunks = await client.list_trunks()
+                # Busca la troncal SIP que apunta hacia LiveKit/Ausarta
+                livekit_trunk = next(
+                    (
+                        t for t in trunks
+                        if any(
+                            kw in str(t.get("name", "")).lower()
+                            for kw in ("livekit", "ausarta", "sip_out", "sbc")
+                        )
+                    ),
+                    trunks[0] if trunks else None,
+                )
+                if livekit_trunk:
+                    result["inbound_route"] = await client.create_inbound_route(
+                        ddi=ddi,
+                        trunk_name=str(livekit_trunk["name"]),
+                    )
+                else:
+                    result["errors"].append(
+                        "No se encontró troncal SIP hacia LiveKit en este Yeastar. "
+                        "Crea una troncal SIP con 'livekit' o 'ausarta' en el nombre."
+                    )
+            except Exception as exc:
+                msg = f"Ruta entrante falló: {exc}"
+                logger.warning("[auto-config] empresa=%s %s", empresa_id, msg)
+                result["errors"].append(msg)
+        else:
+            result["errors"].append(
+                "DDI no proporcionado — ruta entrante no creada. "
+                "Pasa el campo 'ddi' en el payload para crearla automáticamente."
+            )
+
+    return result
 
 
 async def _resolve_inbound_agent_id(empresa_id: int) -> int | None:
