@@ -411,11 +411,12 @@ class YeastarClient:
     ) -> dict[str, Any]:
         """
         Crea (o reutiliza) una troncal SIP peer_did en el Yeastar del cliente
-        apuntando al servidor SIP de LiveKit.
+        apuntando al servidor SIP de LiveKit (livekit-sip, puerto 5070 por defecto).
 
-        Usa type=peer_did con country=XX (sin plantilla ITSP específica → equivale
-        a "General" en la UI, lo que permite activar la troncal sin restricciones
-        de plan).  La troncal se activa automáticamente al crearse.
+        Según docs oficiales (help.yeastar.com → Add a SIP Trunk):
+        - enable: Integer 1/0 (no booleano — un bool da INTERNAL SERVER ERROR)
+        - country: "general" → plantilla ITSP "General" (la plantilla ES deja
+          la troncal desactivada en planes cloud)
 
         - errcode 70103: hostname ya ocupado → buscamos la troncal existente por host y la reutilizamos.
         - Solo soportado en modo pseries.
@@ -433,14 +434,13 @@ class YeastarClient:
         did_entry = ddi.strip() if ddi else "+000000000"
         payload: dict[str, Any] = {
             "name": trunk_name,
+            "enable": 1,
             "type": "peer_did",
             "hostname": host,
             "port": port,
             "domain": host,
             "transport": transport.lower(),
-            # XX = código de país inexistente → Yeastar aplica plantilla "General"
-            # (evita la plantilla ES que deja la troncal desactivada en planes cloud)
-            "country": "XX",
+            "country": "general",
             "codec_sel": "ulaw",
             "did_list": [{"did": did_entry}],
         }
@@ -462,6 +462,15 @@ class YeastarClient:
                     "[Yeastar] [%s] Host %s:%d ya está en troncal '%s' — reutilizando",
                     self.tenant_label, host, port, existing["name"],
                 )
+                # Asegurar que está habilitada
+                try:
+                    await self._authenticated_pseries_request(
+                        "POST",
+                        "trunk/update",
+                        payload={"id": int(existing["id"]), "enable": 1},
+                    )
+                except Exception as exc:
+                    logger.warning("[Yeastar] [%s] No se pudo activar troncal reutilizada: %s", self.tenant_label, exc)
                 return {"skipped": False, "name": existing["name"], "reused": True, "id": existing["id"]}
             raise YeastarConnectionError(
                 f"[{self.tenant_label}] Host {host_port} ya ocupado pero no se encontró la troncal: {response}"
@@ -483,15 +492,15 @@ class YeastarClient:
 
         trunk_id = response.get("id")
 
-        # Activar la troncal tras crearla (hostname + port = campos permitidos en update)
+        # Asegurar que la troncal queda habilitada (enable=1 como Integer, según docs)
         try:
             await self._authenticated_pseries_request(
                 "POST",
                 "trunk/update",
-                payload={"id": trunk_id, "hostname": host, "port": port, "domain": host},
+                payload={"id": trunk_id, "enable": 1},
             )
         except Exception as exc:
-            logger.warning("[Yeastar] [%s] No se pudo hacer update post-creación: %s", self.tenant_label, exc)
+            logger.warning("[Yeastar] [%s] No se pudo activar la troncal post-creación: %s", self.tenant_label, exc)
 
         logger.info(
             "[Yeastar] [%s] Troncal SIP '%s' creada OK (host=%s:%d, id=%s)",
@@ -505,11 +514,22 @@ class YeastarClient:
         trunk_name: str,
     ) -> dict[str, Any]:
         """
-        Crea ruta entrante en Yeastar: DDI del cliente → troncal SIP hacia LiveKit.
-        Si ya existe una ruta con ese nombre, la sobreescribe.
+        Crea la cadena completa de enrutamiento en Yeastar para llevar el DDI a LiveKit:
+          1. Ruta saliente "ausarta_livekit_route" (patrón = DDI) → troncal LiveKit.
+          2. Ruta entrante "ausarta_<ddi>" (DID = DDI) → def_dest=outroute → esa ruta saliente.
+
+        Formato verificado contra la P-Series OpenAPI real:
+        - inbound_route/create requiere trunk_list=[{id}], def_dest (oneof: end_call,
+          extension, ivr, outroute, ...) y def_dest_value (id de la ruta saliente).
+        - outbound_route/create requiere dial_pattern_list=[{pattern}], trunk_list=[{id}]
+          y pin_protect='disable'.
+
         Solo soportado en modo pseries (P-Series OpenAPI).
         """
-        route_name = f"ausarta_{ddi.replace('+', '').replace(' ', '')}"
+        ddi_digits = ddi.replace("+", "").replace(" ", "")
+        route_name = f"ausarta_{ddi_digits}"
+        out_route_name = "ausarta_livekit_route"
+
         if self.api_mode == "cloud_pbx":
             logger.warning(
                 "[Yeastar] [%s] create_inbound_route no soportado en cloud_pbx — omitiendo",
@@ -517,51 +537,109 @@ class YeastarClient:
             )
             return {"skipped": True, "reason": "cloud_pbx_not_supported"}
 
-        response = await self._authenticated_pseries_request(
-            "POST",
-            "inbound_route/create",
-            payload={
-                "name": route_name,
-                "did_number": ddi,
-                "trunk": trunk_name,
-                "destination_type": "trunk",
-            },
-        )
-        # errcode 110011 = ya existe → hacer update en su lugar
-        if response.get("errcode") == 110011:
-            logger.info(
-                "[Yeastar] [%s] Ruta '%s' ya existe — actualizando",
-                self.tenant_label,
-                route_name,
+        # --- Localizar troncales ---
+        trunks = await self.list_trunks()
+        livekit_trunk = next((t for t in trunks if t["name"] == trunk_name), None)
+        if not livekit_trunk:
+            raise YeastarConnectionError(
+                f"[{self.tenant_label}] Troncal '{trunk_name}' no encontrada para la ruta entrante"
             )
-            response = await self._authenticated_pseries_request(
+        livekit_trunk_id = int(livekit_trunk["id"])
+        # Troncales de origen: todas menos la de LiveKit (las llamadas entran por el SBC/PSTN)
+        source_trunk_ids = [
+            {"id": int(t["id"])} for t in trunks if int(t["id"]) != livekit_trunk_id
+        ]
+        if not source_trunk_ids:
+            source_trunk_ids = [{"id": livekit_trunk_id}]
+
+        # --- 1. Ruta saliente hacia LiveKit ---
+        out_route_id: int | None = None
+        out_list = await self._authenticated_pseries_request("GET", "outbound_route/list")
+        for item in out_list.get("data") or []:
+            if item.get("name") == out_route_name:
+                out_route_id = int(item["id"])
+                break
+
+        if out_route_id is None:
+            out_resp = await self._authenticated_pseries_request(
                 "POST",
-                "inbound_route/update",
+                "outbound_route/create",
                 payload={
-                    "name": route_name,
-                    "did_number": ddi,
-                    "trunk": trunk_name,
-                    "destination_type": "trunk",
+                    "name": out_route_name,
+                    "dial_pattern_list": [{"pattern": ddi_digits}],
+                    "trunk_list": [{"id": livekit_trunk_id}],
+                    "pin_protect": "disable",
                 },
             )
+            if out_resp.get("errcode") not in (None, 0):
+                raise YeastarConnectionError(
+                    f"[{self.tenant_label}] Error creando ruta saliente hacia LiveKit: {out_resp}"
+                )
+            out_route_id = int(out_resp["id"])
+            logger.info(
+                "[Yeastar] [%s] Ruta saliente '%s' creada (id=%s)",
+                self.tenant_label, out_route_name, out_route_id,
+            )
+        else:
+            # Asegurar que el patrón incluye este DDI
+            await self._authenticated_pseries_request(
+                "POST",
+                "outbound_route/update",
+                payload={
+                    "id": out_route_id,
+                    "dial_pattern_list": [{"pattern": ddi_digits}],
+                    "trunk_list": [{"id": livekit_trunk_id}],
+                },
+            )
+
+        # --- 2. Ruta entrante DDI → outroute ---
+        in_payload = {
+            "name": route_name,
+            "did_number": ddi,
+            "trunk_list": source_trunk_ids,
+            "def_dest": "outroute",
+            "def_dest_value": str(out_route_id),
+        }
+        response = await self._authenticated_pseries_request(
+            "POST", "inbound_route/create", payload=in_payload,
+        )
+
+        # Nombre duplicado (40003, o 40002 sin detalle) → actualizar la ruta existente
+        if response.get("errcode") in (40002, 40003):
+            in_list = await self._authenticated_pseries_request("GET", "inbound_route/list")
+            existing_id = next(
+                (int(i["id"]) for i in (in_list.get("data") or []) if i.get("name") == route_name),
+                None,
+            )
+            if existing_id:
+                # did_number no es aceptado en update — solo destino y troncales
+                response = await self._authenticated_pseries_request(
+                    "POST",
+                    "inbound_route/update",
+                    payload={
+                        "id": existing_id,
+                        "name": route_name,
+                        "trunk_list": source_trunk_ids,
+                        "def_dest": "outroute",
+                        "def_dest_value": str(out_route_id),
+                    },
+                )
+
         if response.get("errcode") not in (None, 0):
             raise YeastarConnectionError(
                 f"[{self.tenant_label}] Error creando ruta entrante DDI={ddi}: {response}"
             )
         logger.info(
-            "[Yeastar] [%s] Ruta entrante '%s' creada/actualizada OK (DDI=%s → trunk=%s)",
-            self.tenant_label,
-            route_name,
-            ddi,
-            trunk_name,
+            "[Yeastar] [%s] Ruta entrante '%s' OK (DDI=%s → outroute=%s → trunk=%s)",
+            self.tenant_label, route_name, ddi, out_route_name, trunk_name,
         )
-        return response
+        return {**response, "outbound_route_id": out_route_id, "route_name": route_name}
 
     async def configure_event_push(self, webhook_url: str) -> dict[str, Any]:
         """
-        Configura Event Push en Yeastar para que envíe eventos de llamada
-        al webhook de Ausarta (/webhooks/yeastar).
-        Activa el evento 30011 (Call State Changed), que es el que ya procesa el backend.
+        Configura Webhook Event Push en Yeastar (endpoint oficial webhook/update)
+        para que envíe el evento 30011 (Call State Changed) al webhook de Ausarta.
+        Preserva los webhooks de otras aplicaciones ya configurados.
         Solo soportado en modo pseries.
         """
         if self.api_mode == "cloud_pbx":
@@ -571,23 +649,34 @@ class YeastarClient:
             )
             return {"skipped": True, "reason": "cloud_pbx_not_supported"}
 
+        # Leer configuración actual para no machacar otros webhooks
+        existing_list: list[dict[str, Any]] = []
+        try:
+            current = await self._authenticated_pseries_request("GET", "webhook/query")
+            if current.get("errcode") in (None, 0):
+                for entry in current.get("webhook_event_push_list") or []:
+                    if isinstance(entry, dict) and entry.get("url") != webhook_url:
+                        existing_list.append(entry)
+        except Exception as exc:
+            logger.warning("[Yeastar] [%s] No se pudo leer webhooks actuales: %s", self.tenant_label, exc)
+
+        new_entry = {
+            "url": webhook_url,
+            "secret": "ausarta",
+            "request_method": "POST",
+            "event_ids": [30011],
+        }
         response = await self._authenticated_pseries_request(
             "POST",
-            "advanced_setting/event_push",
-            payload={
-                "enable": True,
-                "url": webhook_url,
-                "events": ["30011"],
-                "method": "POST",
-                "content_type": "application/json",
-            },
+            "webhook/update",
+            payload={"webhook_event_push_list": existing_list + [new_entry]},
         )
         if response.get("errcode") not in (None, 0):
             raise YeastarConnectionError(
                 f"[{self.tenant_label}] Error configurando event push → {webhook_url}: {response}"
             )
         logger.info(
-            "[Yeastar] [%s] Event Push configurado OK → %s",
+            "[Yeastar] [%s] Event Push (webhook/update) configurado OK → %s",
             self.tenant_label,
             webhook_url,
         )

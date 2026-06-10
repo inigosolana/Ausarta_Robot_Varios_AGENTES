@@ -196,8 +196,10 @@ def _resolve_ausarta_public_ip() -> str:
 
 def _resolve_livekit_sip_host() -> tuple[str, int]:
     """
-    Host e IP del servidor SIP de LiveKit al que Yeastar enviará las llamadas.
-    Prioridad: LIVEKIT_SIP_HOST > AUSARTA_PUBLIC_IP (puerto 5060).
+    Host e IP del servidor SIP de LiveKit (livekit-sip) al que Yeastar enviará
+    las llamadas entrantes.
+    Prioridad: LIVEKIT_SIP_HOST > AUSARTA_PUBLIC_IP (puerto 5070).
+    Nota: 5060 está ocupado por Asterisk en el servidor — livekit-sip escucha en 5070.
     Devuelve (host, port).
     """
     explicit = (os.getenv("LIVEKIT_SIP_HOST") or "").strip()
@@ -208,13 +210,13 @@ def _resolve_livekit_sip_host() -> tuple[str, int]:
                 return host.strip(), int(port_str.strip())
             except ValueError:
                 pass
-        return explicit, 5060
+        return explicit, 5070
 
     public_ip = _resolve_ausarta_public_ip()
     if public_ip:
-        return public_ip, 5060
+        return public_ip, 5070
 
-    return "", 5060
+    return "", 5070
 
 
 def _resolve_yeastar_webhook_url() -> str:
