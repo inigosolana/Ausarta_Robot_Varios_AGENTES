@@ -342,16 +342,18 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
           {tab === 'knowledge' && (
             <div className="space-y-4">
               <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/40">
-                <label className={labelCls}>Fuente de información</label>
+                <label className={labelCls}>Fuentes de información</label>
                 <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-                  Controla si este agente puede buscar en internet o debe limitarse a su base de conocimiento.
+                  Este agente <strong className="text-gray-700 dark:text-gray-200">siempre usa</strong> su propia base de
+                  conocimiento <strong className="text-gray-700 dark:text-gray-200">y</strong> la de la empresa. Aquí
+                  eliges si además puede consultar internet.
                 </p>
                 <div className="space-y-2">
                   {([
-                    ['inherit', 'Usar configuración de la empresa'],
-                    ['disabled', 'Solo base de conocimiento (no inventar)'],
-                    ['enabled', 'Permitir búsqueda en internet'],
-                  ] as const).map(([value, label]) => (
+                    ['inherit', 'Usar configuración de la empresa', 'KB agente + KB empresa (+ internet si la empresa lo permite)'],
+                    ['disabled', 'Solo bases de conocimiento', 'KB agente + KB empresa. Sin internet ni inventar'],
+                    ['enabled', 'Bases de conocimiento + internet', 'KB agente + KB empresa + internet'],
+                  ] as const).map(([value, label, hint]) => (
                     <label
                       key={value}
                       className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm ${
@@ -369,7 +371,10 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
                         onChange={() => setKbInternetMode(value)}
                         className="text-cyan-600 focus:ring-cyan-500"
                       />
-                      {label}
+                      <span>
+                        <span className="block font-medium">{label}</span>
+                        <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{hint}</span>
+                      </span>
                     </label>
                   ))}
                 </div>

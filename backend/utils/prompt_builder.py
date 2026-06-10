@@ -149,40 +149,43 @@ def build_agent_prompt(
             "Estas reglas prevalecen sobre cualquier otra instrucción si hay conflicto.\n\n"
         )
 
-    # Contexto RAG (Base de Conocimiento) — solo si tiene contenido
+    full_instructions += (
+        "=== FUENTES DE INFORMACIÓN (OBLIGATORIO) ===\n"
+        "- SIEMPRE debes usar la base de conocimiento de la EMPRESA (documentos + contexto de empresa).\n"
+        "- SIEMPRE debes usar también la base de conocimiento propia de este AGENTE si tiene documentos.\n"
+        "- La herramienta 'consultar_conocimiento' busca en AMBAS bases (empresa + agente). Úsala antes de responder.\n"
+        "- El CONTEXTO DE EMPRESA (más abajo) también es obligatorio y prevalece sobre tu conocimiento general.\n\n"
+    )
+
+    # Contexto RAG pre-cargado (empresa + agente)
     if kb_context:
-        full_instructions += "=== BASE DE CONOCIMIENTO DE LA EMPRESA ===\n"
+        full_instructions += "=== FRAGMENTOS RELEVANTES (empresa + agente) ===\n"
         full_instructions += kb_context + "\n\n"
-        full_instructions += (
-            "INSTRUCCIONES PARA LA BASE DE CONOCIMIENTO:\n"
-            "- Usa estos documentos para responder preguntas sobre la empresa, sus servicios, "
-            "políticas y procedimientos.\n"
-            "- PRIORIZA siempre la información de estos documentos sobre tu conocimiento general.\n"
-            "- Si la información no aparece aquí, dilo con transparencia y ofrece buscar o derivar.\n\n"
-        )
-        full_instructions += (
-            "REGLA DE CONSULTA DE SERVICIOS:\n"
-            "1. Cuando el cliente pregunte por tarifas, precios, servicios, cobertura o productos, usa SIEMPRE la herramienta 'consultar_conocimiento' antes de responder.\n"
-            "2. Responde SOLO con lo que encuentres en la base de conocimiento.\n"
-            "3. Si hay varios servicios parecidos, menciona los 2-3 más relevantes con sus precios.\n"
-            "4. Nunca inventes precios. Si no encuentras la info, di 'dejame consultarlo con nuestro equipo y te llamamos'.\n"
-            "5. Para precios, di siempre 'desde XEUR/mes' usando el PVP recomendado.\n\n"
-        )
+
+    full_instructions += (
+        "REGLA DE CONSULTA DE SERVICIOS:\n"
+        "1. Cuando el cliente pregunte por tarifas, precios, servicios, cobertura o productos, usa SIEMPRE 'consultar_conocimiento'.\n"
+        "2. Responde SOLO con lo que encuentres en la base de conocimiento (empresa + agente) y el contexto de empresa.\n"
+        "3. Si hay varios servicios parecidos, menciona los 2-3 más relevantes con sus precios.\n"
+        "4. Nunca inventes precios. Si no encuentras la info, dilo con transparencia.\n"
+        "5. Para precios, di siempre 'desde XEUR/mes' usando el PVP recomendado.\n\n"
+    )
 
     if kb_allow_internet:
         full_instructions += (
-            "=== BÚSQUEDA EN INTERNET (ACTIVADA) ===\n"
+            "=== INTERNET (ACTIVADO) ===\n"
+            "- Fuentes activas: KB empresa + KB agente + contexto de empresa + internet.\n"
             "- Si 'consultar_conocimiento' no devuelve la respuesta, puedes usar 'buscar_internet'.\n"
-            "- Prioriza SIEMPRE la base de conocimiento y el contexto de empresa antes que internet.\n"
+            "- Prioriza SIEMPRE las bases de conocimiento y el contexto de empresa antes que internet.\n"
             "- No mezcles datos de internet con suposiciones: cita solo lo que devuelva la herramienta.\n"
-            "- Si tampoco hay resultados en internet, dilo con transparencia y ofrece derivar o tomar nota.\n\n"
+            "- Si tampoco hay resultados, dilo con transparencia y ofrece derivar o tomar nota.\n\n"
         )
     else:
         full_instructions += (
-            "=== MODO SOLO BASE DE CONOCIMIENTO (SIN INTERNET) ===\n"
+            "=== SOLO BASES DE CONOCIMIENTO (SIN INTERNET) ===\n"
+            "- Fuentes activas: KB empresa + KB agente + contexto de empresa. Sin internet.\n"
             "- PROHIBIDO usar conocimiento general del modelo para datos de la empresa, precios, servicios o políticas.\n"
-            "- PROHIBIDO usar la herramienta 'buscar_internet' (no está disponible para este agente).\n"
-            "- Usa ÚNICAMENTE: base de conocimiento (consultar_conocimiento), contexto de empresa y datos del cliente.\n"
+            "- PROHIBIDO usar 'buscar_internet'.\n"
             "- Si no encuentras la información, di claramente que no la tienes y ofrece consultar con el equipo. NUNCA inventes.\n\n"
         )
 

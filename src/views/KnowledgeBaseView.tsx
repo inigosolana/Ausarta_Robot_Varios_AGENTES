@@ -483,6 +483,53 @@ export function KnowledgeBaseView() {
           </div>
 
           <section className="kb-glass rounded-2xl p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Modo de consulta</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Todos los agentes de la empresa <strong className="text-gray-700 dark:text-gray-200">siempre usan</strong>{' '}
+              los documentos y el contexto que configures aquí. Este ajuste solo decide si, además, pueden buscar en internet.
+            </p>
+            <div className="mt-4 space-y-2">
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-white/60 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+                <input
+                  type="radio"
+                  name="company-kb-mode"
+                  checked={!kbAllowInternet}
+                  onChange={() => setKbAllowInternet(false)}
+                  className="mt-1"
+                />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  <span className="font-semibold text-gray-900 dark:text-white">
+                    Solo base de conocimiento de empresa
+                  </span>
+                  <span className="mt-1 block text-gray-500 dark:text-gray-400">
+                    Los agentes responden únicamente con los documentos y el contexto que subas aquí. No buscan en internet ni inventan.
+                  </span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-white/60 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+                <input
+                  type="radio"
+                  name="company-kb-mode"
+                  checked={kbAllowInternet}
+                  onChange={() => setKbAllowInternet(true)}
+                  className="mt-1"
+                />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  <span className="font-semibold text-gray-900 dark:text-white">
+                    Base de conocimiento + internet
+                  </span>
+                  <span className="mt-1 block text-gray-500 dark:text-gray-400">
+                    Los agentes usan primero esta base; si no encuentran la respuesta, pueden consultar internet (salvo que un agente lo desactive).
+                  </span>
+                </span>
+              </label>
+            </div>
+            <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+              Guarda junto con el contexto de empresa usando el botón &quot;Guardar contexto&quot;.
+            </p>
+          </section>
+
+          <section className="kb-glass rounded-2xl p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Contexto de empresa</h2>
@@ -516,23 +563,6 @@ export function KnowledgeBaseView() {
               placeholder="Ej: somos una clínica dental en Madrid; horario L–V 9–20h; política de cancelación 24h; tono cercano y profesional…"
               className="kb-field w-full rounded-xl px-4 py-3"
             />
-            <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-white/60 p-4 dark:border-gray-700 dark:bg-gray-900/40">
-              <input
-                type="checkbox"
-                checked={kbAllowInternet}
-                onChange={e => setKbAllowInternet(e.target.checked)}
-                className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-              />
-              <span className="text-sm text-gray-700 dark:text-gray-300">
-                <span className="font-semibold text-gray-900 dark:text-white">
-                  Permitir búsqueda en internet
-                </span>
-                <span className="mt-1 block text-gray-500 dark:text-gray-400">
-                  Si está activado, los agentes podrán consultar internet cuando la base de conocimiento no tenga la respuesta.
-                  Si está desactivado, solo usarán documentos y contexto interno — no inventarán datos.
-                </span>
-              </span>
-            </label>
           </section>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

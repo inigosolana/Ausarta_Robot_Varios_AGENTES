@@ -810,8 +810,8 @@ class DynamicAgent(Agent):
         threshold: float = 0.70,
     ) -> str:
         """
-        Busca información relevante en la base de conocimiento de la empresa de esta llamada.
-        Úsala para responder preguntas del cliente con contexto documental interno.
+        Busca en la base de conocimiento de la empresa Y del agente (documentos internos).
+        Úsala SIEMPRE antes de responder sobre servicios, precios, políticas o datos de la empresa.
         """
         try:
             empresa_id_int = int(str(getattr(self, "empresa_id", "0") or "0"))
@@ -2314,8 +2314,21 @@ async def _enrich_agent_config_with_context(
             from services.embedding_service import search_knowledge
             greeting = agent_config.get("greeting") or agent_config.get("instructions", "")
             query = (greeting or "información general servicios empresa")[:500]
+            agent_id_int = None
+            try:
+                raw_agent_id = agent_config.get("agent_id")
+                if raw_agent_id is not None:
+                    agent_id_int = int(str(raw_agent_id))
+            except (TypeError, ValueError):
+                agent_id_int = None
             results = await asyncio.wait_for(
-                search_knowledge(empresa_id_int, query, limit=3, threshold=0.70),
+                search_knowledge(
+                    empresa_id_int,
+                    query,
+                    limit=3,
+                    threshold=0.70,
+                    agent_id=agent_id_int,
+                ),
                 timeout=5,
             )
             if not results:
