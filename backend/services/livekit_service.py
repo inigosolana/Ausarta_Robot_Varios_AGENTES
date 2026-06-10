@@ -201,6 +201,13 @@ async def ensure_yeastar_inbound_trunk(
         if str(address).strip()
     })
     clean_numbers = sorted({str(number).strip() for number in numbers if str(number).strip()})
+    expanded_numbers: set[str] = set(clean_numbers)
+    for number in clean_numbers:
+        if number.startswith("+") and len(number) > 1:
+            expanded_numbers.add(number[1:])
+        elif number.isdigit() and len(number) >= 9:
+            expanded_numbers.add(f"+{number}")
+    clean_numbers = sorted(expanded_numbers)
     if not clean_addresses:
         raise ValueError("La troncal Yeastar no proporciona una IP/host permitido")
     if not clean_numbers:
@@ -248,15 +255,13 @@ async def ensure_yeastar_inbound_trunk(
         })
         merged_addresses = sorted(set(clean_addresses) | set(existing_addresses))
         trunk = await lkapi.sip.update_sip_inbound_trunk(
-            api.UpdateSIPInboundTrunkRequest(
-                sip_trunk_id=existing.sip_trunk_id,
-                update=api.SIPInboundTrunkUpdate(
-                    name=trunk_name,
-                    metadata=metadata,
-                    numbers=api.ListUpdate(set=clean_numbers),
-                    allowed_addresses=api.ListUpdate(set=merged_addresses),
-                ),
-            )
+            existing.sip_trunk_id,
+            api.SIPInboundTrunkInfo(
+                name=trunk_name,
+                metadata=metadata,
+                numbers=clean_numbers,
+                allowed_addresses=merged_addresses,
+            ),
         )
         created = False
     else:
