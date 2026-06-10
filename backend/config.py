@@ -11,9 +11,9 @@ class Settings(BaseSettings):
     livekit_room_prefix: str = "llamada_ausarta_"
 
     # Modelos por defecto
-    default_cartesia_voice_id: str = "b5aa8098-49ef-475d-89b0-c9262ecf33fd"
+    default_cartesia_voice_id: str = "de38f545-c574-44e8-9b54-a7d6fec1c6b1"
     default_stt_model: str = "nova-3"
-    default_tts_model: str = "sonic-multilingual"
+    default_tts_model: str = "sonic-3"
     default_llm_model: str = "llama-3.3-70b-versatile"
 
     # Tiempos del agente

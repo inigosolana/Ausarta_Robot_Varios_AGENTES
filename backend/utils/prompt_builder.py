@@ -133,7 +133,18 @@ def build_agent_prompt(
 
     kb_allow_internet = resolve_kb_allow_internet(agent_config)
 
+    call_direction = str(agent_config.get("call_direction") or "").lower()
     base_rules_to_use = BASE_RULES
+    if call_direction == "inbound":
+        base_rules_to_use = BASE_RULES.replace(
+            """EXCEPCIÓN - BUZÓN DE VOZ / FUERA DE COBERTURA:
+- Si escuchas "fuera de cobertura", "móvil apagado", "buzón de voz", "contestador", "terminado el tiempo de grabación" o mensajes automáticos similares:
+  - Usa 'guardar_encuesta' (status='failed').
+  - Usa 'finalizar_llamada' (mensaje_despedida_manual="Buzón de voz detectado, finalizando.").
+
+""",
+            "",
+        )
 
     full_instructions = f"{base_rules_to_use}\n\n"
     full_instructions += f"{HUMAN_STYLE_RULES}\n\n"

@@ -255,6 +255,36 @@ def _room_name_allowed(room_name: str) -> bool:
     return any(room_name.startswith(prefix) for prefix in ALLOWED_ROOM_PREFIXES)
 
 
+def _is_inbound_agent_config(agent_config: dict) -> bool:
+    return str(agent_config.get("call_direction") or "").lower() == "inbound"
+
+
+def _parse_inbound_caller_from_room(room_name: str) -> str:
+    if "__" in room_name:
+        tail = room_name.split("__", 1)[1]
+        caller = tail.split("_", 1)[0] if tail else ""
+        if caller.isdigit():
+            return caller
+    for part in room_name.split("_"):
+        if part.isdigit() and len(part) >= 9:
+            return part
+    return ""
+
+
+def _build_inbound_datos_extra(
+    agent_config: dict,
+    room_name: str,
+    base: dict | None = None,
+) -> dict:
+    extra = dict(base or {})
+    extra["call_direction"] = "inbound"
+    extra.setdefault("empresa_id", agent_config.get("empresa_id"))
+    extra.setdefault("agent_id", agent_config.get("id") or agent_config.get("agent_id"))
+    extra.setdefault("telefono", _parse_inbound_caller_from_room(room_name))
+    extra.setdefault("room_name", room_name)
+    return extra
+
+
 DEFAULT_CARTESIA_VOICE = os.getenv("VOICE_ID_AUSARTA", settings.default_cartesia_voice)
 DISPATCH_AGENT_NAME = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
 
@@ -342,6 +372,14 @@ def _build_tts_plugin(voice_id: str, language: str, speaking_speed: float, tts_m
         safe_voice = DEFAULT_CARTESIA_VOICE
 
     safe_model = (tts_model or settings.default_tts_model).strip()
+    # Cartesia deprecó sonic-multilingual; migrar automáticamente al modelo activo.
+    if safe_model in {"sonic-multilingual", "sonic-english", "sonic", "sonic-2-2025-03-07"}:
+        logger.warning(
+            "⚠️ Modelo TTS '%s' deprecado en Cartesia. Usando '%s'.",
+            safe_model,
+            settings.default_tts_model,
+        )
+        safe_model = settings.default_tts_model
 
     try:
         return cartesia.TTS(
@@ -748,6 +786,14 @@ class DynamicAgent(Agent):
                 payload["datos_extra"] = llm_datos
         elif llm_datos:
             payload["datos_extra"] = llm_datos
+
+        if _is_inbound_agent_config(self.agent_config):
+            base_extra = payload.get("datos_extra") if isinstance(payload.get("datos_extra"), dict) else {}
+            payload["datos_extra"] = _build_inbound_datos_extra(
+                self.agent_config,
+                self.room_name,
+                base_extra,
+            )
 
         job_id = await enqueue_guardar_encuesta(payload)
         if job_id:
@@ -1529,6 +1575,9 @@ class CallSession:
 
     async def run_amd(self) -> None:
         """Monitoriza transcripciones tempranas para detectar contestador automático."""
+        if _is_inbound_agent_config(self.agent_config):
+            logger.info(f"⏭️ [{self.job_id}] AMD desactivado para llamada inbound")
+            return
         start_time = self.loop_obj.time()
         while not self.stop_guard.is_set():
             await asyncio.sleep(0.5)
@@ -1745,75 +1794,78 @@ class CallSession:
         """Registra todos los handlers de session y ctx.room."""
 
         @self.session.on("user_input_transcribed")
-        async def _on_user_input_transcribed(ev):
-            try:
-                content = _normalize_message_text(getattr(ev, "transcript", ""))
-                is_final = bool(getattr(ev, "is_final", True))
-                if not content or not is_final:
-                    return
-                if _is_likely_noise_transcript(content):
-                    logger.debug(
-                        f"🔇 [{self.job_id}] Transcripción descartada como ruido: '{anonymize_text(content)}'"
-                    )
-                    return
-                word_count = _count_words(content)
-                self.runtime_state["last_user_text"] = content
-                if not self.lang_state["detected"] and word_count >= 1:
-                    asyncio.create_task(self._try_switch_language(content))
-                if (
-                    self.runtime_state["agent_state"] in ("speaking", "thinking")
-                    and word_count < self.max_short_interrupt_words
-                ):
-                    logger.debug(
-                        f"🛡️ [{self.job_id}] Interrupción corta ignorada "
-                        f"({word_count} palabras): '{anonymize_text(content)}'"
-                    )
-                    return
-                now = self.loop_obj.time()
-                if (
-                    self.runtime_state["agent_state"] in ("speaking", "thinking")
-                    and word_count >= self.max_short_interrupt_words
-                ):
-                    if (now - float(self.runtime_state["last_interrupt_ack_at"])) > 1.2:
-                        self.runtime_state["last_interrupt_ack_at"] = now
-                        async def _say_interrupt_ack():
-                            try:
-                                await self.session.say(
-                                    random.choice(self.INTERRUPTION_ACKS),
-                                    allow_interruptions=True,
-                                )
-                            except Exception as ack_err:
-                                logger.debug(
-                                    f"[{self.job_id}] Ack de interrupción no enviado: {ack_err}"
-                                )
-                        asyncio.create_task(_say_interrupt_ack())
-                self._append_transcript_event("user", content)
-                self.reprompt_state["last_user_at"] = now
-                self.reprompt_state["waiting_user"] = False
-                self.reprompt_state["reprompt_count"] = 0
-
-                # Fase 2 — Detección de nombre del cliente en conversación
-                if not getattr(self.agent_instance, "_detected_customer_name", ""):
-                    _name_match = re.search(
-                        r"(?:soy|me llamo|mi nombre es)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+"
-                        r"(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)?)",
-                        content,
-                        re.IGNORECASE,
-                    )
-                    if _name_match:
-                        detected = _name_match.group(1).strip()
-                        self.agent_instance._detected_customer_name = detected
-                        logger.info(
-                            "[%s] Nombre del cliente detectado: %s",
-                            self.job_id, detected,
+        def _on_user_input_transcribed(ev):
+            async def _process_user_input_transcribed() -> None:
+                try:
+                    content = _normalize_message_text(getattr(ev, "transcript", ""))
+                    is_final = bool(getattr(ev, "is_final", True))
+                    if not content or not is_final:
+                        return
+                    if _is_likely_noise_transcript(content):
+                        logger.debug(
+                            f"🔇 [{self.job_id}] Transcripción descartada como ruido: '{anonymize_text(content)}'"
                         )
+                        return
+                    word_count = _count_words(content)
+                    self.runtime_state["last_user_text"] = content
+                    if not self.lang_state["detected"] and word_count >= 1:
+                        asyncio.create_task(self._try_switch_language(content))
+                    if (
+                        self.runtime_state["agent_state"] in ("speaking", "thinking")
+                        and word_count < self.max_short_interrupt_words
+                    ):
+                        logger.debug(
+                            f"🛡️ [{self.job_id}] Interrupción corta ignorada "
+                            f"({word_count} palabras): '{anonymize_text(content)}'"
+                        )
+                        return
+                    now = self.loop_obj.time()
+                    if (
+                        self.runtime_state["agent_state"] in ("speaking", "thinking")
+                        and word_count >= self.max_short_interrupt_words
+                    ):
+                        if (now - float(self.runtime_state["last_interrupt_ack_at"])) > 1.2:
+                            self.runtime_state["last_interrupt_ack_at"] = now
 
-                # PARTE 4 — Integración workflow: avanzar máquina de estados
-                wf_sm = getattr(self.agent_instance, "_workflow_sm", None)
-                if wf_sm is not None and not wf_sm.is_finished():
-                    await self._handle_workflow_turn(content, wf_sm)
-            except Exception as ev_err:
-                logger.debug(f"[{self.job_id}] Error evento user_input_transcribed: {ev_err}")
+                            async def _say_interrupt_ack():
+                                try:
+                                    await self.session.say(
+                                        random.choice(self.INTERRUPTION_ACKS),
+                                        allow_interruptions=True,
+                                    )
+                                except Exception as ack_err:
+                                    logger.debug(
+                                        f"[{self.job_id}] Ack de interrupción no enviado: {ack_err}"
+                                    )
+
+                            asyncio.create_task(_say_interrupt_ack())
+                    self._append_transcript_event("user", content)
+                    self.reprompt_state["last_user_at"] = now
+                    self.reprompt_state["waiting_user"] = False
+                    self.reprompt_state["reprompt_count"] = 0
+
+                    if not getattr(self.agent_instance, "_detected_customer_name", ""):
+                        _name_match = re.search(
+                            r"(?:soy|me llamo|mi nombre es)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+"
+                            r"(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)?)",
+                            content,
+                            re.IGNORECASE,
+                        )
+                        if _name_match:
+                            detected = _name_match.group(1).strip()
+                            self.agent_instance._detected_customer_name = detected
+                            logger.info(
+                                "[%s] Nombre del cliente detectado: %s",
+                                self.job_id, detected,
+                            )
+
+                    wf_sm = getattr(self.agent_instance, "_workflow_sm", None)
+                    if wf_sm is not None and not wf_sm.is_finished():
+                        await self._handle_workflow_turn(content, wf_sm)
+                except Exception as ev_err:
+                    logger.debug(f"[{self.job_id}] Error evento user_input_transcribed: {ev_err}")
+
+            asyncio.create_task(_process_user_input_transcribed())
 
         @self.session.on("conversation_item_added")
         def _on_conversation_item_added(ev):
@@ -2068,19 +2120,35 @@ class CallSession:
                     data_saved,
                     self.lang_state.get("active_lang", self.language),
                 )
+                if _is_inbound_agent_config(self.agent_config):
+                    datos_extra = _build_inbound_datos_extra(
+                        self.agent_config,
+                        self.room_name,
+                        datos_extra,
+                    )
             else:
-                call_disposition = "no_contesta"
+                if _is_inbound_agent_config(self.agent_config):
+                    call_disposition = "incomplete"
+                else:
+                    call_disposition = "no_contesta"
                 datos_extra = {
                     "sentimiento_cliente": "Neutral",
                     "idioma": self.lang_state.get("active_lang", self.language),
                 }
                 logger.info(
                     f"📵 Sin transcripción para encuesta {self.survey_id} → "
-                    f"disposición: no_contesta"
+                    f"disposición: {call_disposition}"
                 )
 
             if not call_disposition:
                 call_disposition = "completada" if data_saved else "parcial"
+
+            if _is_inbound_agent_config(self.agent_config):
+                datos_extra = _build_inbound_datos_extra(
+                    self.agent_config,
+                    self.room_name,
+                    datos_extra,
+                )
 
             enc_id = int(self.survey_id) if str(self.survey_id).isdigit() else 0
 
@@ -2693,8 +2761,6 @@ async def entrypoint(ctx: JobContext):
             f"turn_detection={turn_mode}"
         )
 
-        await session.start(room=ctx.room, agent=agent_instance)
-
         # --- Iniciar CallSession: agrupa todos los bucles y post-procesamiento ---
         cs = CallSession(
             ctx=ctx,
@@ -2711,6 +2777,7 @@ async def entrypoint(ctx: JobContext):
             call_start_time=call_start_time,
         )
         cs.setup_events()
+        await session.start(room=ctx.room, agent=agent_instance)
         await cs.start()
 
     except Exception as e:

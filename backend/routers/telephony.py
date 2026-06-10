@@ -1539,10 +1539,60 @@ _PROPAGABLE_STATUSES = {"completed", "rejected_opt_out", "incomplete", "failed",
 _TERMINAL_STATUSES = {"completed", "failed", "unreached", "incomplete", "rejected_opt_out"}
 
 
+async def _resolve_or_create_inbound_encuesta_id(datos: EncuestaData) -> int:
+    """Crea fila en encuestas para llamadas entrantes cuando aún no hay id numérico."""
+    if datos.id_encuesta > 0:
+        return datos.id_encuesta
+
+    extra = datos.datos_extra if isinstance(datos.datos_extra, dict) else {}
+    if str(extra.get("call_direction") or "").lower() != "inbound":
+        return datos.id_encuesta
+
+    empresa_id = extra.get("empresa_id")
+    agent_id = extra.get("agent_id")
+    telefono = str(extra.get("telefono") or extra.get("caller") or "desconocido").strip()
+    room_name = str(extra.get("room_name") or "").strip()
+
+    insert_payload = {
+        "telefono": telefono,
+        "nombre_cliente": str(extra.get("nombre_cliente") or telefono),
+        "fecha": datetime.now(timezone.utc).isoformat(),
+        "status": (datos.status or "in_progress"),
+        "completada": 0,
+        "agent_id": agent_id,
+        "empresa_id": empresa_id,
+        "campaign_id": None,
+        "datos_extra": {
+            "call_direction": "inbound",
+            "room_name": room_name,
+        },
+    }
+    if datos.comentarios:
+        insert_payload["comentarios"] = datos.comentarios
+    if datos.transcription:
+        insert_payload["transcription"] = datos.transcription
+    if datos.seconds_used is not None:
+        insert_payload["seconds_used"] = datos.seconds_used
+
+    res = await sb_query(
+        lambda payload=insert_payload: supabase.table("encuestas").insert(payload).execute()
+    )
+    encuesta_id = int(res.data[0]["id"])
+    logger.info(
+        "📞 [guardar-encuesta] Llamada inbound registrada como encuesta %s (tel=%s, room=%s)",
+        encuesta_id,
+        telefono,
+        room_name,
+    )
+    return encuesta_id
+
+
 @router.post("/guardar-encuesta")
 async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTasks):
     if not supabase:
         return {"status": "error", "message": "No DB connection"}
+
+    datos.id_encuesta = await _resolve_or_create_inbound_encuesta_id(datos)
 
     logger.info(f"📥 [guardar-encuesta] encuesta={datos.id_encuesta}: {datos.dict(exclude_none=True)}")
 
@@ -1631,6 +1681,30 @@ async def _propagate_to_lead(encuesta_id: int, final_status: str, enc_curr_data:
     Actualiza el campaign_lead asociado a esta encuesta.
     Calcula reintentos según la configuración de la campaña.
     """
+    if encuesta_id <= 0:
+        logger.info("⏭️ Skip propagate lead: encuesta_id inválido (%s)", encuesta_id)
+        return
+
+    extra = enc_curr_data.get("datos_extra") or {}
+    if isinstance(extra, dict) and str(extra.get("call_direction") or "").lower() == "inbound":
+        logger.info("⏭️ Skip propagate lead: llamada inbound encuesta %s", encuesta_id)
+        return
+
+    try:
+        enc_row = await sb_query(
+            lambda eid=encuesta_id: supabase.table("encuestas")
+            .select("campaign_id")
+            .eq("id", eid)
+            .limit(1)
+            .execute()
+        )
+        if not enc_row.data or not enc_row.data[0].get("campaign_id"):
+            logger.info("⏭️ Skip propagate lead: encuesta %s sin campaña", encuesta_id)
+            return
+    except Exception as e:
+        logger.warning("No se pudo verificar campaña de encuesta %s: %s", encuesta_id, e)
+        return
+
     lead_update: dict = {"status": final_status}
 
     if final_status == "rejected_opt_out":
