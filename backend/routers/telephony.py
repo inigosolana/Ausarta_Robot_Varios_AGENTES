@@ -194,6 +194,29 @@ def _resolve_ausarta_public_ip() -> str:
     return ""
 
 
+def _resolve_livekit_sip_host() -> tuple[str, int]:
+    """
+    Host e IP del servidor SIP de LiveKit al que Yeastar enviará las llamadas.
+    Prioridad: LIVEKIT_SIP_HOST > AUSARTA_PUBLIC_IP (puerto 5060).
+    Devuelve (host, port).
+    """
+    explicit = (os.getenv("LIVEKIT_SIP_HOST") or "").strip()
+    if explicit:
+        if ":" in explicit:
+            host, port_str = explicit.rsplit(":", 1)
+            try:
+                return host.strip(), int(port_str.strip())
+            except ValueError:
+                pass
+        return explicit, 5060
+
+    public_ip = _resolve_ausarta_public_ip()
+    if public_ip:
+        return public_ip, 5060
+
+    return "", 5060
+
+
 def _resolve_yeastar_webhook_url() -> str:
     """
     URL pública donde Yeastar envía Event Push (POST /webhooks/yeastar).
@@ -894,14 +917,14 @@ async def _sync_yeastar_inbound_to_livekit(empresa_id: int, source_trunk_id: str
 async def _auto_configure_yeastar(empresa_id: int, ddi: str | None) -> dict:
     """
     Configura automáticamente el Yeastar del cliente:
-      1. Lee las troncales para encontrar la que apunta a LiveKit/Ausarta.
+      1. Crea (o reutiliza) la troncal SIP hacia LiveKit en el Yeastar del cliente.
       2. Crea la ruta entrante DDI → esa troncal.
       3. Configura Event Push → /webhooks/yeastar de Ausarta.
 
     Se llama tras save_yeastar_config. Fallos no bloquean el guardado
     (se loguean como warning y se devuelven en auto_config_result.errors).
     """
-    result: dict = {"inbound_route": None, "event_push": None, "errors": []}
+    result: dict = {"sip_trunk": None, "inbound_route": None, "event_push": None, "errors": []}
 
     config = await _get_yeastar_config(int(empresa_id))
     if not config:
@@ -915,8 +938,29 @@ async def _auto_configure_yeastar(empresa_id: int, ddi: str | None) -> dict:
             "no se puede apuntar el Event Push"
         )
 
+    livekit_sip_host, livekit_sip_port = _resolve_livekit_sip_host()
+    livekit_trunk_name = "ausarta_livekit"
+
     async with _yeastar_client_from_config(config) as client:
-        # --- Event Push ---
+        # --- 1. Crear troncal SIP hacia LiveKit ---
+        if livekit_sip_host:
+            try:
+                result["sip_trunk"] = await client.create_sip_trunk(
+                    trunk_name=livekit_trunk_name,
+                    host=livekit_sip_host,
+                    port=livekit_sip_port,
+                )
+            except Exception as exc:
+                msg = f"Troncal SIP LiveKit falló: {exc}"
+                logger.warning("[auto-config] empresa=%s %s", empresa_id, msg)
+                result["errors"].append(msg)
+        else:
+            result["errors"].append(
+                "LIVEKIT_SIP_HOST o AUSARTA_PUBLIC_IP no configurados — "
+                "no se puede crear la troncal SIP en el Yeastar del cliente"
+            )
+
+        # --- 2. Event Push ---
         if webhook_url:
             try:
                 result["event_push"] = await client.configure_event_push(webhook_url)
@@ -925,9 +969,8 @@ async def _auto_configure_yeastar(empresa_id: int, ddi: str | None) -> dict:
                 logger.warning("[auto-config] empresa=%s %s", empresa_id, msg)
                 result["errors"].append(msg)
 
-        # --- Ruta entrante ---
+        # --- 3. Ruta entrante DDI → troncal LiveKit ---
         if not ddi:
-            # Intentar leer DDI guardado en BD si no viene en el payload
             try:
                 ddi = str(config.get("ddi") or "").strip() or None
             except Exception:
@@ -935,27 +978,33 @@ async def _auto_configure_yeastar(empresa_id: int, ddi: str | None) -> dict:
 
         if ddi:
             try:
-                trunks = await client.list_trunks()
-                # Busca la troncal SIP que apunta hacia LiveKit/Ausarta
-                livekit_trunk = next(
-                    (
-                        t for t in trunks
-                        if any(
-                            kw in str(t.get("name", "")).lower()
-                            for kw in ("livekit", "ausarta", "sip_out", "sbc")
+                # Usar la troncal que acabamos de crear/verificar, o buscar una existente
+                trunk_for_route = livekit_trunk_name
+                if result["sip_trunk"] is None:
+                    # La creación falló — intentar encontrar una existente con keywords LiveKit
+                    trunks = await client.list_trunks()
+                    found = next(
+                        (
+                            t for t in trunks
+                            if any(
+                                kw in str(t.get("name", "")).lower()
+                                for kw in ("livekit", "ausarta", "sip_out", "sbc")
+                            )
+                        ),
+                        None,
+                    )
+                    if found:
+                        trunk_for_route = str(found["name"])
+                    else:
+                        result["errors"].append(
+                            "No se encontró troncal SIP hacia LiveKit — ruta entrante no creada."
                         )
-                    ),
-                    trunks[0] if trunks else None,
-                )
-                if livekit_trunk:
+                        trunk_for_route = None
+
+                if trunk_for_route:
                     result["inbound_route"] = await client.create_inbound_route(
                         ddi=ddi,
-                        trunk_name=str(livekit_trunk["name"]),
-                    )
-                else:
-                    result["errors"].append(
-                        "No se encontró troncal SIP hacia LiveKit en este Yeastar. "
-                        "Crea una troncal SIP con 'livekit' o 'ausarta' en el nombre."
+                        trunk_name=trunk_for_route,
                     )
             except Exception as exc:
                 msg = f"Ruta entrante falló: {exc}"

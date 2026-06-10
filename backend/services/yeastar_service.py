@@ -401,6 +401,66 @@ class YeastarClient:
             raise
 
 
+    async def create_sip_trunk(
+        self,
+        trunk_name: str,
+        host: str,
+        port: int = 5060,
+        transport: str = "udp",
+    ) -> dict[str, Any]:
+        """
+        Crea (o reutiliza) una troncal SIP VoIP en el Yeastar del cliente
+        apuntando al servidor SIP de LiveKit.
+
+        - Si ya existe una troncal con ese nombre (errcode 110011), no hace nada.
+        - Solo soportado en modo pseries.
+        """
+        if self.api_mode == "cloud_pbx":
+            logger.warning(
+                "[Yeastar] [%s] create_sip_trunk no soportado en cloud_pbx — omitiendo",
+                self.tenant_label,
+            )
+            return {"skipped": True, "reason": "cloud_pbx_not_supported"}
+
+        host_port = f"{host}:{port}" if port != 5060 else host
+
+        payload: dict[str, Any] = {
+            "name": trunk_name,
+            "type": "VoIP",
+            "host_port": host_port,
+            "transport": transport.upper(),
+            "trunk_type": "peer",
+            "from_user": "",
+            "enable": True,
+        }
+        response = await self._authenticated_pseries_request(
+            "POST",
+            "trunk/add_voip_trunk",
+            payload=payload,
+        )
+
+        # errcode 110011 → ya existe con ese nombre: OK, reutilizamos
+        if response.get("errcode") == 110011:
+            logger.info(
+                "[Yeastar] [%s] Troncal SIP '%s' ya existe — reutilizando",
+                self.tenant_label,
+                trunk_name,
+            )
+            return {"skipped": False, "name": trunk_name, "reused": True}
+
+        if response.get("errcode") not in (None, 0):
+            raise YeastarConnectionError(
+                f"[{self.tenant_label}] Error creando troncal SIP '{trunk_name}': {response}"
+            )
+
+        logger.info(
+            "[Yeastar] [%s] Troncal SIP '%s' creada OK (host=%s)",
+            self.tenant_label,
+            trunk_name,
+            host_port,
+        )
+        return {**response, "name": trunk_name, "host_port": host_port, "reused": False}
+
     async def create_inbound_route(
         self,
         ddi: str,

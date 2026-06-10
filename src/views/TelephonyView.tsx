@@ -88,7 +88,7 @@ const TelephonyView: React.FC = () => {
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState('');
-  const [autoConfigResult, setAutoConfigResult] = useState<{ inbound_route?: unknown; event_push?: unknown; errors?: string[] } | null>(null);
+  const [autoConfigResult, setAutoConfigResult] = useState<{ sip_trunk?: unknown; inbound_route?: unknown; event_push?: unknown; errors?: string[] } | null>(null);
   const [capabilities, setCapabilities] = useState<YeastarCapability[]>([]);
   const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
 
@@ -293,7 +293,7 @@ const TelephonyView: React.FC = () => {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(formatApiError(errorData?.detail, `HTTP ${res.status}`));
       }
-      const saved: YeastarConfig & { auto_config_result?: { inbound_route?: unknown; event_push?: unknown; errors?: string[] } } = await res.json();
+      const saved: YeastarConfig & { auto_config_result?: { sip_trunk?: unknown; inbound_route?: unknown; event_push?: unknown; errors?: string[] } } = await res.json();
       setSavedConfig(saved);
       setAutoConfigResult(saved.auto_config_result || null);
       setForm(prev => ({
@@ -543,6 +543,7 @@ const TelephonyView: React.FC = () => {
                               : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300'
                           }`}>
                             <p className="mb-1 font-semibold">Autoconfiguración Yeastar:</p>
+                            <p>• Troncal SIP LiveKit: {autoConfigResult.sip_trunk ? (autoConfigResult.sip_trunk as Record<string, unknown>)?.skipped ? 'omitida (cloud_pbx)' : (autoConfigResult.sip_trunk as Record<string, unknown>)?.reused ? '✅ ya existía' : '✅ creada' : '—'}</p>
                             <p>• Ruta entrante: {autoConfigResult.inbound_route ? (autoConfigResult.inbound_route as Record<string, unknown>)?.skipped ? 'omitida (cloud_pbx)' : '✅ creada' : '—'}</p>
                             <p>• Event Push: {autoConfigResult.event_push ? (autoConfigResult.event_push as Record<string, unknown>)?.skipped ? 'omitido (cloud_pbx)' : '✅ configurado' : '—'}</p>
                             {(autoConfigResult.errors?.length ?? 0) > 0 && (
