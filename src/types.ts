@@ -97,8 +97,8 @@ export interface AgentConfig {
   tipo_resultados?: string;
   agent_type?: string;
   company_context?: string;
-  /** null = heredar empresa; true/false = override por agente */
-  kb_allow_internet_search?: boolean | null;
+  /** true = KB agente + KB empresa + internet (si la empresa lo permite) */
+  kb_allow_internet_search?: boolean;
   enthusiasm_level?: 'Bajo' | 'Normal' | 'Alto' | 'Extremo' | string;
   voice_id?: string;
   speaking_speed?: number;

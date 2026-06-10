@@ -32,19 +32,6 @@ function MaterialIcon({ name, className = '' }: { name: string; className?: stri
 }
 
 type Tab = 'knowledge' | 'personality' | 'voice';
-type KbInternetMode = 'inherit' | 'enabled' | 'disabled';
-
-function kbInternetModeFromAgent(value: boolean | null | undefined): KbInternetMode {
-  if (value === true) return 'enabled';
-  if (value === false) return 'disabled';
-  return 'inherit';
-}
-
-function kbInternetModeToAgent(mode: KbInternetMode): boolean | null {
-  if (mode === 'enabled') return true;
-  if (mode === 'disabled') return false;
-  return null;
-}
 
 type Props = {
   agent: AgentRow;
@@ -68,7 +55,7 @@ function agentToForm(agent: AgentRow): AgentConfig {
     tipo_resultados: agent.tipo_resultados,
     agent_mode: agent.agent_mode,
     workflow_definition: agent.workflow_definition,
-    kb_allow_internet_search: agent.kb_allow_internet_search ?? null,
+    kb_allow_internet_search: Boolean(agent.kb_allow_internet_search),
   };
 }
 
@@ -82,14 +69,14 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
   const [aiConfig, setAiConfig] = useState<AIConfig>({ ...defaultAIConfig, ...(agent.ai_config || {}) });
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingConfig, setIsLoadingConfig] = useState(false);
-  const [kbInternetMode, setKbInternetMode] = useState<KbInternetMode>(
-    () => kbInternetModeFromAgent(agent.kb_allow_internet_search),
+  const [kbAllowInternet, setKbAllowInternet] = useState(
+    () => Boolean(agent.kb_allow_internet_search),
   );
 
   const resetForm = useCallback(() => {
     setFormData(agentToForm(agent));
     setAiConfig({ ...defaultAIConfig, ...(agent.ai_config || {}) });
-    setKbInternetMode(kbInternetModeFromAgent(agent.kb_allow_internet_search));
+    setKbAllowInternet(Boolean(agent.kb_allow_internet_search));
     setIsEditing(false);
   }, [agent]);
 
@@ -173,7 +160,7 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
           agent_mode: agent.agent_mode || 'prompt',
           workflow_definition: agent.workflow_definition ?? null,
           company_context: undefined,
-          kb_allow_internet_search: kbInternetModeToAgent(kbInternetMode),
+          kb_allow_internet_search: kbAllowInternet,
         }),
       });
       if (!res.ok) {
@@ -345,19 +332,18 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
                 <label className={labelCls}>Fuentes de información</label>
                 <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
                   Este agente <strong className="text-gray-700 dark:text-gray-200">siempre usa</strong> su propia base de
-                  conocimiento <strong className="text-gray-700 dark:text-gray-200">y</strong> la de la empresa. Aquí
-                  eliges si además puede consultar internet.
+                  conocimiento <strong className="text-gray-700 dark:text-gray-200">y</strong> la de la empresa. Si la
+                  empresa permite internet (en Base de Conocimiento), aquí decides si este agente también lo usa.
                 </p>
                 <div className="space-y-2">
                   {([
-                    ['inherit', 'Usar configuración de la empresa', 'KB agente + KB empresa (+ internet si la empresa lo permite)'],
-                    ['disabled', 'Solo bases de conocimiento', 'KB agente + KB empresa. Sin internet ni inventar'],
-                    ['enabled', 'Bases de conocimiento + internet', 'KB agente + KB empresa + internet'],
+                    [false, 'Solo bases de conocimiento', 'KB agente + KB empresa. Sin internet ni inventar'],
+                    [true, 'Bases de conocimiento + internet', 'KB agente + KB empresa + internet (requiere que la empresa lo permita)'],
                   ] as const).map(([value, label, hint]) => (
                     <label
-                      key={value}
+                      key={String(value)}
                       className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm ${
-                        kbInternetMode === value
+                        kbAllowInternet === value
                           ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-800 dark:text-cyan-200'
                           : 'border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'
                       } ${!isEditing ? 'pointer-events-none opacity-80' : ''}`}
@@ -365,10 +351,9 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
                       <input
                         type="radio"
                         name="kb-internet-mode"
-                        value={value}
-                        checked={kbInternetMode === value}
+                        checked={kbAllowInternet === value}
                         disabled={!isEditing}
-                        onChange={() => setKbInternetMode(value)}
+                        onChange={() => setKbAllowInternet(value)}
                         className="text-cyan-600 focus:ring-cyan-500"
                       />
                       <span>

@@ -190,10 +190,7 @@ async def update_agent(agent_id: str, config: dict, current_user: CurrentUser = 
             db_config["use_case"] = config.get("useCase") or config.get("use_case")
         if "company_context" in config: db_config["company_context"] = config["company_context"]
         if "kb_allow_internet_search" in config:
-            raw_kb_internet = config.get("kb_allow_internet_search")
-            db_config["kb_allow_internet_search"] = (
-                None if raw_kb_internet is None else bool(raw_kb_internet)
-            )
+            db_config["kb_allow_internet_search"] = bool(config.get("kb_allow_internet_search"))
         if "enthusiasm_level" in config: db_config["enthusiasm_level"] = config["enthusiasm_level"]
         if "voice_id" in config: db_config["voice_id"] = config["voice_id"]
         if "speaking_speed" in config: db_config["speaking_speed"] = config["speaking_speed"]
