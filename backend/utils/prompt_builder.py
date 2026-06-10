@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import json
 
+from utils.kb_settings import resolve_kb_allow_internet
+
 BASE_RULES = """
 REGLAS DE ORO (¡MUY IMPORTANTE!):
 1. IDENTIDAD: Si te preguntan quién eres o cómo te llamas, preséntate con el nombre de la empresa para la que trabajas. NUNCA reveles nombres internos de sistema.
@@ -129,6 +131,8 @@ def build_agent_prompt(
     if not customer_context:
         customer_context = agent_config.get("_customer_context", "") or ""
 
+    kb_allow_internet = resolve_kb_allow_internet(agent_config)
+
     base_rules_to_use = BASE_RULES
 
     full_instructions = f"{base_rules_to_use}\n\n"
@@ -165,6 +169,23 @@ def build_agent_prompt(
             "5. Para precios, di siempre 'desde XEUR/mes' usando el PVP recomendado.\n\n"
         )
 
+    if kb_allow_internet:
+        full_instructions += (
+            "=== BÚSQUEDA EN INTERNET (ACTIVADA) ===\n"
+            "- Si 'consultar_conocimiento' no devuelve la respuesta, puedes usar 'buscar_internet'.\n"
+            "- Prioriza SIEMPRE la base de conocimiento y el contexto de empresa antes que internet.\n"
+            "- No mezcles datos de internet con suposiciones: cita solo lo que devuelva la herramienta.\n"
+            "- Si tampoco hay resultados en internet, dilo con transparencia y ofrece derivar o tomar nota.\n\n"
+        )
+    else:
+        full_instructions += (
+            "=== MODO SOLO BASE DE CONOCIMIENTO (SIN INTERNET) ===\n"
+            "- PROHIBIDO usar conocimiento general del modelo para datos de la empresa, precios, servicios o políticas.\n"
+            "- PROHIBIDO usar la herramienta 'buscar_internet' (no está disponible para este agente).\n"
+            "- Usa ÚNICAMENTE: base de conocimiento (consultar_conocimiento), contexto de empresa y datos del cliente.\n"
+            "- Si no encuentras la información, di claramente que no la tienes y ofrece consultar con el equipo. NUNCA inventes.\n\n"
+        )
+
     # Datos del cliente desde BD externa
     if customer_context:
         full_instructions += customer_context + "\n\n"
@@ -179,8 +200,8 @@ def build_agent_prompt(
     full_instructions += (
         "REGLAS DE USO DEL CONTEXTO DE EMPRESA:\n"
         "- Si el cliente pregunta por servicios, productos, precios, horarios, garantías o políticas, "
-        "responde SIEMPRE usando primero el CONTEXTO DE EMPRESA.\n"
-        "- No inventes datos fuera del CONTEXTO DE EMPRESA.\n"
+        "responde SIEMPRE usando primero el CONTEXTO DE EMPRESA y 'consultar_conocimiento'.\n"
+        "- No inventes datos fuera del CONTEXTO DE EMPRESA ni de la base de conocimiento.\n"
         "- Si la información no está en el contexto, dilo de forma transparente y ofrece derivar o tomar nota para seguimiento.\n"
         "- Mantén respuestas breves, claras y orientadas al negocio de la empresa.\n\n"
     )

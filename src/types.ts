@@ -39,6 +39,7 @@ export interface Empresa {
   updated_at?: string;
   sip_outbound_trunk_id?: string | null;
   sip_inbound_trunk_id?: string | null;
+  kb_allow_internet_search?: boolean;
 }
 
 // ── Workflow types ──────────────────────────────────────────────────────────
@@ -96,6 +97,8 @@ export interface AgentConfig {
   tipo_resultados?: string;
   agent_type?: string;
   company_context?: string;
+  /** null = heredar empresa; true/false = override por agente */
+  kb_allow_internet_search?: boolean | null;
   enthusiasm_level?: 'Bajo' | 'Normal' | 'Alto' | 'Extremo' | string;
   voice_id?: string;
   speaking_speed?: number;

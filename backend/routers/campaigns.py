@@ -35,6 +35,30 @@ DEFAULT_AUSARTA_VOICE_ID = settings.default_cartesia_voice
 router = APIRouter(prefix="/api", tags=["campaigns"])
 
 
+def _load_empresa_kb_settings(empresa_id: int | None) -> dict:
+    """Contexto de empresa y flag de búsqueda en internet."""
+    if not empresa_id or not supabase:
+        return {"company_context": "", "kb_allow_internet_search": False}
+    try:
+        res = (
+            supabase.table("empresas")
+            .select("company_context, kb_allow_internet_search")
+            .eq("id", empresa_id)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            return {"company_context": "", "kb_allow_internet_search": False}
+        row = res.data[0]
+        return {
+            "company_context": row.get("company_context") or "",
+            "kb_allow_internet_search": bool(row.get("kb_allow_internet_search")),
+        }
+    except Exception as exc:
+        logger.warning("No se pudo cargar KB settings empresa %s: %s", empresa_id, exc)
+        return {"company_context": "", "kb_allow_internet_search": False}
+
+
 def _load_external_db_allowed_queries(empresa_id: int | None) -> list[str]:
     """Lista blanca de queries CRM/ERP permitidos para consultar_cliente."""
     if not empresa_id or not supabase:
@@ -445,7 +469,9 @@ async def get_agent_config_by_survey(survey_id: int):
 
         agent_data = res_agent.data[0]
         agent_empresa_id = agent_data.get("empresa_id")
-        
+        empresa_kb = _load_empresa_kb_settings(empresa_id or agent_empresa_id)
+        empresa_context = empresa_kb["company_context"]
+
         res_ai = supabase.table("ai_config").select("*").eq("agent_id", agent_id).execute()
         ai_data = res_ai.data[0] if res_ai.data else {}
 
@@ -470,11 +496,14 @@ async def get_agent_config_by_survey(survey_id: int):
             "stt_model": ai_data.get("stt_model") or settings.default_stt_model,
             "extraction_schema": extraction_schema,
             "company_context": agent_data.get("company_context") or empresa_context or "",
+            "kb_allow_internet_search": agent_data.get("kb_allow_internet_search"),
+            "empresa_kb_allow_internet_search": empresa_kb["kb_allow_internet_search"],
             "enthusiasm_level": agent_data.get("enthusiasm_level") or "Normal",
             "speaking_speed": agent_data.get("speaking_speed") or 1.0,
             "agent_type": resolved_agent_type,
             "tipo_resultados": agent_data.get("tipo_resultados") or resolved_agent_type,
             "empresa_id": empresa_id or agent_empresa_id,
+            "agent_id": agent_id,
             "config_updated_at": agent_data.get("updated_at") or ai_data.get("updated_at"),
             # PARTE 5: campos de workflow (necesarios para que agent.py compile el workflow)
             "agent_mode": agent_data.get("agent_mode") or "prompt",
@@ -608,11 +637,8 @@ async def get_agent_config_by_agent(agent_id: int, empresa_id: Optional[int] = N
 
         agent_data = res_agent.data[0]
         empresa_id_resolved = agent_data.get("empresa_id")
-        empresa_context = ""
-        if empresa_id_resolved:
-            emp_res = supabase.table("empresas").select("company_context").eq("id", empresa_id_resolved).limit(1).execute()
-            if emp_res.data:
-                empresa_context = emp_res.data[0].get("company_context") or ""
+        empresa_kb = _load_empresa_kb_settings(empresa_id_resolved)
+        empresa_context = empresa_kb["company_context"]
         res_ai = supabase.table("ai_config").select("*").eq("agent_id", agent_id).execute()
         ai_data = res_ai.data[0] if res_ai.data else {}
         resolved_agent_type = (
@@ -633,6 +659,8 @@ async def get_agent_config_by_agent(agent_id: int, empresa_id: Optional[int] = N
             "stt_model": ai_data.get("stt_model") or settings.default_stt_model,
             "extraction_schema": [],
             "company_context": agent_data.get("company_context") or empresa_context or "",
+            "kb_allow_internet_search": agent_data.get("kb_allow_internet_search"),
+            "empresa_kb_allow_internet_search": empresa_kb["kb_allow_internet_search"],
             "enthusiasm_level": agent_data.get("enthusiasm_level") or "Normal",
             "speaking_speed": agent_data.get("speaking_speed") or 1.0,
             "agent_type": resolved_agent_type,

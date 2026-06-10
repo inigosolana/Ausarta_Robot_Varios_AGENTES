@@ -156,6 +156,7 @@ def _build_guardar_encuesta_raw_schema(extraction_schema: list) -> dict[str, Any
 
 from prompts import _LANG_OVERRIDE_MSGS
 from utils.call_analyzer import analyze_call_disposition
+from utils.kb_settings import resolve_kb_allow_internet
 from utils.prompt_builder import build_agent_prompt
 from utils.workflow_compiler import compile_workflow_to_prompt
 from utils.workflow_state import WorkflowStateMachine
@@ -510,6 +511,7 @@ class DynamicAgent(Agent):
         self.empresa_id = str(agent_config.get("empresa_id", "0") or "0")
         self.greeting = agent_config.get("greeting", "Buenas, ¿tiene un momento?")
         self.company_context = agent_config.get("company_context", "") or ""
+        self.kb_allow_internet = resolve_kb_allow_internet(agent_config)
         self.enthusiasm_level = agent_config.get("enthusiasm_level", "Normal") or "Normal"
         self.voice_id = agent_config.get("voice_id", "") or ""
         self.tts_model = agent_config.get("tts_model", settings.default_tts_model)
@@ -858,6 +860,34 @@ class DynamicAgent(Agent):
             return "\n".join(lines).strip()
         except Exception as e:
             logger.warning(f"⚠️ [{self.room_name}] Error en consultar_conocimiento: {e}")
+            return ""
+
+    @function_tool(name="buscar_internet")
+    async def _tool_buscar_internet(
+        self,
+        context: RunContext,
+        consulta: str,
+    ) -> str:
+        """
+        Busca información pública en internet cuando la base de conocimiento no basta.
+        Solo disponible si el agente tiene activada la búsqueda en internet.
+        """
+        if not getattr(self, "kb_allow_internet", False):
+            return ""
+
+        if not consulta or not consulta.strip():
+            return ""
+
+        try:
+            from services.web_search_service import search_web
+
+            result = await asyncio.wait_for(
+                search_web(consulta.strip()),
+                timeout=5,
+            )
+            return result or ""
+        except Exception as e:
+            logger.warning(f"⚠️ [{self.room_name}] Error en buscar_internet: {e}")
             return ""
 
     @function_tool(name="consultar_cliente")

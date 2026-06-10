@@ -91,6 +91,7 @@ export function KnowledgeBaseView() {
 
   const [deletingTitle, setDeletingTitle] = useState<string | null>(null);
   const [companyContext, setCompanyContext] = useState('');
+  const [kbAllowInternet, setKbAllowInternet] = useState(false);
   const [savingContext, setSavingContext] = useState(false);
   const [generatingContext, setGeneratingContext] = useState(false);
 
@@ -155,6 +156,7 @@ export function KnowledgeBaseView() {
       if (res.ok) {
         const data = await res.json();
         setCompanyContext(data.company_context || '');
+        setKbAllowInternet(Boolean(data.kb_allow_internet_search));
       }
     } catch (e) {
       console.error(e);
@@ -170,9 +172,13 @@ export function KnowledgeBaseView() {
       const res = await fetch(`${API_BASE}/api/knowledge/company-context`, {
         method: 'PUT',
         headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ empresa_id, company_context: companyContext }),
+        body: JSON.stringify({
+          empresa_id,
+          company_context: companyContext,
+          kb_allow_internet_search: kbAllowInternet,
+        }),
       });
-      if (res.ok) flash('ok', 'Contexto de empresa guardado');
+      if (res.ok) flash('ok', 'Configuración de conocimiento guardada');
       else flash('error', 'No se pudo guardar el contexto');
     } catch (e) {
       flash('error', String(e));
@@ -510,6 +516,23 @@ export function KnowledgeBaseView() {
               placeholder="Ej: somos una clínica dental en Madrid; horario L–V 9–20h; política de cancelación 24h; tono cercano y profesional…"
               className="kb-field w-full rounded-xl px-4 py-3"
             />
+            <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-white/60 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+              <input
+                type="checkbox"
+                checked={kbAllowInternet}
+                onChange={e => setKbAllowInternet(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+              />
+              <span className="text-sm text-gray-700 dark:text-gray-300">
+                <span className="font-semibold text-gray-900 dark:text-white">
+                  Permitir búsqueda en internet
+                </span>
+                <span className="mt-1 block text-gray-500 dark:text-gray-400">
+                  Si está activado, los agentes podrán consultar internet cuando la base de conocimiento no tenga la respuesta.
+                  Si está desactivado, solo usarán documentos y contexto interno — no inventarán datos.
+                </span>
+              </span>
+            </label>
           </section>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

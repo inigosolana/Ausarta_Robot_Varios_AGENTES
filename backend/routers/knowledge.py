@@ -73,7 +73,11 @@ async def get_company_context(
     if not eid:
         raise HTTPException(status_code=400, detail="empresa_id requerido")
     res = await sb_query(
-        lambda: supabase.table("empresas").select("id, nombre, company_context").eq("id", eid).limit(1).execute()
+        lambda: supabase.table("empresas")
+        .select("id, nombre, company_context, kb_allow_internet_search")
+        .eq("id", eid)
+        .limit(1)
+        .execute()
     )
     row = (res.data or [None])[0]
     if not row:
@@ -82,6 +86,7 @@ async def get_company_context(
         "empresa_id": eid,
         "nombre": row.get("nombre"),
         "company_context": row.get("company_context") or "",
+        "kb_allow_internet_search": bool(row.get("kb_allow_internet_search")),
     }
 
 
@@ -97,13 +102,21 @@ async def save_company_context(
     if not eid:
         raise HTTPException(status_code=400, detail="empresa_id requerido")
     context = str(payload.get("company_context") or "").strip()
+    update_payload: dict[str, Any] = {"company_context": context}
+    if "kb_allow_internet_search" in payload:
+        update_payload["kb_allow_internet_search"] = bool(payload.get("kb_allow_internet_search"))
     await sb_query(
         lambda: supabase.table("empresas")
-        .update({"company_context": context})
+        .update(update_payload)
         .eq("id", eid)
         .execute()
     )
-    return {"status": "ok", "empresa_id": eid, "company_context": context}
+    return {
+        "status": "ok",
+        "empresa_id": eid,
+        "company_context": context,
+        "kb_allow_internet_search": update_payload.get("kb_allow_internet_search"),
+    }
 
 
 @router.get("/")

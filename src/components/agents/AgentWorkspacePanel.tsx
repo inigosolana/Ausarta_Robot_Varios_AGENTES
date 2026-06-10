@@ -32,6 +32,19 @@ function MaterialIcon({ name, className = '' }: { name: string; className?: stri
 }
 
 type Tab = 'knowledge' | 'personality' | 'voice';
+type KbInternetMode = 'inherit' | 'enabled' | 'disabled';
+
+function kbInternetModeFromAgent(value: boolean | null | undefined): KbInternetMode {
+  if (value === true) return 'enabled';
+  if (value === false) return 'disabled';
+  return 'inherit';
+}
+
+function kbInternetModeToAgent(mode: KbInternetMode): boolean | null {
+  if (mode === 'enabled') return true;
+  if (mode === 'disabled') return false;
+  return null;
+}
 
 type Props = {
   agent: AgentRow;
@@ -55,6 +68,7 @@ function agentToForm(agent: AgentRow): AgentConfig {
     tipo_resultados: agent.tipo_resultados,
     agent_mode: agent.agent_mode,
     workflow_definition: agent.workflow_definition,
+    kb_allow_internet_search: agent.kb_allow_internet_search ?? null,
   };
 }
 
@@ -68,10 +82,14 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
   const [aiConfig, setAiConfig] = useState<AIConfig>({ ...defaultAIConfig, ...(agent.ai_config || {}) });
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingConfig, setIsLoadingConfig] = useState(false);
+  const [kbInternetMode, setKbInternetMode] = useState<KbInternetMode>(
+    () => kbInternetModeFromAgent(agent.kb_allow_internet_search),
+  );
 
   const resetForm = useCallback(() => {
     setFormData(agentToForm(agent));
     setAiConfig({ ...defaultAIConfig, ...(agent.ai_config || {}) });
+    setKbInternetMode(kbInternetModeFromAgent(agent.kb_allow_internet_search));
     setIsEditing(false);
   }, [agent]);
 
@@ -155,6 +173,7 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
           agent_mode: agent.agent_mode || 'prompt',
           workflow_definition: agent.workflow_definition ?? null,
           company_context: undefined,
+          kb_allow_internet_search: kbInternetModeToAgent(kbInternetMode),
         }),
       });
       if (!res.ok) {
@@ -322,6 +341,39 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
 
           {tab === 'knowledge' && (
             <div className="space-y-4">
+              <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+                <label className={labelCls}>Fuente de información</label>
+                <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+                  Controla si este agente puede buscar en internet o debe limitarse a su base de conocimiento.
+                </p>
+                <div className="space-y-2">
+                  {([
+                    ['inherit', 'Usar configuración de la empresa'],
+                    ['disabled', 'Solo base de conocimiento (no inventar)'],
+                    ['enabled', 'Permitir búsqueda en internet'],
+                  ] as const).map(([value, label]) => (
+                    <label
+                      key={value}
+                      className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm ${
+                        kbInternetMode === value
+                          ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-800 dark:text-cyan-200'
+                          : 'border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300'
+                      } ${!isEditing ? 'pointer-events-none opacity-80' : ''}`}
+                    >
+                      <input
+                        type="radio"
+                        name="kb-internet-mode"
+                        value={value}
+                        checked={kbInternetMode === value}
+                        disabled={!isEditing}
+                        onChange={() => setKbInternetMode(value)}
+                        className="text-cyan-600 focus:ring-cyan-500"
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
               <div>
                 <label className={labelCls}>System Prompt (Directiva)</label>
                 <textarea
