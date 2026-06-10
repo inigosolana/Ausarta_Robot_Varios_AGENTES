@@ -15,6 +15,7 @@ interface YeastarConfig {
   yeastar_client_id: string;
   yeastar_client_secret?: string;
   enabled_capabilities?: string[];
+  ddi?: string;
 }
 
 interface YeastarCapability {
@@ -33,6 +34,7 @@ const EMPTY_FORM: YeastarConfig = {
   yeastar_client_id: '',
   yeastar_client_secret: '',
   enabled_capabilities: [],
+  ddi: '',
 };
 
 const CAP_ICONS: Record<string, string> = {
@@ -86,6 +88,7 @@ const TelephonyView: React.FC = () => {
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [autoConfigResult, setAutoConfigResult] = useState<{ inbound_route?: unknown; event_push?: unknown; errors?: string[] } | null>(null);
   const [capabilities, setCapabilities] = useState<YeastarCapability[]>([]);
   const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
 
@@ -208,6 +211,7 @@ const TelephonyView: React.FC = () => {
           yeastar_client_id: data.yeastar_client_id || '',
           yeastar_client_secret: '',
           enabled_capabilities: data.enabled_capabilities || [],
+          ddi: data.ddi || '',
         });
       }
     } catch (err) {
@@ -275,6 +279,9 @@ const TelephonyView: React.FC = () => {
         yeastar_client_id: form.yeastar_client_id,
         enabled_capabilities: form.enabled_capabilities || [],
       };
+      if (form.ddi?.trim()) {
+        payload.ddi = form.ddi.trim();
+      }
       if (form.yeastar_client_secret && form.yeastar_client_secret !== '********') {
         payload.yeastar_client_secret = form.yeastar_client_secret;
       }
@@ -286,11 +293,17 @@ const TelephonyView: React.FC = () => {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(formatApiError(errorData?.detail, `HTTP ${res.status}`));
       }
-      const saved: YeastarConfig = await res.json();
+      const saved: YeastarConfig & { auto_config_result?: { inbound_route?: unknown; event_push?: unknown; errors?: string[] } } = await res.json();
       setSavedConfig(saved);
-      setForm(prev => ({ ...prev, yeastar_client_secret: '', enabled_capabilities: saved.enabled_capabilities || [] }));
+      setAutoConfigResult(saved.auto_config_result || null);
+      setForm(prev => ({
+        ...prev,
+        yeastar_client_secret: '',
+        enabled_capabilities: saved.enabled_capabilities || [],
+        ddi: saved.ddi || prev.ddi || '',
+      }));
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 4000);
+      setTimeout(() => { setSaveSuccess(false); setAutoConfigResult(null); }, 8000);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : t('Save error', 'Error al guardar la configuracion'));
     } finally {
@@ -481,6 +494,31 @@ const TelephonyView: React.FC = () => {
                       </div>
                     </div>
 
+                    {/* DDI — número entrante del cliente */}
+                    <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 dark:border-indigo-900/30 dark:bg-indigo-950/20">
+                      <div className="mb-3 flex items-center gap-2">
+                        <MaterialIcon name="call_received" className="!text-lg text-indigo-600 dark:text-indigo-400" />
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                            DDI / Número entrante del cliente
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Al guardar, se creará automáticamente la ruta entrante en Yeastar y se configurará el Event Push.
+                          </p>
+                        </div>
+                      </div>
+                      <input
+                        type="tel"
+                        value={form.ddi || ''}
+                        onChange={e => handleChange('ddi', e.target.value)}
+                        placeholder="+34911234501"
+                        className="tel-field tel-mono px-3 py-2.5"
+                      />
+                      <p className="mt-1.5 text-[11px] text-indigo-600/70 dark:text-indigo-400/70">
+                        Formato E.164 recomendado. Opcional — si no se rellena, la ruta y el webhook se configuran manualmente.
+                      </p>
+                    </div>
+
                     {testResult && (
                       <div className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm ${
                         testResult.ok
@@ -493,9 +531,27 @@ const TelephonyView: React.FC = () => {
                     )}
 
                     {saveSuccess && (
-                      <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-                        <CheckCircle2 size={16} />
-                        {t('Configuration saved successfully.', 'Configuración guardada correctamente.')}
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                          <CheckCircle2 size={16} />
+                          {t('Configuration saved successfully.', 'Configuración guardada correctamente.')}
+                        </div>
+                        {autoConfigResult && (
+                          <div className={`rounded-lg border px-3 py-2.5 text-xs ${
+                            (autoConfigResult.errors?.length ?? 0) === 0
+                              ? 'border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-900/40 dark:bg-indigo-950/30 dark:text-indigo-300'
+                              : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300'
+                          }`}>
+                            <p className="mb-1 font-semibold">Autoconfiguración Yeastar:</p>
+                            <p>• Ruta entrante: {autoConfigResult.inbound_route ? (autoConfigResult.inbound_route as Record<string, unknown>)?.skipped ? 'omitida (cloud_pbx)' : '✅ creada' : '—'}</p>
+                            <p>• Event Push: {autoConfigResult.event_push ? (autoConfigResult.event_push as Record<string, unknown>)?.skipped ? 'omitido (cloud_pbx)' : '✅ configurado' : '—'}</p>
+                            {(autoConfigResult.errors?.length ?? 0) > 0 && (
+                              <ul className="mt-1 list-inside list-disc space-y-0.5 text-amber-700 dark:text-amber-400">
+                                {autoConfigResult.errors!.map((e, i) => <li key={i}>{e}</li>)}
+                              </ul>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
 
