@@ -147,7 +147,7 @@ services:
     container_name: ausarta-v2-frontend
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "8080:80"
     networks:
       - ausarta-network
     depends_on:
