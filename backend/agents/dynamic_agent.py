@@ -245,6 +245,16 @@ def anonymize_text(text: str) -> str:
 
 
 ROOM_PREFIX = os.getenv("LIVEKIT_ROOM_PREFIX", "llamada_ausarta_")
+INBOUND_ROOM_PREFIX = os.getenv("LIVEKIT_INBOUND_ROOM_PREFIX", "yeastar_")
+ALLOWED_ROOM_PREFIXES = tuple(
+    p for p in {ROOM_PREFIX, INBOUND_ROOM_PREFIX} if p
+)
+
+
+def _room_name_allowed(room_name: str) -> bool:
+    return any(room_name.startswith(prefix) for prefix in ALLOWED_ROOM_PREFIXES)
+
+
 DEFAULT_CARTESIA_VOICE = os.getenv("VOICE_ID_AUSARTA", settings.default_cartesia_voice)
 DISPATCH_AGENT_NAME = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
 
@@ -2469,8 +2479,10 @@ async def entrypoint(ctx: JobContext):
             logger.error(f"[{job_id}] Error cerrando job rechazado: {rej_err}")
 
     # --- PASO 1: Filtro estricto de sala + metadata ---
-    if not room_name.startswith(ROOM_PREFIX):
-        await _safe_reject(f"Sala fuera de prefijo permitido '{ROOM_PREFIX}': {room_name}")
+    if not _room_name_allowed(room_name):
+        await _safe_reject(
+            f"Sala fuera de prefijos permitidos {ALLOWED_ROOM_PREFIXES}: {room_name}"
+        )
         return
 
     metadata_str = getattr(ctx.job, 'metadata', '')
