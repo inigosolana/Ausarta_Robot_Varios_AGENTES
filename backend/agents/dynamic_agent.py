@@ -5,14 +5,17 @@ import time
 import aiohttp
 import asyncio
 from datetime import datetime
-import redis.asyncio as aioredis
 import sys
 import json
 import re
 import random
 from dotenv import load_dotenv
 from config import settings
-load_dotenv() # Cargar antes de cualquier otra cosa para que los decoradores lo vean
+from services.redis_service import get_redis
+
+# Solo cargar .env en desarrollo local; en producción Docker las vars vienen del entorno del contenedor.
+if os.getenv("ENVIRONMENT", "production") == "development":
+    load_dotenv()
 
 from livekit import rtc
 from livekit.agents import (
@@ -831,16 +834,13 @@ async def fetch_agent_config(survey_id: str, expected_empresa_id: str = "0") -> 
     cache_key = f"ausarta:agent_config:survey_{survey_id}"
 
     try:
-        redis_client = aioredis.from_url(_REDIS_URL, decode_responses=True)
-        try:
-            cached_raw = await redis_client.get(cache_key)
-            if cached_raw:
-                config = json.loads(cached_raw)
-                _validate_agent_config_tenant(config, expected_empresa_id)
-                logger.info(f"📋 Config desde Redis para survey {survey_id}")
-                return config
-        finally:
-            await redis_client.close()
+        redis_client = await get_redis()
+        cached_raw = await redis_client.get(cache_key)
+        if cached_raw:
+            config = json.loads(cached_raw)
+            _validate_agent_config_tenant(config, expected_empresa_id)
+            logger.info(f"📋 Config desde Redis para survey {survey_id}")
+            return config
     except Exception as cache_err:
         logger.warning(f"⚠️ Redis cache miss/error para survey {survey_id}: {cache_err}")
 
@@ -860,15 +860,12 @@ async def fetch_agent_config(survey_id: str, expected_empresa_id: str = "0") -> 
                         _validate_agent_config_tenant(config, expected_empresa_id)
 
                         try:
-                            redis_client = aioredis.from_url(_REDIS_URL, decode_responses=True)
-                            try:
-                                await redis_client.set(
-                                    cache_key,
-                                    json.dumps(config, ensure_ascii=False),
-                                    ex=_AGENT_CONFIG_CACHE_TTL,
-                                )
-                            finally:
-                                await redis_client.close()
+                            redis_client = await get_redis()
+                            await redis_client.set(
+                                cache_key,
+                                json.dumps(config, ensure_ascii=False),
+                                ex=_AGENT_CONFIG_CACHE_TTL,
+                            )
                         except Exception as write_err:
                             logger.warning(
                                 f"⚠️ No se pudo cachear config en Redis survey {survey_id}: {write_err}"
@@ -901,16 +898,13 @@ async def fetch_agent_config_by_agent_id(agent_id: str, expected_empresa_id: str
     """Consulta config directa por agent_id para llamadas entrantes SIP sin encuesta previa."""
     cache_key = f"ausarta:agent_config:agent_{agent_id}:empresa_{expected_empresa_id or '0'}"
     try:
-        redis_client = aioredis.from_url(_REDIS_URL, decode_responses=True)
-        try:
-            cached_raw = await redis_client.get(cache_key)
-            if cached_raw:
-                config = json.loads(cached_raw)
-                _validate_agent_config_tenant(config, expected_empresa_id)
-                logger.info(f"Config inbound desde Redis para agent_id {agent_id}")
-                return config
-        finally:
-            await redis_client.close()
+        redis_client = await get_redis()
+        cached_raw = await redis_client.get(cache_key)
+        if cached_raw:
+            config = json.loads(cached_raw)
+            _validate_agent_config_tenant(config, expected_empresa_id)
+            logger.info(f"Config inbound desde Redis para agent_id {agent_id}")
+            return config
     except Exception as cache_err:
         logger.warning(f"Redis cache miss/error para agent_id {agent_id}: {cache_err}")
 
@@ -928,15 +922,12 @@ async def fetch_agent_config_by_agent_id(agent_id: str, expected_empresa_id: str
             config = await resp.json()
             _validate_agent_config_tenant(config, expected_empresa_id)
             try:
-                redis_client = aioredis.from_url(_REDIS_URL, decode_responses=True)
-                try:
-                    await redis_client.set(
-                        cache_key,
-                        json.dumps(config, ensure_ascii=False),
-                        ex=_AGENT_CONFIG_CACHE_TTL,
-                    )
-                finally:
-                    await redis_client.close()
+                redis_client = await get_redis()
+                await redis_client.set(
+                    cache_key,
+                    json.dumps(config, ensure_ascii=False),
+                    ex=_AGENT_CONFIG_CACHE_TTL,
+                )
             except Exception as write_err:
                 logger.warning(f"No se pudo cachear config inbound agent_id={agent_id}: {write_err}")
             return config
@@ -996,172 +987,6 @@ async def notify_system_alert(message: str, details: Optional[dict] = None):
         logger.info(f"📡 Alerta del sistema encolada: {message}")
     except Exception as e:
         logger.error(f"❌ Error encolando alerta del sistema: {e}")
-
-# ============================================================================
-# FASE 2 — ENRIQUECIMIENTO DE CONTEXTO (KB + BD externa)
-# ============================================================================
-
-async def _enrich_agent_config_with_context(
-    job_id: str,
-    agent_config: dict,
-    empresa_id_str: str,
-    meta_data: dict,
-) -> None:
-    """
-    Carga en paralelo (timeout 5s):
-    1. Base de Conocimiento RAG (top 3 chunks relevantes al greeting del agente).
-    2. Datos del cliente en BD externa (si hay teléfono en metadata).
-
-    Los resultados se inyectan en agent_config como _kb_context y _customer_context,
-    que build_agent_prompt() ya sabe leer.
-    Si cualquiera falla, continúa sin ese contexto (nunca bloquea la llamada).
-    """
-    try:
-        empresa_id_int = int(empresa_id_str) if empresa_id_str.isdigit() else 0
-    except Exception:
-        empresa_id_int = 0
-
-    if not empresa_id_int:
-        return
-
-    async def _load_kb() -> str:
-        try:
-            from services.embedding_service import search_knowledge
-            greeting = agent_config.get("greeting") or agent_config.get("instructions", "")
-            query = (greeting or "información general servicios empresa")[:500]
-            agent_id_int = None
-            try:
-                raw_agent_id = agent_config.get("agent_id")
-                if raw_agent_id is not None:
-                    agent_id_int = int(str(raw_agent_id))
-            except (TypeError, ValueError):
-                agent_id_int = None
-            results = await asyncio.wait_for(
-                search_knowledge(
-                    empresa_id_int,
-                    query,
-                    limit=3,
-                    threshold=0.70,
-                    agent_id=agent_id_int,
-                ),
-                timeout=5,
-            )
-            if not results:
-                return ""
-            lines = []
-            for r in results:
-                lines.append(f"[{r['titulo']}]\n{r['contenido']}")
-            context = "\n\n".join(lines)
-            logger.info(
-                "[%s] KB context cargado: %d chunks (%.0f chars)",
-                job_id, len(results), len(context),
-            )
-            return context
-        except Exception as kb_err:
-            logger.warning("[%s] KB context no disponible: %s", job_id, kb_err)
-            return ""
-
-    async def _load_customer(telefono: str) -> str:
-        try:
-            from services.external_db_service import query_external_db, format_customer_context
-            rows = await asyncio.wait_for(
-                query_external_db(empresa_id_int, "cliente_por_telefono", [telefono]),
-                timeout=5,
-            )
-            if not rows:
-                return ""
-            ctx_str = format_customer_context(rows)
-            logger.info("[%s] Customer context cargado desde BD externa: %d filas", job_id, len(rows))
-            return ctx_str
-        except Exception as ext_err:
-            logger.warning("[%s] Customer context no disponible: %s", job_id, ext_err)
-            return ""
-
-    async def _load_crm_contact(telefono: str) -> str:
-        try:
-            from services.supabase_service import supabase, sb_query
-
-            if not supabase:
-                return ""
-            for fields in (
-                "nombre,email,empresa_nombre,cargo,notas,datos_extra,historial_llamadas,ultima_disposicion",
-                "nombre,email,empresa_nombre,notas,datos_extra,ultima_disposicion",
-                "nombre,email,notas,datos_extra",
-            ):
-                try:
-                    res = await asyncio.wait_for(
-                        sb_query(
-                            lambda f=fields: supabase.table("contactos")
-                            .select(f)
-                            .eq("empresa_id", empresa_id_int)
-                            .eq("telefono", telefono)
-                            .limit(1)
-                            .execute()
-                        ),
-                        timeout=5,
-                    )
-                    if res.data:
-                        break
-                except Exception:
-                    res = None
-            if not res or not res.data:
-                return ""
-            c = res.data[0]
-            lines = []
-            if c.get("nombre"):
-                lines.append(f"Nombre: {c['nombre']}")
-            if c.get("empresa_nombre"):
-                lines.append(f"Empresa: {c['empresa_nombre']}")
-            if c.get("cargo"):
-                lines.append(f"Cargo: {c['cargo']}")
-            if c.get("notas"):
-                lines.append(f"Notas: {c['notas']}")
-            if c.get("ultima_disposicion"):
-                lines.append(f"Última disposición: {c['ultima_disposicion']}")
-            historial = c.get("historial_llamadas") or []
-            if isinstance(historial, list) and historial:
-                ultima = historial[-1] if isinstance(historial[-1], dict) else {}
-                lines.append(
-                    f"Ultima llamada: {ultima.get('fecha', '?')} - {ultima.get('disposicion', '?')}"
-                )
-            elif isinstance(c.get("datos_extra"), dict):
-                llamadas = c["datos_extra"].get("llamadas") or []
-                if isinstance(llamadas, list) and llamadas:
-                    ultima = llamadas[-1] if isinstance(llamadas[-1], dict) else {}
-                    lines.append(
-                        f"Ultima llamada: {ultima.get('fecha', '?')} - {ultima.get('disposicion', '?')}"
-                    )
-            return "\n".join(lines)
-        except Exception as crm_err:
-            logger.warning("[%s] CRM contact lookup failed: %s", job_id, crm_err)
-            return ""
-
-    # Teléfono del contacto — puede venir en varios campos de metadata
-    telefono = (
-        meta_data.get("contacto_phone")
-        or meta_data.get("telefono")
-        or meta_data.get("phone")
-        or ""
-    )
-
-    tasks: list[asyncio.Task] = [asyncio.create_task(_load_kb())]
-    customer_task: asyncio.Task | None = None
-    if telefono:
-        customer_task = asyncio.create_task(_load_crm_contact(str(telefono)))
-        tasks.append(customer_task)
-
-    results_list = await asyncio.gather(*tasks, return_exceptions=True)
-
-    kb_context = results_list[0] if isinstance(results_list[0], str) else ""
-    customer_context = ""
-    if customer_task is not None and len(results_list) > 1:
-        customer_context = results_list[1] if isinstance(results_list[1], str) else ""
-        if not customer_context:
-            customer_context = await _load_customer(str(telefono))
-
-    agent_config["_kb_context"] = kb_context
-    agent_config["_customer_context"] = customer_context
-
 
 # ============================================================================
 # SERVIDOR Y ENTRYPOINT DINÁMICO
@@ -1301,7 +1126,8 @@ async def entrypoint(ctx: JobContext):
                 meta_data.setdefault("contacto_phone", caller_phone)
 
         # --- PASO 4 (Fase 2): Cargar contextos KB y cliente ANTES de crear el agente ---
-        await _enrich_agent_config_with_context(
+        from utils.call_loader import enrich_agent_config_with_context
+        await enrich_agent_config_with_context(
             job_id=job_id,
             agent_config=agent_config,
             empresa_id_str=empresa_id,
