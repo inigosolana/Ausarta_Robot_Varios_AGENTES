@@ -1,7 +1,10 @@
-from .dynamic_agent import (
+"""Re-export de utilidades de texto (compatibilidad con tests y imports legacy)."""
+
+from __future__ import annotations
+
+from agents.agent_common import (
     _count_words,
     _detect_language,
-    _extract_transcript_from_session,
     _is_likely_noise_transcript,
     _normalize_goodbye_message,
     _normalize_message_text,
@@ -9,11 +12,10 @@ from .dynamic_agent import (
 )
 
 __all__ = [
-    "anonymize_text",
-    "_detect_language",
-    "_normalize_message_text",
-    "_normalize_goodbye_message",
-    "_is_likely_noise_transcript",
     "_count_words",
-    "_extract_transcript_from_session",
+    "_detect_language",
+    "_is_likely_noise_transcript",
+    "_normalize_goodbye_message",
+    "_normalize_message_text",
+    "anonymize_text",
 ]

@@ -44,7 +44,12 @@ backend/venv/
 .env
 .env.local
 .env.*.local
+*.env
+stack.env
 !.env.example
+
+# Runtime data / logs
+data/*.jsonl
 
 # MCP secrets (use ~/.cursor/mcp.json on remote; do not commit tokens)
 .cursor/mcp.json

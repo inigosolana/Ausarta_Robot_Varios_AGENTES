@@ -73,6 +73,16 @@ class EncuestaData(BaseModel):
     llm_model: Optional[str] = None
     datos_extra: Optional[dict] = None
 
+class InboundCallRegisterRequest(BaseModel):
+    """Registro de llamada entrante al conectar el agente (antes de colgar)."""
+
+    empresa_id: int
+    agent_id: Optional[int] = None
+    telefono: str = ""
+    room_name: str = ""
+    agent_type: Optional[str] = None
+
+
 class CallEndRequest(BaseModel):
     nombre_sala: str
 

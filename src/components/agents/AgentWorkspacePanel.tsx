@@ -12,6 +12,7 @@ import {
   getAgentCallDirection,
 } from '../../lib/agentVoiceOptions';
 import { AgentKnowledgeDocs } from './AgentKnowledgeDocs';
+import { apiFetch } from '../../lib/apiFetch';
 
 type AgentRow = AgentConfig & { ai_config?: AIConfig; empresas?: Empresa };
 
@@ -147,10 +148,8 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
     }
     setIsSaving(true);
     try {
-      const API_URL = (import.meta as any).env.VITE_API_URL || '';
-      const res = await fetch(`${API_URL}/api/agents/${agent.id}`, {
+      const res = await apiFetch(`/api/agents/${agent.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...formData,
           ...aiConfig,
@@ -164,8 +163,8 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
         }),
       });
       if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Error saving agent');
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || errorData.detail || 'Error saving agent');
       }
       setIsEditing(false);
       onSaved();

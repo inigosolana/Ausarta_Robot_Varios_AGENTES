@@ -86,11 +86,56 @@ Reglas para sonar humano:
 13) ANTE AUDIO CORTADO O INCOMPRENSIBLE: usa una frase breve y natural ("Perdona, se ha cortado un poco, ¿qué decías?"). NUNCA uses "dime algo".
 """
 
+INBOUND_SOPORTE_SAVE_RULES = """
+REGLA DE GUARDADO — LLAMADA ENTRANTE (SOPORTE / RECEPCIÓN):
+- NO pidas notas del 1 al 10 salvo que tu guion lo indique explícitamente.
+- Usa 'guardar_encuesta' con status según el resultado:
+  * 'completada' si resolviste la consulta o tomaste nota completa.
+  * 'parcial' si el cliente colgó antes de cerrar o quedó algo pendiente.
+  * 'rechazada' si el cliente no quiso continuar.
+  * 'incomplete' si cuelga de repente sin despedida.
+- En 'datos_extra' guarda: motivo_llamada, resolucion, acciones_pendientes, puntos_clave (array).
+- En 'comentarios' escribe un resumen breve para el equipo humano (1-2 frases).
+- OBLIGATORIO: llama a 'guardar_encuesta' antes de 'finalizar_llamada'.
+"""
+
+INBOUND_ENCUESTA_SAVE_RULES = """
+REGLA DE GUARDADO — LLAMADA ENTRANTE (ENCUESTA):
+- Si el guion pide notas del 1 al 10, guárdalas en nota_comercial / nota_instalador / nota_rapidez.
+- Si hay preguntas abiertas, pásalas en 'datos_extra' como JSON.
+- status='completada' si terminaste el cuestionario; 'parcial' si se interrumpió; 'rechazada' si no quiso participar.
+- OBLIGATORIO: 'guardar_encuesta' antes de 'finalizar_llamada'.
+"""
+
+INBOUND_GENERIC_SAVE_RULES = """
+REGLA DE GUARDADO — LLAMADA ENTRANTE:
+- Usa 'guardar_encuesta' para persistir el resultado (no es solo para encuestas numéricas; es el registro de la llamada).
+- status: 'completada', 'parcial', 'rechazada' o 'incomplete' según cómo termine la conversación.
+- Resume lo importante en 'comentarios' y detalles estructurados en 'datos_extra'.
+- OBLIGATORIO: 'guardar_encuesta' antes de 'finalizar_llamada'.
+"""
+
+
+def _inbound_save_rules(agent_type: str) -> str:
+    if agent_type in ("ENCUESTA_NUMERICA", "ENCUESTA_MIXTA", "PREGUNTAS_ABIERTAS"):
+        return INBOUND_ENCUESTA_SAVE_RULES
+    if agent_type == "SOPORTE_CLIENTE":
+        return INBOUND_SOPORTE_SAVE_RULES
+    return INBOUND_GENERIC_SAVE_RULES
+
+
 ENTHUSIASM_INSTRUCTIONS = {
     "Bajo": "Mantén un tono calmado, pausado y profesional. Evita sonar efusivo.",
     "Normal": "Mantén un tono cercano, claro y profesional con energía equilibrada.",
     "Alto": "Habla con energía positiva y dinamismo, sin perder claridad ni profesionalidad.",
     "Extremo": "Usa un tono muy entusiasta y motivador, con mucha energía y amabilidad.",
+}
+
+
+LANG_INSTRUCTIONS = {
+    "eu": "Eres un agente que habla exclusivamente en euskera. Responde SIEMPRE en euskera, sin excepción.",
+    "gl": "Eres un agente que habla exclusivamente en galego. Responde SIEMPRE en galego, sen excepción.",
+    "ca": "Eres un agente que habla exclusivamente en catalán. Responde SIEMPRE en catalán, sin excepción.",
 }
 
 
@@ -106,6 +151,7 @@ def build_agent_prompt(
     speaking_speed: float,
     kb_context: str = "",
     customer_context: str = "",
+    language: str = "es",
 ) -> str:
     """
     Ensambla el system prompt: reglas base, contexto, guion y bloque JSON de extracción si aplica.
@@ -134,6 +180,7 @@ def build_agent_prompt(
     kb_allow_internet = resolve_kb_allow_internet(agent_config)
 
     call_direction = str(agent_config.get("call_direction") or "").lower()
+    agent_type = str(agent_config.get("agent_type") or "ENCUESTA_NUMERICA")
     base_rules_to_use = BASE_RULES
     if call_direction == "inbound":
         base_rules_to_use = BASE_RULES.replace(
@@ -145,8 +192,28 @@ def build_agent_prompt(
 """,
             "",
         )
+        if agent_type != "ENCUESTA_NUMERICA":
+            base_rules_to_use = base_rules_to_use.replace(
+                """REGLA UNIVERSAL DE GUARDADO (guardar_encuesta):
+- Tu herramienta 'guardar_encuesta' es súper flexible. Adáptate al guion que se te ha dado.
+- Si en tu guion haces preguntas de notas numéricas (ej. comercial, instalador, rapidez), guarda esos números del 1 al 10 en 'nota_comercial', 'nota_instalador' y/o 'nota_rapidez'.
+- Si en tu guion hay preguntas abiertas, condicionales (ej. "si responde mal, pregunta por qué") o cualquier dato que NO sea numérico, OBLIGATORIAMENTE crea un JSON y pásalo como string en 'datos_extra'. Ejemplo: '{"motivo_queja":"tardaron mucho","interesado":true}'.
+- Si el guion es solo texto, guarda un resumen en 'comentarios' o en 'datos_extra'.
+- OBLIGATORIO: Siempre llama a 'guardar_encuesta' antes de despedirte.
 
-    full_instructions = f"{base_rules_to_use}\n\n"
+""",
+                _inbound_save_rules(agent_type) + "\n",
+            )
+
+    lang_code = (language or agent_config.get("language") or "es").strip().lower()
+    lang_instruction = LANG_INSTRUCTIONS.get(lang_code, "")
+
+    full_instructions = ""
+    if lang_instruction:
+        full_instructions += f"{lang_instruction}\n\n"
+    full_instructions += f"{base_rules_to_use}\n\n"
+    if call_direction == "inbound" and agent_type == "ENCUESTA_NUMERICA":
+        full_instructions += f"{_inbound_save_rules(agent_type)}\n\n"
     full_instructions += f"{HUMAN_STYLE_RULES}\n\n"
     full_instructions += f"{HUMANIZATION_PROMPT}\n\n"
     full_instructions += f"DATOS DEL AGENTE:\n- NOMBRE: {agent_name}\n- EMPRESA: {company_name}\n"

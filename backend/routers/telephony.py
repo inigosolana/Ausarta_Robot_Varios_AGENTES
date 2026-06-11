@@ -18,11 +18,16 @@ from models.schemas import (
     CallEndRequest,
     CallTransferRequest,
     EncuestaData,
+    InboundCallRegisterRequest,
     TelephonyTransferRequest,
     TestOutboundCallRequest,
     YeastarPSeriesConfigCreate,
     YeastarPSeriesConfigResponse,
     YeastarPSeriesConfigTest,
+)
+from utils.inbound_call import (
+    create_inbound_encuesta_record,
+    find_recent_inbound_encuesta,
 )
 from services.supabase_service import supabase, sb_query
 from services.platform_access import has_global_access
@@ -1548,43 +1553,60 @@ async def _resolve_or_create_inbound_encuesta_id(datos: EncuestaData) -> int:
     if str(extra.get("call_direction") or "").lower() != "inbound":
         return datos.id_encuesta
 
-    empresa_id = extra.get("empresa_id")
+    empresa_id = int(extra.get("empresa_id") or 0)
     agent_id = extra.get("agent_id")
     telefono = str(extra.get("telefono") or extra.get("caller") or "desconocido").strip()
     room_name = str(extra.get("room_name") or "").strip()
+    agent_type = extra.get("agent_type")
 
-    insert_payload = {
-        "telefono": telefono,
-        "nombre_cliente": str(extra.get("nombre_cliente") or telefono),
-        "fecha": datetime.now(timezone.utc).isoformat(),
-        "status": (datos.status or "in_progress"),
-        "completada": 0,
-        "agent_id": agent_id,
-        "empresa_id": empresa_id,
-        "campaign_id": None,
-        "datos_extra": {
-            "call_direction": "inbound",
-            "room_name": room_name,
-        },
-    }
-    if datos.comentarios:
-        insert_payload["comentarios"] = datos.comentarios
-    if datos.transcription:
-        insert_payload["transcription"] = datos.transcription
-    if datos.seconds_used is not None:
-        insert_payload["seconds_used"] = datos.seconds_used
+    existing = await find_recent_inbound_encuesta(empresa_id, room_name, telefono)
+    if existing:
+        return existing
 
-    res = await sb_query(
-        lambda payload=insert_payload: supabase.table("encuestas").insert(payload).execute()
+    status = (datos.status or "in_progress")
+    encuesta_id = await create_inbound_encuesta_record(
+        empresa_id=empresa_id,
+        agent_id=int(agent_id) if agent_id is not None else None,
+        telefono=telefono,
+        room_name=room_name,
+        agent_type=str(agent_type) if agent_type else None,
+        status=status,
+        datos_extra=extra,
     )
-    encuesta_id = int(res.data[0]["id"])
-    logger.info(
-        "📞 [guardar-encuesta] Llamada inbound registrada como encuesta %s (tel=%s, room=%s)",
-        encuesta_id,
-        telefono,
-        room_name,
-    )
+    if encuesta_id:
+        logger.info(
+            "📞 [guardar-encuesta] Llamada inbound registrada como encuesta %s (tel=%s, room=%s)",
+            encuesta_id,
+            telefono,
+            room_name,
+        )
     return encuesta_id
+
+
+@router.post("/inbound-call/register")
+async def register_inbound_call(body: InboundCallRegisterRequest):
+    """Registra la llamada entrante al conectar el agente (id numérico antes de colgar)."""
+    if not supabase:
+        return JSONResponse(status_code=503, content={"error": "No DB connection"})
+
+    telefono = (body.telefono or "desconocido").strip() or "desconocido"
+    room_name = (body.room_name or "").strip()
+
+    existing = await find_recent_inbound_encuesta(body.empresa_id, room_name, telefono)
+    if existing:
+        return {"status": "ok", "encuesta_id": existing, "reused": True}
+
+    encuesta_id = await create_inbound_encuesta_record(
+        empresa_id=body.empresa_id,
+        agent_id=body.agent_id,
+        telefono=telefono,
+        room_name=room_name,
+        agent_type=body.agent_type,
+        status="calling",
+    )
+    if not encuesta_id:
+        return JSONResponse(status_code=500, content={"error": "No se pudo registrar la llamada"})
+    return {"status": "ok", "encuesta_id": encuesta_id, "reused": False}
 
 
 @router.post("/guardar-encuesta")

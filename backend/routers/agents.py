@@ -25,9 +25,6 @@ async def _invalidate_agent_cache(agent_id: str) -> int:
     Solución: al actualizar un agente se borran las claves Redis de todas las
     encuestas activas de ese agente para forzar recarga inmediata.
     """
-    import redis.asyncio as _aioredis
-
-    _REDIS_URL = settings.redis_url
     deleted = 0
     try:
         if not supabase:
@@ -40,14 +37,13 @@ async def _invalidate_agent_cache(agent_id: str) -> int:
         enc_ids = [row["id"] for row in (enc_res.data or [])]
         if not enc_ids:
             return 0
-        redis_client = _aioredis.from_url(_REDIS_URL, decode_responses=True)
-        try:
-            for enc_id in enc_ids:
-                deleted += await redis_client.delete(
-                    f"ausarta:agent_config:survey_{enc_id}"
-                )
-        finally:
-            await redis_client.close()
+        from services.redis_service import get_redis
+
+        redis_client = await get_redis()
+        for enc_id in enc_ids:
+            deleted += await redis_client.delete(
+                f"ausarta:agent_config:survey_{enc_id}"
+            )
         if deleted:
             logger.info(
                 f"🧹 [agents] Caché Redis invalidada para agente {agent_id}: "

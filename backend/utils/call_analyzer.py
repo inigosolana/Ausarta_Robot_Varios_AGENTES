@@ -16,6 +16,46 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 
+def _contacto_llamada_entry(
+    disposicion: str | None,
+    resumen: str | None,
+    datos_llamada: dict | None,
+) -> dict:
+    return {
+        **(datos_llamada or {}),
+        "disposicion": disposicion,
+        "resumen": resumen,
+    }
+
+
+async def _fetch_contacto_row(empresa_id: int, telefono: str) -> tuple[dict | None, bool]:
+    """Devuelve (fila, tiene_columna_historial). Tolera esquemas sin historial_llamadas."""
+    from services.supabase_service import supabase, sb_query
+
+    if not supabase:
+        return None, False
+
+    for fields, with_hist in (
+        ("id, total_llamadas, score, nombre, historial_llamadas, datos_extra", True),
+        ("id, total_llamadas, score, nombre, datos_extra", False),
+        ("id, total_llamadas, score, nombre", False),
+    ):
+        try:
+            res = await sb_query(
+                lambda f=fields, eid=empresa_id, tel=telefono: supabase.table("contactos")
+                .select(f)
+                .eq("empresa_id", eid)
+                .eq("telefono", tel)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                return res.data[0], with_hist and "historial_llamadas" in res.data[0]
+        except Exception:
+            continue
+    return None, False
+
+
 async def upsert_contacto_post_call(
     empresa_id: int,
     telefono: str,
@@ -26,9 +66,7 @@ async def upsert_contacto_post_call(
 ) -> None:
     """
     Crea o actualiza la ficha de contacto tras una llamada.
-    - Si no existe el contacto: INSERT con los datos disponibles.
-    - Si existe: UPDATE ultima_llamada, total_llamadas, ultima_disposicion.
-    - Score: +10 si disposición positiva, -5 si negativa.
+    Compatible con esquemas antiguos (sin historial_llamadas).
     Nunca propaga excepciones; si falla, solo loguea.
     """
     if not telefono or not empresa_id:
@@ -41,50 +79,41 @@ async def upsert_contacto_post_call(
 
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        # Calcular delta de score según disposición
         score_delta = 0
         if disposicion in ("completada",):
             score_delta = 10
         elif disposicion in ("rechazada",):
             score_delta = -5
 
-        # Intentar actualizar contacto existente
-        res = await sb_query(
-            lambda eid=empresa_id, tel=telefono: supabase.table("contactos")
-            .select("id, total_llamadas, score, nombre, historial_llamadas")
-            .eq("empresa_id", eid)
-            .eq("telefono", tel)
-            .limit(1)
-            .execute()
-        )
+        existing, has_historial_col = await _fetch_contacto_row(empresa_id, telefono)
+        llamada_entry = _contacto_llamada_entry(disposicion, resumen, datos_llamada)
 
-        if res.data:
-            existing = res.data[0]
+        if existing:
             contact_id = existing["id"]
             new_total = (existing.get("total_llamadas") or 0) + 1
             new_score = max(0, (existing.get("score") or 0) + score_delta)
-
-            historial = existing.get("historial_llamadas") or []
-            if not isinstance(historial, list):
-                historial = []
-            if datos_llamada:
-                historial.append({
-                    **datos_llamada,
-                    "disposicion": disposicion,
-                    "resumen": resumen,
-                })
-                historial = historial[-50:]
 
             update_data: dict = {
                 "ultima_llamada": now_iso,
                 "total_llamadas": new_total,
                 "ultima_disposicion": disposicion,
                 "score": new_score,
-                "historial_llamadas": historial,
             }
-            # Solo sobreescribir nombre si se detectó uno y el existente está vacío
             if nombre_detectado and not existing.get("nombre"):
                 update_data["nombre"] = nombre_detectado
+
+            if has_historial_col:
+                historial = existing.get("historial_llamadas") or []
+                if not isinstance(historial, list):
+                    historial = []
+                historial.append(llamada_entry)
+                update_data["historial_llamadas"] = historial[-50:]
+            elif datos_llamada:
+                datos_extra = existing.get("datos_extra") if isinstance(existing.get("datos_extra"), dict) else {}
+                hist = datos_extra.get("llamadas") if isinstance(datos_extra.get("llamadas"), list) else []
+                hist.append(llamada_entry)
+                datos_extra["llamadas"] = hist[-50:]
+                update_data["datos_extra"] = datos_extra
 
             await sb_query(
                 lambda cid=contact_id, d=update_data: supabase.table("contactos")
@@ -97,7 +126,6 @@ async def upsert_contacto_post_call(
                 contact_id, empresa_id, new_total, disposicion,
             )
         else:
-            # Crear nuevo contacto
             insert_data: dict = {
                 "empresa_id": empresa_id,
                 "telefono": telefono,
@@ -105,16 +133,21 @@ async def upsert_contacto_post_call(
                 "ultima_llamada": now_iso,
                 "total_llamadas": 1,
                 "ultima_disposicion": disposicion,
-                "score": max(0, 50 + score_delta),  # base 50 para nuevos contactos
-                "historial_llamadas": ([{
-                    **(datos_llamada or {}),
-                    "disposicion": disposicion,
-                    "resumen": resumen,
-                }] if datos_llamada else []),
+                "score": max(0, 50 + score_delta),
             }
-            await sb_query(
-                lambda d=insert_data: supabase.table("contactos").insert(d).execute()
-            )
+            if datos_llamada:
+                insert_data["historial_llamadas"] = [llamada_entry]
+                insert_data["datos_extra"] = {"llamadas": [llamada_entry]}
+
+            try:
+                await sb_query(
+                    lambda d=insert_data: supabase.table("contactos").insert(d).execute()
+                )
+            except Exception:
+                insert_data.pop("historial_llamadas", None)
+                await sb_query(
+                    lambda d=insert_data: supabase.table("contactos").insert(d).execute()
+                )
             logger.info(
                 "[contacto] Creado nuevo contacto empresa=%d telefono=%s disp=%s",
                 empresa_id, telefono[:6] + "…", disposicion,
@@ -129,6 +162,7 @@ async def analyze_call_disposition(
     agent_type: str,
     data_saved: bool,
     language: str,
+    call_direction: str = "outbound",
 ) -> tuple[str | None, dict | None]:
     """
     Clasifica la disposición de la llamada y devuelve datos_extra enriquecidos.
@@ -162,7 +196,24 @@ async def analyze_call_disposition(
         "  - 'no_contesta': Buzón de voz, contestador automático o sin interacción humana real.\n\n"
     )
 
-    if agent_type == "CUALIFICACION_LEAD":
+    is_inbound = str(call_direction or "").lower() == "inbound"
+    if is_inbound:
+        disposition_prompt += (
+            "CONTEXTO LLAMADA ENTRANTE:\n"
+            "- El cliente llamó a la empresa (no es campaña saliente).\n"
+            "- Si hay diálogo real con el cliente (preguntas, respuestas, consultas), "
+            "NUNCA uses 'no_contesta'. Usa 'completada', 'parcial' o 'rechazada'.\n"
+            "- 'no_contesta' solo si no hubo interacción humana (cuelgue inmediato, buzón, silencio total).\n\n"
+        )
+
+    if agent_type == "SOPORTE_CLIENTE":
+        disposition_prompt += (
+            "Añade también estos campos al JSON:\n"
+            "- 'motivo_llamada' (string): Motivo principal de la llamada del cliente.\n"
+            "- 'resolucion' (string): Qué se resolvió o qué quedó pendiente.\n"
+            "- 'puntos_clave' (array de strings): Los 3 puntos más importantes.\n"
+        )
+    elif agent_type == "CUALIFICACION_LEAD":
         disposition_prompt += (
             "Añade también estos campos al JSON:\n"
             "- 'lead_cualificado' (booleano): ¿El lead cumple los criterios de cualificación?\n"
@@ -244,6 +295,16 @@ async def analyze_call_disposition(
                 datos_extra["idioma"] = language
                 if resumen_narrativo:
                     datos_extra["resumen_narrativo"] = resumen_narrativo
+
+                if is_inbound:
+                    from utils.inbound_call import normalize_inbound_disposition
+
+                    call_disposition = normalize_inbound_disposition(
+                        call_disposition,
+                        transcript,
+                        data_saved,
+                        agent_type,
+                    )
 
                 logger.info(
                     "✅ Disposición: %s | Sentimiento: %s | Idioma: %s | "

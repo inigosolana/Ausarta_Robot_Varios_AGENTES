@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useTranslation } from "react-i18next";
 import type { AgentConfig, AIConfig, Empresa, UserProfile } from "../types";
+import { apiFetch } from "../lib/apiFetch";
 
 const SkeletonCard = () => (
     <div className="bg-white rounded-2xl border border-gray-100 p-8 flex flex-col items-center space-y-4 animate-pulse">
@@ -258,9 +259,8 @@ const AgentListView: React.FC = () => {
 
         try {
             setLoading(true);
-            const API_URL = (import.meta as any).env.VITE_API_URL || '';
-            const res = await fetch(`${API_URL}/api/agents/${id}`, {
-                method: 'DELETE'
+            const res = await apiFetch(`/api/agents/${id}`, {
+                method: 'DELETE',
             });
             const result = await res.json();
 

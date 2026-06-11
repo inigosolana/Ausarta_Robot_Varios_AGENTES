@@ -11,6 +11,7 @@ import WorkflowEditor from '../components/WorkflowEditor';
 import { AgentKnowledgeDocs } from '../components/agents/AgentKnowledgeDocs';
 import { Link } from 'react-router-dom';
 import './agents.css';
+import { apiFetch } from '../lib/apiFetch';
 
 const AUSARTA_FEMALE_VOICE_ID = 'b5aa8098-49ef-475d-89b0-c9262ecf33fd';  // Chica castellano Cartesia
 
@@ -152,13 +153,11 @@ const AgentFormView: React.FC<Props> = ({ agent, empresaName, onSave, onCancel }
 
         setIsSaving(true);
         try {
-            const API_URL = (import.meta as any).env.VITE_API_URL || '';
             const method = isEditing ? 'PUT' : 'POST';
-            const url = isEditing ? `${API_URL}/api/agents/${agent!.id}` : `${API_URL}/api/agents`;
+            const url = isEditing ? `/api/agents/${agent!.id}` : '/api/agents';
 
-            const res = await fetch(url, {
+            const res = await apiFetch(url, {
                 method,
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ...formData,
                     ...aiConfig,
@@ -180,8 +179,8 @@ const AgentFormView: React.FC<Props> = ({ agent, empresaName, onSave, onCancel }
             });
 
             if (!res.ok) {
-                const errorData = await res.json();
-                throw new Error(errorData.error || 'Error saving agent');
+                const errorData = await res.json().catch(() => ({}));
+                throw new Error(errorData.error || errorData.detail || 'Error saving agent');
             }
 
             // Also upsert AI config directly via Supabase for fields not in the simple agents API
@@ -205,10 +204,8 @@ const AgentFormView: React.FC<Props> = ({ agent, empresaName, onSave, onCancel }
         if (!workflowDefinition || !agent?.id) return;
         setIsPreviewLoading(true);
         try {
-            const API_URL = (import.meta as any).env.VITE_API_URL || '';
-            const resp = await fetch(`${API_URL}/api/agents/${agent.id}/workflow/validate`, {
+            const resp = await apiFetch(`/api/agents/${agent.id}/workflow/validate`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     workflow_definition: workflowDefinition,
                     agent_mode: agentMode,
