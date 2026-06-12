@@ -27,6 +27,7 @@ from services.auth import CurrentUser, require_admin, get_current_user
 from services.embedding_service import get_embedding, search_knowledge, _split_into_chunks
 from services.crypto_service import encrypt_data, decrypt_data
 from services.document_parser import parse_services_excel, stringify_json_document
+from services.chunk_builder import chunks_to_kb_rows, parse_jsonl_bytes
 
 logger = logging.getLogger("api-backend")
 
@@ -197,51 +198,67 @@ async def upload_knowledge(
     filename = file.filename or ""
     content_type = (file.content_type or "").lower()
 
-    parsed_documents: list[dict[str, Any]] = []
     ext = (filename or "").lower().rsplit(".", 1)[-1] if "." in (filename or "") else ""
+    parsed_documents: list[dict[str, Any]] = []
+    semantic_chunks: list[dict[str, Any]] = []
+
     if ext in {"xlsx", "xls"}:
-        parsed_documents = await parse_services_excel(content_bytes, eid)
-
-    texto = _extract_text_from_uploaded_file(filename, content_type, content_bytes)
-    if parsed_documents:
-        texto = "\n\n".join(
-            str(doc.get("contenido") or "").strip()
-            for doc in parsed_documents
-            if str(doc.get("contenido") or "").strip()
+        parsed_documents = await parse_services_excel(
+            content_bytes, eid, agent_id=agent_id, fuente=filename or "services_excel"
         )
+        semantic_chunks = parsed_documents
+    elif ext == "jsonl":
+        try:
+            semantic_chunks = parse_jsonl_bytes(content_bytes, empresa_id=eid)
+        except ValueError as jsonl_err:
+            raise HTTPException(status_code=400, detail=str(jsonl_err)) from jsonl_err
+        for chunk in semantic_chunks:
+            if agent_id is not None and chunk.get("agent_id") is None:
+                chunk["agent_id"] = int(agent_id)
 
-    texto = texto.strip()
-    if not texto:
-        raise HTTPException(status_code=400, detail="El archivo no contiene texto extraíble")
-
-    # Chunkear
-    chunks = _split_into_chunks(texto, max_tokens=800, overlap=100)
-    if not chunks:
-        raise HTTPException(status_code=400, detail="No se pudieron generar chunks del texto")
-
-    # Generar embeddings y preparar filas (en paralelo, lotes de 5)
     rows_to_insert: list[dict] = []
-    BATCH = 5
-    for i in range(0, len(chunks), BATCH):
-        batch = chunks[i:i + BATCH]
-        embeddings = await asyncio.gather(
-            *[get_embedding(c) for c in batch], return_exceptions=True
-        )
-        for j, (chunk, emb) in enumerate(zip(batch, embeddings)):
-            if isinstance(emb, Exception) or emb is None:
-                logger.warning("[knowledge] Embedding fallido chunk %d, se inserta sin vector", i + j)
-                emb = None
+
+    if semantic_chunks:
+        # 1 producto/tarifa = 1 chunk (sin re-partir por tokens)
+        kb_rows = chunks_to_kb_rows(semantic_chunks, default_titulo=titulo)
+        if not kb_rows:
+            raise HTTPException(status_code=400, detail="No se generaron chunks válidos del archivo")
+        rows_to_insert = [{**r, "embedding": None} for r in kb_rows]
+    else:
+        texto = _extract_text_from_uploaded_file(filename, content_type, content_bytes).strip()
+        if not texto:
+            raise HTTPException(status_code=400, detail="El archivo no contiene texto extraíble")
+
+        text_chunks = _split_into_chunks(texto, max_tokens=800, overlap=100)
+        if not text_chunks:
+            raise HTTPException(status_code=400, detail="No se pudieron generar chunks del texto")
+
+        for i, chunk in enumerate(text_chunks):
             row: dict = {
                 "empresa_id": eid,
                 "titulo": titulo,
                 "contenido": chunk,
-                "chunk_index": i + j,
-                "embedding": emb,
+                "chunk_index": i,
+                "embedding": None,
                 "source_type": source_type,
             }
             if agent_id is not None:
                 row["agent_id"] = int(agent_id)
             rows_to_insert.append(row)
+
+    # Generar embeddings en paralelo (lotes de 5)
+    BATCH = 5
+    for i in range(0, len(rows_to_insert), BATCH):
+        batch = rows_to_insert[i : i + BATCH]
+        embeddings = await asyncio.gather(
+            *[get_embedding(r["contenido"]) for r in batch], return_exceptions=True
+        )
+        for j, emb in enumerate(embeddings):
+            if isinstance(emb, Exception) or emb is None:
+                logger.warning("[knowledge] Embedding fallido chunk %d, se inserta sin vector", i + j)
+                rows_to_insert[i + j]["embedding"] = None
+            else:
+                rows_to_insert[i + j]["embedding"] = emb
 
     # Insertar en Supabase
     try:
@@ -255,20 +272,22 @@ async def upload_knowledge(
     inserted = len(res.data) if res.data else 0
     logger.info(
         "[knowledge] Documento '%s' indexado: %d chunks, %d con embedding para empresa %d",
-        titulo, len(chunks), sum(1 for r in rows_to_insert if r["embedding"]), eid,
+        titulo, len(rows_to_insert), sum(1 for r in rows_to_insert if r["embedding"]), eid,
     )
+    preview_source = semantic_chunks or parsed_documents
     return {
         "status": "ok",
         "titulo": titulo,
-        "chunks_total": len(chunks),
+        "chunks_total": len(rows_to_insert),
         "chunks_con_embedding": sum(1 for r in rows_to_insert if r["embedding"]),
         "insertados": inserted,
+        "modo": "semantic" if semantic_chunks else "text_split",
         "preview": [
             {
                 "titulo": doc.get("titulo"),
                 "contenido_preview": str(doc.get("contenido") or "")[:240],
             }
-            for doc in parsed_documents[:10]
+            for doc in preview_source[:10]
         ],
     }
 

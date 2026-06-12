@@ -4,14 +4,17 @@ import io
 import json
 from typing import Any
 
+from services.chunk_builder import service_row_to_chunk
+
 
 async def parse_services_excel(
     file_bytes: bytes,
     empresa_id: int,
     sheet_name: str = "informe CRM",
+    agent_id: int | None = None,
+    fuente: str = "services_excel",
 ) -> list[dict[str, Any]]:
-    """Convierte cada fila del Excel en documentos KB orientados a servicios."""
-    _ = empresa_id
+    """Convierte cada fila del Excel en un chunk semántico (1 producto = 1 chunk)."""
     try:
         from openpyxl import load_workbook  # type: ignore
     except ImportError:
@@ -29,6 +32,16 @@ async def parse_services_excel(
 
     for values in rows[1:]:
         row = {headers[idx]: values[idx] for idx in range(min(len(headers), len(values)))}
+
+        activo = row.get("Activo")
+        if activo is not None and activo != "":
+            try:
+                if float(activo) == 0:
+                    continue
+            except (TypeError, ValueError):
+                if str(activo).strip().lower() in {"0", "no", "false"}:
+                    continue
+
         ofertable = str(row.get("Ofertable") or "").strip().lower()
         activable = str(row.get("Activable") or "").strip().lower()
         if ofertable not in {"si", "sí", "s"} and activable not in {"si", "sí", "s"}:
@@ -42,24 +55,14 @@ async def parse_services_excel(
         if active_rows > 50 and uds_activas_num == 0:
             continue
 
-        nombre = str(row.get("Nombre") or "").strip()
-        familia = str(row.get("familia") or row.get("Familia") or "").strip()
-        if not nombre:
-            continue
-
-        titulo = f"{familia} - {nombre}".strip(" -")
-        contenido = (
-            f"Servicio: {nombre}\n"
-            f"Familia: {familia}\n"
-            f"Tipo: {row.get('Tipo de servicio') or ''}\n"
-            f"Descripcion: {row.get('Descripción contractual') or row.get('DescripciÃ³n contractual') or ''}\n"
-            f"Informacion comercial: {row.get('Información comercial') or row.get('InformaciÃ³n comercial') or ''}\n"
-            f"Precio coste: {row.get('Precio coste') or ''} EUR/mes\n"
-            f"PVP recomendado: {row.get('PVP recomendado') or ''} EUR/mes\n"
-            f"Ofertable: {row.get('Ofertable') or ''} | Activable: {row.get('Activable') or ''}\n"
-            f"Unidades activas: {row.get('Uds totales activas') or ''}"
+        chunk = service_row_to_chunk(
+            row,
+            empresa_id=empresa_id,
+            agent_id=agent_id,
+            fuente=fuente,
         )
-        docs.append({"titulo": titulo, "contenido": contenido, "source_type": "services_excel"})
+        if chunk:
+            docs.append(chunk)
 
     return docs
 
