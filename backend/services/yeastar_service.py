@@ -7,6 +7,7 @@ Supported modes:
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from typing import Any, Literal
@@ -251,6 +252,20 @@ class YeastarClient:
             token = await self.get_access_token(force_refresh=True)
             response = await self._pseries_request(method, path, payload=payload, token=token)
         return response
+
+    async def health_check(self, *, timeout: float = 5.0) -> bool:
+        """
+        Comprobación ligera de conectividad/autenticación contra el PBX.
+
+        Usa get_access_token (una sola petición HTTP) en lugar de list_extensions
+        para minimizar carga en el Yeastar del cliente durante el cron de salud.
+        """
+        try:
+            await asyncio.wait_for(self.get_access_token(), timeout=timeout)
+            return True
+        except Exception as exc:
+            logger.warning("[Yeastar] [%s] health_check failed: %s", self.tenant_label, exc)
+            return False
 
     async def test_connection(self) -> tuple[bool, str]:
         try:

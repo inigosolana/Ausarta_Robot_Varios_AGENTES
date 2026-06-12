@@ -39,6 +39,7 @@ from tasks.notifications import (
     process_system_alert,
     process_yeastar_webhook,
 )
+from tasks.yeastar_health import check_yeastar_health_task
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -124,7 +125,12 @@ class WorkerSettings:
         process_system_alert,
         send_telegram_alert_task,
         process_yeastar_webhook,
+        check_yeastar_health_task,
     ]
+
+    _health_interval = int(os.getenv("YEASTAR_HEALTH_CHECK_INTERVAL_SECONDS", "120"))
+    _health_minute_step = max(1, _health_interval // 60)
+    _health_cron_minutes = set(range(0, 60, _health_minute_step))
 
     cron_jobs = [
         cron(
@@ -138,6 +144,13 @@ class WorkerSettings:
             minute=None,   # cada minuto
             unique=True,
             timeout=55,
+        ),
+        cron(
+            check_yeastar_health_task,
+            minute=_health_cron_minutes,
+            second={0},
+            unique=True,
+            timeout=120,
         ),
     ]
 

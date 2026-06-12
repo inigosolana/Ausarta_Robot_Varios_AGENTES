@@ -28,6 +28,17 @@ interface YeastarCapability {
   status: 'implemented' | 'available' | 'planned' | string;
 }
 
+interface YeastarHealthStatus {
+  empresa_id?: number;
+  configured?: boolean;
+  health_status?: 'ok' | 'down' | 'unknown' | string;
+  last_health_check_at?: string | null;
+  consecutive_failures?: number;
+  failure_threshold?: number;
+  campaigns_paused_count?: number;
+  campaigns_paused_by_health?: Array<{ id: number; name?: string; paused_reason?: string }>;
+}
+
 const EMPTY_FORM: YeastarConfig = {
   yeastar_pbx_url: '',
   yeastar_api_mode: 'pseries',
@@ -91,6 +102,9 @@ const TelephonyView: React.FC = () => {
   const [autoConfigResult, setAutoConfigResult] = useState<{ sip_trunk?: unknown; inbound_route?: unknown; event_push?: unknown; errors?: string[] } | null>(null);
   const [capabilities, setCapabilities] = useState<YeastarCapability[]>([]);
   const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
+  const [healthStatus, setHealthStatus] = useState<YeastarHealthStatus | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [healthRefreshing, setHealthRefreshing] = useState(false);
 
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | null>(null);
@@ -167,12 +181,48 @@ const TelephonyView: React.FC = () => {
   }, [profile, isPlatformOwner]);
 
   useEffect(() => {
-    if (selectedEmpresaId) loadConfig(selectedEmpresaId);
-    else {
+    if (selectedEmpresaId) {
+      loadConfig(selectedEmpresaId);
+      loadHealth(selectedEmpresaId);
+    } else {
       setForm(EMPTY_FORM);
       setSavedConfig(null);
+      setHealthStatus(null);
     }
   }, [selectedEmpresaId]);
+
+  const loadHealth = async (empId: number) => {
+    setHealthLoading(true);
+    try {
+      const res = await apiFetch(`/api/empresas/${empId}/yeastar/health`);
+      if (res.ok) {
+        setHealthStatus(await res.json());
+      } else {
+        setHealthStatus(null);
+      }
+    } catch {
+      setHealthStatus(null);
+    } finally {
+      setHealthLoading(false);
+    }
+  };
+
+  const forceHealthCheck = async () => {
+    if (!selectedEmpresaId) return;
+    setHealthRefreshing(true);
+    try {
+      const res = await apiFetch(`/api/empresas/${selectedEmpresaId}/yeastar/health/check`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        await loadHealth(selectedEmpresaId);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setHealthRefreshing(false);
+    }
+  };
 
   const loadEmpresas = async () => {
     try {
@@ -317,6 +367,21 @@ const TelephonyView: React.FC = () => {
       ? 'ENLACE ACTIVO'
       : 'SIN CONFIGURAR';
 
+  const yeastarHealth = healthStatus?.health_status || 'unknown';
+  const healthDotClass =
+    yeastarHealth === 'ok'
+      ? 'bg-emerald-500'
+      : yeastarHealth === 'down'
+        ? 'bg-red-500'
+        : 'bg-gray-400';
+  const healthLabel =
+    yeastarHealth === 'ok'
+      ? t('PBX OK', 'PBX operativo')
+      : yeastarHealth === 'down'
+        ? t('PBX DOWN', 'PBX sin respuesta')
+        : t('PBX unknown', 'PBX sin comprobar');
+  const campaignsPausedByHealth = (healthStatus?.campaigns_paused_count ?? 0) > 0;
+
   return (
     <div className="telephony-page relative min-h-full">
       <div className="pointer-events-none absolute top-0 right-1/4 h-[420px] w-[420px] rounded-full bg-cyan-500/10 blur-[120px]" />
@@ -380,22 +445,82 @@ const TelephonyView: React.FC = () => {
               )}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {isConfigured && selectedEmpresaId && (
+              <span
+                className="tel-glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold"
+                title={
+                  healthStatus?.last_health_check_at
+                    ? `${t('Last check', 'Última comprobación')}: ${healthStatus.last_health_check_at}`
+                    : undefined
+                }
+              >
+                <span className={`h-2 w-2 rounded-full ${healthDotClass} ${yeastarHealth === 'down' ? 'animate-pulse' : ''}`} />
+                <span className={
+                  yeastarHealth === 'ok'
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : yeastarHealth === 'down'
+                      ? 'text-red-700 dark:text-red-400'
+                      : 'text-gray-500'
+                }>
+                  {healthLoading ? t('Checking...', 'Comprobando...') : healthLabel}
+                </span>
+              </span>
+            )}
             <span className="tel-glass rounded-full px-3 py-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
               {currentModeLabel}
             </span>
             {selectedEmpresaId && (
-              <button
-                type="button"
-                onClick={() => loadConfig(selectedEmpresaId)}
-                className="tel-glass rounded-lg border border-gray-200 p-2 text-gray-500 transition-colors hover:text-cyan-600 dark:border-white/10 dark:hover:text-cyan-400"
-                title="Recargar"
-              >
-                <MaterialIcon name="sync" className="!text-xl" />
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={forceHealthCheck}
+                  disabled={healthRefreshing}
+                  className="tel-glass rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:text-cyan-600 disabled:opacity-50 dark:border-white/10 dark:text-gray-300 dark:hover:text-cyan-400"
+                  title={t('Force health check', 'Forzar comprobación de salud')}
+                >
+                  {healthRefreshing ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <MaterialIcon name="monitor_heart" className="!text-base" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { loadConfig(selectedEmpresaId); loadHealth(selectedEmpresaId); }}
+                  className="tel-glass rounded-lg border border-gray-200 p-2 text-gray-500 transition-colors hover:text-cyan-600 dark:border-white/10 dark:hover:text-cyan-400"
+                  title="Recargar"
+                >
+                  <MaterialIcon name="sync" className="!text-xl" />
+                </button>
+              </>
             )}
           </div>
         </header>
+
+        {campaignsPausedByHealth && selectedEmpresaId && (
+          <div className="rounded-xl border border-amber-300/60 bg-amber-50/90 px-4 py-3 text-sm text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-100">
+            <p className="font-semibold">
+              {t(
+                'Campaigns paused — Yeastar unreachable',
+                'Campañas pausadas — Yeastar sin respuesta',
+              )}
+            </p>
+            <p className="mt-1 text-amber-800/90 dark:text-amber-200/90">
+              {t(
+                'The PBX health check failed repeatedly. Outbound campaigns were paused automatically and will resume when Yeastar responds again.',
+                'El health-check del PBX falló varias veces. Las campañas salientes se pausaron automáticamente y se reanudarán cuando Yeastar vuelva a responder.',
+              )}
+            </p>
+            {healthStatus?.campaigns_paused_by_health && healthStatus.campaigns_paused_by_health.length > 0 && (
+              <ul className="mt-2 list-inside list-disc text-xs">
+                {healthStatus.campaigns_paused_by_health.map(c => (
+                  <li key={c.id}>{c.name || `Campaña #${c.id}`}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {!selectedEmpresaId ? (
           <div className="tel-glass rounded-2xl p-12 text-center text-gray-500 dark:text-gray-400">

@@ -655,6 +655,48 @@ async def get_yeastar_config(
     return _yeastar_config_to_response(row)
 
 
+@router.get("/api/empresas/{empresa_id}/yeastar/health")
+async def get_yeastar_health(
+    empresa_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Estado del health-check Yeastar de la empresa y campañas pausadas por salud.
+
+    Multi-tenant: solo la propia empresa o superadmin/platform owner.
+    """
+    if not has_global_access(current_user):
+        if not current_user.empresa_id or int(current_user.empresa_id) != int(empresa_id):
+            raise HTTPException(status_code=403, detail="Acceso denegado")
+
+    from services.yeastar_health_service import get_yeastar_health_status
+    return await get_yeastar_health_status(empresa_id)
+
+
+@router.post("/api/empresas/{empresa_id}/yeastar/health/check")
+async def force_yeastar_health_check(
+    empresa_id: int,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """
+    Fuerza un health-check inmediato para una empresa (operadores / admin).
+    Aplica la misma lógica de pausa/reanudación que el cron ARQ.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+    if not has_global_access(current_user):
+        if not current_user.empresa_id or int(current_user.empresa_id) != int(empresa_id):
+            raise HTTPException(status_code=403, detail="Acceso denegado")
+
+    row = await _get_yeastar_config(empresa_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Yeastar no configurado para esta empresa")
+
+    from services.yeastar_health_service import check_single_empresa_health
+    result = await check_single_empresa_health(row)
+    return {"status": "ok", "result": result}
+
+
 @router.post("/api/telephony/yeastar", response_model=YeastarPSeriesConfigResponse)
 async def save_yeastar_config(
     payload: YeastarPSeriesConfigCreate,

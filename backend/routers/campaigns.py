@@ -609,7 +609,13 @@ async def schedule_campaign_retry(campaign_id: int, payload: ScheduleRetryReques
 async def stop_campaign(campaign_id: int):
     if not supabase: return {"error": "No DB"}
     try:
-        supabase.table("campaigns").update({"status": "paused"}).eq("id", campaign_id).execute()
+        supabase.table("campaigns").update({
+            "status": "paused",
+            "paused_by_health_check": False,
+            "paused_reason": None,
+            "status_before_health_pause": None,
+            "health_paused_at": None,
+        }).eq("id", campaign_id).execute()
         try:
             from services.redis_service import get_redis
             redis = await get_redis()
@@ -1007,7 +1013,13 @@ async def start_campaign(campaign_id: int):
         res = supabase.table("campaigns").select("*").eq("id", campaign_id).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Campaña no encontrada")
-        supabase.table("campaigns").update({"status": "active"}).eq("id", campaign_id).execute()
+        supabase.table("campaigns").update({
+            "status": "active",
+            "paused_by_health_check": False,
+            "paused_reason": None,
+            "status_before_health_pause": None,
+            "health_paused_at": None,
+        }).eq("id", campaign_id).execute()
         try:
             from services.redis_service import get_redis
             redis = await get_redis()

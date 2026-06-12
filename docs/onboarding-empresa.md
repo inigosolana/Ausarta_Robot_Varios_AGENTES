@@ -266,9 +266,15 @@ Enviar por canal seguro (no email plano):
 
 ## Troubleshooting
 
+### Health-check automático del PBX
+
+El worker ARQ comprueba periódicamente si el Yeastar de cada empresa responde. Si falla 3 veces seguidas, pausa las campañas salientes y avisa por Telegram. Ver [yeastar-health-check.md](./yeastar-health-check.md).
+
+Intervalo configurable: `YEASTAR_HEALTH_CHECK_INTERVAL_SECONDS=120` en el servicio worker.
+
 ### El agente no contesta llamadas entrantes
 
-1. Verificar `yeastar_config.activo = true`
+1. Verificar `company_yeastar_configs.is_active = true`
 2. Verificar que `BRIDGE_SERVER_URL_INTERNAL` apunta al contenedor correcto
 3. Consultar logs: `docker logs ausarta-livekit-agent --tail 100`
 
