@@ -355,7 +355,44 @@ class YeastarClient:
             logger.warning("[Yeastar] [%s] get_extension_status(%s): %s", self.tenant_label, extension, exc)
             return "Error"
 
-    async def transfer_call(self, channel_id: str, target_extension: str) -> dict[str, Any]:
+    async def transfer_call(
+        self,
+        channel_id: str,
+        target_extension: str,
+        *,
+        outbound_prefix: str = "",
+    ) -> dict[str, Any]:
+        """
+        Transfiere la llamada identificada por channel_id al destino target_extension.
+
+        Funciona tanto con extensiones internas (ej. "1001") como con números externos
+        (ej. "+34612345678", "612345678").
+
+        Args:
+            channel_id: ID del canal Yeastar (del evento 30011, campo channel_id).
+            target_extension: Extensión interna o número externo al que transferir.
+            outbound_prefix: Prefijo de ruta saliente a anteponer al número (ej. "0", "9").
+                             Solo aplica cuando target_extension es un número externo.
+                             Configurable por empresa en company_yeastar_configs.outbound_prefix.
+
+        Notas de API Yeastar:
+        - P-Series OpenAPI (pseries): POST /openapi/v1.0/call/transfer
+            payload: {"type": "blind", "channel_id": "...", "number": "..."}
+            El campo "number" acepta extensiones internas y números externos si el Yeastar
+            tiene configurada una ruta saliente que los alcance.
+        - Cloud PBX: POST /api/v2.0.0/call/transfer
+            payload: {"channelid": "...", "number": "..."}
+            Requiere el channelid del evento 30011 (no el call_id genérico).
+
+        # TODO verificar con Yeastar: confirmar que call/transfer acepta números externos
+        # (no solo extensiones internas) en P-Series firmware 84.x y Cloud PBX.
+        # En entornos de cliente el dial plan / ruta saliente debe existir para que
+        # el PBX encamine la llamada al número PSTN externo.
+        # El parámetro outbound_prefix prepende el dígito de acceso a la ruta saliente
+        # cuando así lo requiere el plan de numeración del cliente.
+        """
+        final_number = f"{outbound_prefix}{target_extension}" if outbound_prefix else target_extension
+
         try:
             if self.api_mode == "cloud_pbx":
                 token = await self.get_access_token()
@@ -364,7 +401,7 @@ class YeastarClient:
                     token=token,
                     payload={
                         "channelid": channel_id,
-                        "number": target_extension,
+                        "number": final_number,
                     },
                 )
                 if str(response.get("status") or "").lower() != "success":
@@ -380,7 +417,7 @@ class YeastarClient:
                 payload={
                     "type": "blind",
                     "channel_id": channel_id,
-                    "number": target_extension,
+                    "number": final_number,
                 },
             )
             if response.get("errcode") != 0:
@@ -392,10 +429,10 @@ class YeastarClient:
             raise
         except Exception as exc:
             logger.error(
-                "[Yeastar] [%s] Excepcion durante transfer_call (channel_id=%s, ext=%s): %s",
+                "[Yeastar] [%s] Excepcion durante transfer_call (channel_id=%s, target=%s): %s",
                 self.tenant_label,
                 channel_id,
-                target_extension,
+                final_number,
                 exc,
             )
             raise

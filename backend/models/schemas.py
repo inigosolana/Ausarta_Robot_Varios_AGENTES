@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Literal, Any
 from datetime import datetime
 
@@ -164,22 +164,53 @@ class YeastarPSeriesConfigResponse(YeastarPSeriesConfigBase):
 
 
 class CallTransferRequest(BaseModel):
-    """Transferencia a agente humano (agente LiveKit → backend → Yeastar)."""
+    """
+    Transferencia a agente humano (agente LiveKit → backend → Yeastar).
+
+    El campo `extension` acepta tanto extensiones internas del PBX (ej. "1001")
+    como números de teléfono externos en formato nacional o E.164 (ej. "612345678",
+    "+34912345678"). El backend detecta automáticamente si es interno o externo
+    consultando la tabla yeastar_extensions de la empresa.
+
+    Para números externos se requiere que el Yeastar del cliente tenga configurada
+    una ruta saliente válida. Ver docs/transferencias.md para configurar outbound_prefix.
+    """
     room_name: str
     empresa_id: int
     call_id: str
-    extension: str = "1000"
+    extension: str = Field(
+        default="1000",
+        description="Extensión interna (ej. '1001') o número externo (ej. '612345678', '+34612345678')",
+    )
     survey_id: Optional[int] = None
     motivo: Optional[str] = None
+    outbound_prefix: Optional[str] = Field(
+        default=None,
+        description="Prefijo de ruta saliente a anteponer para números externos (ej. '0', '9'). "
+                    "Si es None, se usa el configurado en company_yeastar_configs o vacío.",
+    )
 
 
 class TelephonyTransferRequest(BaseModel):
-    """Solicitud de transferencia LiveKit → extensión Yeastar del tenant."""
+    """
+    Solicitud de transferencia LiveKit → destino Yeastar del tenant.
+
+    El campo `target_extension` acepta tanto extensiones internas del PBX (ej. "1001")
+    como números de teléfono externos en formato nacional o E.164 (ej. "612345678",
+    "+34912345678"). Ver docs/transferencias.md.
+    """
     survey_id: int
     room_name: str
     motivo: Optional[str] = None
-    target_extension: Optional[str] = None
+    target_extension: Optional[str] = Field(
+        default=None,
+        description="Extensión interna o número externo (E.164 o nacional)",
+    )
     yeastar_call_id: Optional[str] = None
+    outbound_prefix: Optional[str] = Field(
+        default=None,
+        description="Prefijo de ruta saliente para números externos (ej. '0', '9').",
+    )
 
 
 # ── Workflow: tipos de nodo/edge y definición completa ───────────────────────

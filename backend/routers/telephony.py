@@ -1051,10 +1051,99 @@ async def _resolve_inbound_agent_id(empresa_id: int) -> int | None:
     return int(preferred["id"]) if preferred.get("id") is not None else None
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers de transferencia: validación y clasificación de destino
+# ──────────────────────────────────────────────────────────────────────────────
+
+import re as _re
+
+# Caracteres permitidos en un número de teléfono externo antes de normalizar
+_PHONE_ALLOWED = _re.compile(r"[^0-9+\-\s().]+")
+# Solo dígitos (y + inicial) tras la normalización
+_PHONE_DIGITS = _re.compile(r"^\+?[0-9]{6,20}$")
+
+
+def _normalize_external_number(target: str) -> str | None:
+    """
+    Normaliza un número de teléfono externo eliminando espacios, guiones y paréntesis.
+    Preserva el '+' inicial si existe (formato E.164).
+
+    Retorna el número normalizado, o None si el resultado no es válido
+    (menos de 6 dígitos o contiene caracteres ilegales).
+
+    Ejemplos:
+        "+34 612-34 56 78" → "+34612345678"
+        "912 34 56 78"    → "912345678"
+        "abc"             → None
+        "123"             → None  (demasiado corto)
+    """
+    # Conservar el '+' inicial si existe
+    stripped = target.strip()
+    has_plus = stripped.startswith("+")
+    # Quitar todo excepto dígitos
+    digits_only = _re.sub(r"[^0-9]", "", stripped)
+    normalized = ("+" if has_plus else "") + digits_only
+    if _PHONE_DIGITS.match(normalized):
+        return normalized
+    return None
+
+
+async def _is_internal_extension(empresa_id: int, target: str) -> bool:
+    """
+    Determina si `target` es una extensión interna configurada para la empresa.
+
+    Estrategia (en orden de coste):
+    1. Si target tiene más de 5 dígitos → casi seguro es un número externo.
+    2. Consulta tabla local `yeastar_extensions` (empresa_id + extension_number).
+    3. Si la tabla no tiene registros → fallback: si tiene ≤ 5 dígitos lo trata como interno.
+
+    Retorna True si es interna, False si es un número externo.
+    """
+    target_clean = target.strip()
+
+    # Heurística rápida: números con más de 5 dígitos puros son casi siempre externos
+    digits_only = _re.sub(r"[^0-9]", "", target_clean)
+    if len(digits_only) > 5:
+        return False
+
+    # Consulta Supabase tabla yeastar_extensions
+    if supabase:
+        try:
+            res = await sb_query(
+                lambda eid=empresa_id, t=target_clean: supabase.table("yeastar_extensions")
+                .select("id")
+                .eq("empresa_id", eid)
+                .eq("extension_number", t)
+                .limit(1)
+                .execute()
+            )
+            if res and res.data:
+                return True
+            # Si la tabla tiene algún registro pero no encontró este target → externo
+            count_res = await sb_query(
+                lambda eid=empresa_id: supabase.table("yeastar_extensions")
+                .select("id", count="exact")
+                .eq("empresa_id", eid)
+                .limit(1)
+                .execute()
+            )
+            if count_res and (count_res.count or 0) > 0:
+                return False
+        except Exception as exc:
+            logger.debug("[transfer] _is_internal_extension lookup error: %s", exc)
+
+    # Fallback sin BD: ≤ 5 dígitos sin '+' se trata como extensión interna
+    return not target_clean.startswith("+") and len(digits_only) <= 5
+
+
 def _resolve_target_extension(
     datos_extra: dict,
     explicit: str | None = None,
 ) -> str:
+    """
+    Resuelve el destino de transferencia desde múltiples fuentes en orden de prioridad.
+    Acepta extensiones internas y números externos.
+    """
     ext = (
         (explicit or "").strip()
         or (os.getenv("YEASTAR_HUMAN_TRANSFER_EXTENSION") or "").strip()
@@ -1064,7 +1153,7 @@ def _resolve_target_extension(
     if not ext:
         raise HTTPException(
             status_code=400,
-            detail="Extensión de transferencia no configurada (YEASTAR_HUMAN_TRANSFER_EXTENSION).",
+            detail="Extensión/número de transferencia no configurado (YEASTAR_HUMAN_TRANSFER_EXTENSION).",
         )
     return ext
 
@@ -1077,8 +1166,15 @@ async def _execute_yeastar_transfer(
     call_id: str | None = None,
     target_extension: str | None = None,
     yeastar_call_id: str | None = None,
+    outbound_prefix: str | None = None,
 ) -> dict:
-    """Lógica compartida de transferencia multi-tenant vía Yeastar P-Series."""
+    """Lógica compartida de transferencia multi-tenant vía Yeastar.
+
+    Soporta tanto extensiones internas como números de teléfono externos:
+    - Extensión interna: se comprueba su estado antes de transferir.
+    - Número externo: se salta el check de estado y se transfiere directamente
+      confiando en el dial plan / ruta saliente del Yeastar del cliente.
+    """
     if not supabase:
         raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
 
@@ -1118,9 +1214,57 @@ async def _execute_yeastar_transfer(
         )
     resolved_extension = _resolve_target_extension(datos_extra, target_extension)
 
+    # ── Clasificar destino: interno vs externo ─────────────────────────────
+    is_internal = await _is_internal_extension(empresa_id, resolved_extension)
+    transfer_type = "internal" if is_internal else "external"
+    logger.info(
+        "[transfer] empresa=%s survey=%s destino='%s' tipo=%s",
+        empresa_id, survey_id, resolved_extension, transfer_type,
+    )
+
+    if not is_internal:
+        # Validar número externo antes de enviarlo a Yeastar
+        normalized = _normalize_external_number(resolved_extension)
+        if normalized is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Número externo '{resolved_extension}' inválido. "
+                    "Usa formato nacional (ej. '612345678') o E.164 (ej. '+34612345678'). "
+                    "Mínimo 6 dígitos."
+                ),
+            )
+        resolved_extension = normalized
+
+    # Prefijo de ruta saliente: parámetro explícito > config de empresa > vacío
+    effective_prefix = outbound_prefix if outbound_prefix is not None else ""
+    if not is_internal and not effective_prefix:
+        # Intentar leer outbound_prefix de la config de Yeastar de la empresa
+        effective_prefix = str(emp.get("outbound_prefix") or "").strip()
+
     try:
         async with _yeastar_client_from_config(emp) as client:
-            await client.transfer_call(resolved_channel_id, resolved_extension)
+            if is_internal:
+                # Extensión interna: verificar estado antes de transferir
+                ext_status = await client.get_extension_status(resolved_extension)
+                if str(ext_status).strip().lower() not in {"idle", "available"}:
+                    logger.info(
+                        "[transfer] Extensión interna %s no disponible (status=%s) empresa=%s",
+                        resolved_extension, ext_status, empresa_id,
+                    )
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "message": f"Extensión ocupada ({ext_status})",
+                            "status": ext_status,
+                            "transfer_type": "internal",
+                        },
+                    )
+            await client.transfer_call(
+                resolved_channel_id,
+                resolved_extension,
+                outbound_prefix=effective_prefix,
+            )
     except Exception as exc:
         logger.error(
             f"[transfer] Fallo Yeastar empresa={empresa_id} survey={survey_id} "
@@ -1133,13 +1277,15 @@ async def _execute_yeastar_transfer(
         **datos_extra,
         "transfer_room": room_name,
         "transfer_extension": resolved_extension,
+        "transfer_type": transfer_type,
         "yeastar_callid": str(resolved_call_id),
     }
+    dest_label = f"ext {resolved_extension}" if is_internal else f"número externo {resolved_extension}"
     await sb_query(
-        lambda sid=survey_id, extra=merged_extra, m=motivo_text, ext=resolved_extension: supabase.table("encuestas")
+        lambda sid=survey_id, extra=merged_extra, m=motivo_text, dl=dest_label: supabase.table("encuestas")
         .update({
             "status": "transferred",
-            "comentarios": f"Transferido a ext {ext}: {m}",
+            "comentarios": f"Transferido a {dl}: {m}",
             "datos_extra": extra,
         })
         .eq("id", sid)
@@ -1147,8 +1293,8 @@ async def _execute_yeastar_transfer(
     )
 
     logger.info(
-        f"✅ [transfer] empresa={empresa_id} survey={survey_id} "
-        f"call_id={resolved_call_id} → ext {resolved_extension} room={room_name}"
+        "✅ [transfer] empresa=%s survey=%s call_id=%s → %s (%s) room=%s",
+        empresa_id, survey_id, resolved_call_id, resolved_extension, transfer_type, room_name,
     )
     return {
         "status": "ok",
@@ -1158,15 +1304,21 @@ async def _execute_yeastar_transfer(
         "room_name": room_name,
         "call_id": str(resolved_call_id),
         "target_extension": resolved_extension,
+        "transfer_type": transfer_type,
     }
 
 
 @router.post("/api/calls/transfer")
 async def transfer_call_to_human(payload: CallTransferRequest):
     """
-    Transfiere una llamada a extensión humana tras comprobar que está Idle en Yeastar.
+    Transfiere una llamada a extensión interna o número externo vía Yeastar.
 
-    Body: ``room_name``, ``empresa_id``, ``call_id``, ``extension`` (default 1000).
+    - Extensión interna (ej. '1001'): verifica que esté idle antes de transferir.
+      Si está ocupada devuelve 409.
+    - Número externo (ej. '612345678', '+34912345678'): salta el check de estado
+      y transfiere directamente confiando en el dial plan del Yeastar del cliente.
+
+    Body: room_name, empresa_id, call_id, extension, [survey_id], [motivo], [outbound_prefix].
     """
     if not supabase:
         raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
@@ -1197,6 +1349,7 @@ async def transfer_call_to_human(payload: CallTransferRequest):
             or datos_extra.get("yeastar_call_id")
             or call_id
         ).strip()
+
     channel_id = str(datos_extra.get("yeastar_channel_id") or "").strip()
     if not call_id:
         raise HTTPException(status_code=400, detail="call_id es obligatorio")
@@ -1204,9 +1357,8 @@ async def transfer_call_to_human(payload: CallTransferRequest):
         raise HTTPException(
             status_code=409,
             detail=(
-                "La llamada no tiene call_id de Yeastar. Solo se puede transferir a una "
-                "extension interna si la llamada ha pasado por Yeastar y se ha recibido "
-                "el webhook 30011."
+                "La llamada no tiene call_id de Yeastar. La llamada debe haber pasado "
+                "por Yeastar y haberse recibido el webhook 30011 para poder transferir."
             ),
         )
     if not channel_id:
@@ -1214,87 +1366,103 @@ async def transfer_call_to_human(payload: CallTransferRequest):
             status_code=409,
             detail=(
                 "La llamada no tiene channel_id de Yeastar. Comprueba que el webhook "
-                "30011 Call State Changed esta activo antes de intentar transferir."
+                "30011 Call State Changed está activo antes de intentar transferir."
             ),
         )
 
-    extension = (payload.extension or "1000").strip()
+    target = (payload.extension or "1000").strip()
     empresa_id = int(payload.empresa_id)
+    outbound_prefix = payload.outbound_prefix  # puede ser None
+
+    # ── Clasificar destino ─────────────────────────────────────────────────
+    is_internal = await _is_internal_extension(empresa_id, target)
+    transfer_type = "internal" if is_internal else "external"
+
+    if not is_internal:
+        # Validar número externo
+        normalized = _normalize_external_number(target)
+        if normalized is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Número externo '{target}' inválido. "
+                    "Usa formato nacional (ej. '612345678') o E.164 (ej. '+34612345678'). "
+                    "Mínimo 6 dígitos."
+                ),
+            )
+        target = normalized
+
+    logger.info(
+        "[transfer] empresa=%s room=%s destino='%s' tipo=%s",
+        empresa_id, room_name, target, transfer_type,
+    )
 
     config = await _load_yeastar_tenant_config(empresa_id)
 
+    # Prefijo de ruta saliente para números externos
+    effective_prefix = outbound_prefix if outbound_prefix is not None else ""
+    if not is_internal and not effective_prefix:
+        effective_prefix = str(config.get("outbound_prefix") or "").strip()
+
+    ext_status: str = "N/A"
     try:
         async with _yeastar_client_from_config(config) as yeastar_client:
-            ext_status = await yeastar_client.get_extension_status(extension)
-            if str(ext_status).strip().lower() not in {"idle", "available"}:
-                logger.info(
-                    f"[transfer] ExtensiÃ³n {extension} no disponible (status={ext_status}) "
-                    f"empresa={empresa_id} room={room_name}"
-                )
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "message": f"ExtensiÃ³n ocupada ({ext_status})",
-                        "status": ext_status,
-                    },
-                )
-
-            await yeastar_client.transfer_call(channel_id, extension)
+            if is_internal:
+                ext_status = await yeastar_client.get_extension_status(target)
+                if str(ext_status).strip().lower() not in {"idle", "available"}:
+                    logger.info(
+                        "[transfer] Extensión interna %s no disponible (status=%s) empresa=%s room=%s",
+                        target, ext_status, empresa_id, room_name,
+                    )
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "message": f"Extensión ocupada ({ext_status})",
+                            "status": ext_status,
+                            "transfer_type": "internal",
+                        },
+                    )
+            await yeastar_client.transfer_call(
+                channel_id,
+                target,
+                outbound_prefix=effective_prefix,
+            )
     except HTTPException:
         raise
     except Exception as exc:
         logger.error(
-            f"[transfer] Error Yeastar empresa={empresa_id} call_id={call_id}: {exc}"
+            "[transfer] Error Yeastar empresa=%s call_id=%s destino=%s (%s): %s",
+            empresa_id, call_id, target, transfer_type, exc,
         )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    if False:
-            logger.info(
-                f"[transfer] Extensión {extension} no disponible (status={ext_status}) "
-                f"empresa={empresa_id} room={room_name}"
-            )
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "message": f"Extensión ocupada ({ext_status})",
-                    "status": ext_status,
-                },
-            )
-
     if survey_id:
         motivo_text = (payload.motivo or "Transferencia a agente humano").strip()
+        dest_label = f"ext {target}" if is_internal else f"número externo {target}"
         try:
-            enc_res = await sb_query(
-                lambda sid=survey_id: supabase.table("encuestas")
-                .select("datos_extra")
-                .eq("id", sid)
-                .limit(1)
-                .execute()
-            )
-            datos_extra = _parse_datos_extra(
-                enc_res.data[0].get("datos_extra") if enc_res.data else {}
-            )
             merged_extra = {
                 **datos_extra,
                 "transfer_room": room_name,
-                "transfer_extension": extension,
+                "transfer_extension": target,
+                "transfer_type": transfer_type,
                 "yeastar_callid": call_id,
             }
             await sb_query(
-                lambda sid=survey_id, extra=merged_extra, m=motivo_text, ext=extension: supabase.table("encuestas")
+                lambda sid=survey_id, extra=merged_extra, m=motivo_text, dl=dest_label: supabase.table("encuestas")
                 .update({
                     "status": "transferred",
-                    "comentarios": f"Transferido a ext {ext}: {m}",
+                    "comentarios": f"Transferido a {dl}: {m}",
                     "datos_extra": extra,
                 })
                 .eq("id", sid)
                 .execute()
             )
         except Exception as db_err:
-            logger.warning(f"[transfer] No se pudo actualizar encuesta {survey_id}: {db_err}")
+            logger.warning("[transfer] No se pudo actualizar encuesta %s: %s", survey_id, db_err)
 
     logger.info(
-        f"✅ [transfer] empresa={empresa_id} call_id={call_id} → ext {extension} room={room_name}"
+        "✅ [transfer] empresa=%s call_id=%s → %s (%s) room=%s",
+        empresa_id, call_id, target, transfer_type, room_name,
     )
     return {
         "status": "ok",
@@ -1302,8 +1470,9 @@ async def transfer_call_to_human(payload: CallTransferRequest):
         "empresa_id": empresa_id,
         "room_name": room_name,
         "call_id": call_id,
-        "extension": extension,
-        "extension_status": ext_status,
+        "target_extension": target,
+        "transfer_type": transfer_type,
+        "extension_status": ext_status if is_internal else "skipped_external",
     }
 
 
@@ -1338,7 +1507,10 @@ async def get_call_transfer_briefing(
 
 @router.post("/api/telephony/transfer")
 async def transfer_call_to_human_legacy(payload: TelephonyTransferRequest):
-    """Alias legacy; prefiere call_id de Yeastar si está en BD."""
+    """
+    Alias legacy de transferencia; prefiere call_id de Yeastar si está en BD.
+    Acepta extensiones internas y números de teléfono externos.
+    """
     return await _execute_yeastar_transfer(
         room_name=payload.room_name.strip(),
         survey_id=payload.survey_id,
@@ -1346,6 +1518,7 @@ async def transfer_call_to_human_legacy(payload: TelephonyTransferRequest):
         call_id=None,
         target_extension=payload.target_extension,
         yeastar_call_id=payload.yeastar_call_id,
+        outbound_prefix=payload.outbound_prefix,
     )
 
 # Hardening: IP Whitelist for Yeastar Webhooks (example placeholder)
