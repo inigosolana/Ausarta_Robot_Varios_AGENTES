@@ -60,6 +60,24 @@ async def close_redis() -> None:
 # Reemplaza los sets en memoria (_empresas_en_llamada,
 # _processing_rooms) por locks atómicos en Redis con
 # expiración automática para evitar deadlocks.
+#
+# TODO escalado horizontal:
+#   acquire_lock / release_lock son seguros para múltiples procesos/réplicas
+#   porque usan Redis como coordinador central (SET NX atómico).
+#   SIN EMBARGO, si en algún punto del código se reutilizara un lock o set
+#   en memoria (dict, set de Python), ese mecanismo es ÚNICAMENTE seguro
+#   con una sola instancia del backend. Con réplicas, cada pod tendría su
+#   propio dict/set → descoordinación y condiciones de carrera.
+#
+#   Para desplegar réplicas horizontales de ausarta-backend:
+#     1. Eliminar cualquier fallback a dict/set en memoria para coordinación.
+#     2. Usar exclusivamente acquire_lock() / release_lock() de este módulo.
+#     3. Revisar también _processing_rooms (agent_lifecycle.py) y cualquier
+#        variable global de estado que no sea Redis.
+#     4. Configurar Redis con persistencia AOF o réplica para evitar
+#        pérdida de locks en reinicios.
+#     5. Evaluar uso de Redlock (redis-py-lock) para garantías más fuertes
+#        en entornos con partición de red.
 # ──────────────────────────────────────────────
 
 LOCK_PREFIX = "ausarta:lock:"

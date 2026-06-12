@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart3, Globe, Cpu, Mic, Volume2, AlertTriangle, XCircle, Zap, Terminal, RefreshCw } from 'lucide-react';
+import { BarChart3, Globe, Cpu, Mic, Volume2, AlertTriangle, XCircle, Zap, Terminal, RefreshCw, Phone, Clock, Coins } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
+import { apiFetch } from '../lib/apiFetch';
 
 const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
 
@@ -10,6 +11,8 @@ const UsageView: React.FC = () => {
     const { t } = useTranslation();
     const [integrations, setIntegrations] = useState<any[]>([]);
     const [usage, setUsage] = useState<any>(null);
+    const [miConsumo, setMiConsumo] = useState<any>(null);
+    const [isMiConsumoLoading, setIsMiConsumoLoading] = useState(true);
     const [alerts, setAlerts] = useState<any[]>([]);
     const [liveLimits, setLiveLimits] = useState<any>(null);
     const [sipLogs, setSipLogs] = useState<string[]>([]);
@@ -35,6 +38,18 @@ const UsageView: React.FC = () => {
         }
     };
 
+    const loadMiConsumo = async () => {
+        try {
+            setIsMiConsumoLoading(true);
+            const res = await apiFetch('/api/usage/mi-consumo');
+            if (res.ok) setMiConsumo(await res.json());
+        } catch (e) {
+            console.error('Error loading mi-consumo:', e);
+        } finally {
+            setIsMiConsumoLoading(false);
+        }
+    };
+
     const loadData = async () => {
         try {
             setIsLoading(true);
@@ -55,11 +70,10 @@ const UsageView: React.FC = () => {
             if (usageRes.ok) setUsage(await usageRes.json());
             if (limitsRes.ok) setLiveLimits(await limitsRes.json());
 
-            // Fetch alerts specifically for this view too (or pass from props, but independent fetch is fine)
             const alertsRes = await fetch(`${API_URL}/alerts${queryParams}`);
             if (alertsRes.ok) setAlerts(await alertsRes.json());
 
-            await loadSipLogs();
+            await Promise.all([loadSipLogs(), loadMiConsumo()]);
 
         } catch (error) {
             console.error('Error loading usage data:', error);
@@ -89,6 +103,87 @@ const UsageView: React.FC = () => {
                 </div>
                 <div className="absolute -right-20 -top-20 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl"></div>
                 <div className="absolute -left-20 -bottom-20 w-64 h-64 bg-purple-500/5 rounded-full blur-3xl"></div>
+            </div>
+
+            {/* ── Mi consumo del mes ────────────────────────────────────────── */}
+            <div className="backdrop-blur-md bg-white/70 dark:bg-gray-900/70 p-8 rounded-3xl border border-white/20 dark:border-gray-800/50 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)]">
+                <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-xl font-bold flex items-center gap-3">
+                        <div className="p-2 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-xl">
+                            <Coins size={22} />
+                        </div>
+                        {t('My Monthly Usage', 'Mi consumo del mes')}
+                        {miConsumo?.period && (
+                            <span className="text-xs font-normal text-gray-400 dark:text-gray-500 ml-2">
+                                ({miConsumo.period})
+                            </span>
+                        )}
+                    </h3>
+                    <button
+                        onClick={loadMiConsumo}
+                        disabled={isMiConsumoLoading}
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-black uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-green-500/25 disabled:opacity-50"
+                    >
+                        <RefreshCw size={14} className={isMiConsumoLoading ? 'animate-spin' : ''} />
+                        {t('Refresh', 'Actualizar')}
+                    </button>
+                </div>
+
+                {isMiConsumoLoading ? (
+                    <div className="text-center py-8 text-gray-400">{t('Loading...', 'Cargando...')}</div>
+                ) : miConsumo ? (
+                    <>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                            {[
+                                { label: t('Total Calls', 'Total llamadas'), value: miConsumo.total_calls ?? 0, icon: Phone, color: 'blue' },
+                                { label: t('Completed', 'Completadas'), value: miConsumo.completed_calls ?? 0, icon: Phone, color: 'green' },
+                                { label: t('Total Minutes', 'Minutos totales'), value: `${miConsumo.total_minutes ?? 0}`, icon: Clock, color: 'purple' },
+                                { label: t('Est. Cost (€)', 'Coste est. (€)'), value: `€${miConsumo.estimated_cost_eur ?? 0}`, icon: Coins, color: 'orange' },
+                            ].map((stat, i) => (
+                                <div key={i} className="p-5 rounded-2xl bg-gray-50/60 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800 flex flex-col items-center gap-2">
+                                    <div className={`p-2 bg-${stat.color}-100 dark:bg-${stat.color}-900/30 text-${stat.color}-600 dark:text-${stat.color}-400 rounded-xl`}>
+                                        <stat.icon size={18} />
+                                    </div>
+                                    <div className="text-2xl font-black text-gray-900 dark:text-white">{stat.value}</div>
+                                    <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">{stat.label}</div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {miConsumo.per_model_stats && miConsumo.per_model_stats.length > 0 && (
+                            <div className="overflow-x-auto rounded-2xl border border-gray-100 dark:border-gray-800">
+                                <table className="w-full text-left text-sm">
+                                    <thead>
+                                        <tr className="text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-800/40">
+                                            <th className="px-5 py-3">{t('Model', 'Modelo')}</th>
+                                            <th className="px-5 py-3">{t('Calls', 'Llamadas')}</th>
+                                            <th className="px-5 py-3">{t('Minutes', 'Minutos')}</th>
+                                            <th className="px-5 py-3">{t('Tokens (est.)', 'Tokens (est.)')}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100/50 dark:divide-gray-800/50">
+                                        {miConsumo.per_model_stats.map((s: any, idx: number) => (
+                                            <tr key={idx} className="hover:bg-gray-50/50 transition-colors">
+                                                <td className="px-5 py-3 font-bold text-gray-900 dark:text-white">{s.llm_model}</td>
+                                                <td className="px-5 py-3 text-gray-600 dark:text-gray-400 font-mono">{s.calls}</td>
+                                                <td className="px-5 py-3 text-gray-600 dark:text-gray-400 font-mono">{Math.round(s.seconds / 60)}</td>
+                                                <td className="px-5 py-3 text-blue-600 dark:text-blue-400 font-mono font-bold">{s.tokens.toLocaleString()}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {miConsumo.cost_note && (
+                            <p className="mt-4 text-xs text-gray-400 dark:text-gray-500 italic">
+                                ℹ️ {miConsumo.cost_note}
+                            </p>
+                        )}
+                    </>
+                ) : (
+                    <div className="text-center py-8 text-gray-400">{t('No data available', 'Sin datos disponibles')}</div>
+                )}
             </div>
 
             {/* API Status Section */}

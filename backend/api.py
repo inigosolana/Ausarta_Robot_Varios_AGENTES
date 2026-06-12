@@ -33,16 +33,24 @@ from routers.api_credits import router as api_credits_router
 from routers.monitoring import router as monitoring_router
 from routers.knowledge import router as knowledge_router
 from routers.contacts import router as contacts_router
+from routers.usage import router as usage_router
 # --- CONFIGURACIÓN DE LOGS ---
-# Configurado antes de load_dotenv para capturar cualquier problema de arranque
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("api.log", mode='a', encoding='utf-8'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+# Logs en JSON estructurado (timestamp, level, logger, msg, empresa_id, request_id).
+# LOG_FORMAT=plain desactiva JSON (útil para desarrollo local).
+# Compatible con el FileHandler en api.log.
+_LOG_FORMAT = os.environ.get("LOG_FORMAT", "json").lower()
+if _LOG_FORMAT == "json":
+    from services.json_logger import configure_json_logging
+    configure_json_logging(level=logging.INFO, log_file="api.log", force=True)
+else:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler("api.log", mode="a", encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
 logger = logging.getLogger("api-backend")
 
 load_dotenv()
@@ -179,9 +187,82 @@ app.include_router(api_credits_router)
 app.include_router(monitoring_router)
 app.include_router(knowledge_router)
 app.include_router(contacts_router)
+app.include_router(usage_router)
 
 # --- ENDPOINTS BASE ---
 
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "Ausarta Backend v2", "database": "Supabase"}
+
+
+@app.get("/health", tags=["health"])
+async def health_check():
+    """
+    Health check por dependencia.
+
+    Comprueba de forma independiente: Supabase, Redis, ARQ pool y LiveKit.
+    Devuelve 200 si todo OK, 503 si alguna dependencia crítica está DOWN.
+
+    Diseñado para ser consumido por balanceadores de carga y Portainer.
+    No requiere autenticación.
+    """
+    import asyncio as _asyncio
+    from services.supabase_service import supabase
+    from services.redis_service import get_redis
+    from services.queue_service import get_arq_pool
+    from services.livekit_service import lkapi
+
+    deps: dict[str, dict] = {}
+
+    # ── Supabase ──────────────────────────────────────────────────────────
+    try:
+        if not supabase:
+            raise RuntimeError("cliente no inicializado")
+        # Query trivial para verificar conectividad real
+        await _asyncio.wait_for(
+            __import__("asyncio").get_event_loop().run_in_executor(
+                None,
+                lambda: supabase.table("empresas").select("id").limit(1).execute(),
+            ),
+            timeout=5,
+        )
+        deps["supabase"] = {"status": "ok"}
+    except Exception as exc:
+        deps["supabase"] = {"status": "down", "detail": str(exc)[:120]}
+
+    # ── Redis ─────────────────────────────────────────────────────────────
+    try:
+        redis = await _asyncio.wait_for(get_redis(), timeout=3)
+        await _asyncio.wait_for(redis.ping(), timeout=3)
+        deps["redis"] = {"status": "ok"}
+    except Exception as exc:
+        deps["redis"] = {"status": "down", "detail": str(exc)[:120]}
+
+    # ── ARQ pool ──────────────────────────────────────────────────────────
+    try:
+        pool = await _asyncio.wait_for(get_arq_pool(), timeout=3)
+        await _asyncio.wait_for(pool.ping(), timeout=3)
+        deps["arq"] = {"status": "ok"}
+    except Exception as exc:
+        deps["arq"] = {"status": "degraded", "detail": str(exc)[:120]}
+
+    # ── LiveKit (solo verifica credenciales configuradas, no hace llamada) ─
+    lk_url = os.getenv("LIVEKIT_URL", "")
+    lk_key = os.getenv("LIVEKIT_API_KEY", "")
+    if lk_url and lk_key and lkapi:
+        deps["livekit"] = {"status": "ok", "note": "credenciales configuradas"}
+    else:
+        deps["livekit"] = {"status": "degraded", "note": "credenciales no configuradas o cliente no disponible"}
+
+    # ── Resultado global ──────────────────────────────────────────────────
+    critical_down = any(
+        deps[k]["status"] == "down" for k in ("supabase", "redis")
+    )
+    overall = "down" if critical_down else (
+        "degraded" if any(v["status"] == "degraded" for v in deps.values()) else "ok"
+    )
+
+    payload = {"status": overall, "dependencies": deps}
+    status_code = 503 if critical_down else 200
+    return JSONResponse(content=payload, status_code=status_code)

@@ -1,0 +1,71 @@
+name: CI — Backend Tests
+
+on:
+  push:
+    branches: ["main", "dev"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  pytest:
+    name: pytest (Python 3.11)
+    runs-on: ubuntu-latest
+
+    env:
+      # Variables mínimas para que la app arranque en modo test
+      BRIDGE_SERVER_URL_INTERNAL: "http://backend:8001"
+      ENVIRONMENT: "development"
+      SUPABASE_URL: "https://placeholder.supabase.co"
+      SUPABASE_KEY: "placeholder_key"
+      SUPABASE_SERVICE_KEY: "placeholder_service_key"
+      SUPABASE_JWT_SECRET: "placeholder_jwt_secret_min_32_chars_padding"
+      REDIS_URL: "redis://localhost:6379/0"
+      OPENAI_API_KEY: ""           # vacío → tests de cache miss no llaman a OpenAI real
+      LIVEKIT_URL: ""
+      LIVEKIT_API_KEY: ""
+      LIVEKIT_API_SECRET: ""
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
+
+      - name: Run tests
+        working-directory: backend
+        run: |
+          pytest tests/ -v --tb=short -x \
+            --asyncio-mode=auto \
+            --ignore=tests/test_api.py
+        # test_api.py requiere Supabase real → excluido en CI básico
+        # Para incluirlo, configura SUPABASE_URL/KEY como secrets en el repo
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: backend/.pytest_cache/
+          retention-days: 7
