@@ -134,14 +134,14 @@ Aplicar `backend/supabase/migrations/20260613_yeastar_health.sql`:
 
 ---
 
-## Telegram
+## Telegram (opcional)
 
-Alertas enviadas vía `send_telegram_alert` (mismo canal que otras alertas operativas):
+Si `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID` están configurados, se envían alertas:
 
 - Caída: `🔴 Yeastar de {empresa} no responde (N fallos) — X campaña(s) pausada(s)`
 - Recuperación: `✅ Yeastar de {empresa} recuperado, X campaña(s) reanudada(s)`
 
-Requiere `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID` configurados.
+**Sin Telegram configurado el health-check funciona igual** (pausa/reanuda campañas); solo se omiten las notificaciones.
 
 ---
 

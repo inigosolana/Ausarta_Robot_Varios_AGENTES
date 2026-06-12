@@ -13,7 +13,7 @@ async def send_telegram_alert(message: str, parse_mode: str = "HTML") -> bool:
     chat_id = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
 
     if not bot_token or not chat_id:
-        logger.warning("⚠️ [telegram] TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID no configurados.")
+        logger.debug("[telegram] TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID no configurados — omitiendo envío.")
         return False
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"

@@ -76,11 +76,16 @@ async def _get_empresa_nombre(empresa_id: int) -> str:
 
 
 async def _send_telegram(message: str) -> None:
+    """Telegram opcional: si no hay TELEGRAM_BOT_TOKEN/CHAT_ID, no hace nada."""
+    import os
+    if not (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip() or not (os.getenv("TELEGRAM_CHAT_ID") or "").strip():
+        logger.debug("[yeastar_health] Telegram no configurado — alerta omitida: %s", message[:80])
+        return
     try:
         from services.telegram_service import send_telegram_alert
         await send_telegram_alert(message)
     except Exception as exc:
-        logger.warning("[yeastar_health] No se pudo enviar Telegram: %s", exc)
+        logger.debug("[yeastar_health] No se pudo enviar Telegram: %s", exc)
 
 
 async def _pause_campaigns_for_health(empresa_id: int, now_iso: str) -> int:
