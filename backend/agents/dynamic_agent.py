@@ -1305,6 +1305,14 @@ async def entrypoint(ctx: JobContext):
                 f"--- 🏁 FIN DE SESIÓN DUPLICADA (Job: {job_id}) - Saliendo sin reportar datos ---"
             )
 
+# Re-exports legacy: agent.py, config_loader.py y tests importan desde dynamic_agent.
+from agents.text_utils import (  # noqa: E402
+    _detect_language,
+    _normalize_goodbye_message,
+    anonymize_text,
+)
+from utils.call_loader import enrich_agent_config_with_context as _enrich_agent_config_with_context  # noqa: E402
+
 if __name__ == "__main__":
     logger.info(
         "🤖 Arrancando worker LiveKit | agent_name=%s | livekit_url=%s | bridge=%s",
