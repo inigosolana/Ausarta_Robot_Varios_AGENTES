@@ -9,6 +9,7 @@ import ResultsView from './ResultsView';
 import { TestCallModal } from '../components/TestCallModal';
 import WorkflowEditor from '../components/WorkflowEditor';
 import { AgentKnowledgeDocs } from '../components/agents/AgentKnowledgeDocs';
+import { VoiceSelect } from '../components/agents/VoiceSelect';
 import { Link } from 'react-router-dom';
 import './agents.css';
 import { apiFetch } from '../lib/apiFetch';
@@ -467,48 +468,26 @@ const AgentFormView: React.FC<Props> = ({ agent, empresaName, onSave, onCancel }
                                     </div>
                                     <div className="flex-1">
                                         <label className="block text-xs font-medium text-purple-700 mb-1">{t('Select Voice', 'Seleccionar Voz')}</label>
-                                        <select
+                                        <VoiceSelect
                                             value={formData.voice_id || aiConfig.tts_voice}
-                                            onChange={(e) => {
-                                                const selectedVoice = e.target.value;
-                                                const isVozBuena = selectedVoice === 'd4db5fb9-f44b-4bd1-85fa-192e0f0d75f9';
-                                                
-                                                setAiConfig({ 
-                                                    ...aiConfig, 
+                                            languageFilter={aiConfig.language}
+                                            onChange={(selectedVoice, meta) => {
+                                                setAiConfig({
+                                                    ...aiConfig,
                                                     tts_voice: selectedVoice,
-                                                    tts_model: isVozBuena ? 'sonic-3' : 'sonic-multilingual'
+                                                    tts_model: meta?.tts_model || aiConfig.tts_model,
                                                 });
-                                                
-                                                setFormData({ 
-                                                    ...formData, 
+                                                setFormData({
+                                                    ...formData,
                                                     voice_id: selectedVoice,
-                                                    speaking_speed: isVozBuena ? 1.15 : formData.speaking_speed
+                                                    speaking_speed:
+                                                        meta?.speaking_speed !== undefined
+                                                            ? meta.speaking_speed
+                                                            : formData.speaking_speed,
                                                 });
                                             }}
                                             className="w-full bg-transparent border-none p-0 text-sm font-bold text-gray-800 focus:ring-0 cursor-pointer"
-                                        >
-                                            <optgroup label={t('Spanish', 'Español')}>
-                                                <option value={AUSARTA_FEMALE_VOICE_ID}>{t('Inés (España - Natural)', 'Inés (España - Natural)')}</option>
-                                                <option value="cefcb124-080b-4655-b31f-932f3ee743de">{t('Raquel (España - Suave)', 'Raquel (España - Suave)')}</option>
-                                                <option value="a2f12ebd-80df-4de7-83f3-809599135b1d">{t('Marta (España - Corporativa)', 'Marta (España - Corporativa)')}</option>
-                                                <option value="50074b01-9420-4bf5-905e-3a992665e717">{t('Alba (España - Narrativa)', 'Alba (España - Narrativa)')}</option>
-                                                <option value="692cd5ac-7140-49e5-950c-35cd0ebebc12">{t('Javier (España - Hombre)', 'Javier (España - Hombre)')}</option>
-                                                <option value="79a125e3-4d2a-4645-83e3-a618400030f0">{t('Carlos (España - Hombre serio)', 'Carlos (España - Hombre serio)')}</option>
-                                                <option value="d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9">{t('VOZ BUENA', 'VOZ BUENA')}</option>
-                                            </optgroup>
-                                            <optgroup label={t('Basque', 'Euskera')}>
-                                                <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">{t('Ane (Basque Female)', 'Ane (Chica Euskera)')}</option>
-                                                <option value="a62209c3-9f0a-4474-9b51-84b191593f49">{t('Ion (Basque Male)', 'Ion (Chico Euskera)')}</option>
-                                            </optgroup>
-                                            <optgroup label={t('Galician', 'Gallego')}>
-                                                <option value="96eade6e-d863-4f9a-8b08-5d7b74d1643b">{t('Sabela (Galician Female)', 'Sabela (Chica Gallega)')}</option>
-                                                <option value="4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2">{t('Brais (Galician Male)', 'Brais (Chico Gallego)')}</option>
-                                            </optgroup>
-                                            <optgroup label={t('English', 'Inglés')}>
-                                                <option value="62ae83ad-4f6a-430b-af41-a9bede9286ca">{t('Sarah (English Female)', 'Sarah (Chica Inglés)')}</option>
-                                                <option value="0ad65e7f-006c-47cf-bd31-52279d487913">{t('Mark (English Male)', 'Mark (Chico Inglés)')}</option>
-                                            </optgroup>
-                                        </select>
+                                        />
                                     </div>
                                 </div>
                             </div>

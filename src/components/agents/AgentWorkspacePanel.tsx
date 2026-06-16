@@ -12,6 +12,8 @@ import {
   getAgentCallDirection,
 } from '../../lib/agentVoiceOptions';
 import { AgentKnowledgeDocs } from './AgentKnowledgeDocs';
+import { VoiceSelect, getVoiceLabel } from './VoiceSelect';
+import { fetchVoices, type VoiceOption } from '../../lib/voicesApi';
 import { apiFetch } from '../../lib/apiFetch';
 
 type AgentRow = AgentConfig & { ai_config?: AIConfig; empresas?: Empresa };
@@ -74,6 +76,7 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
   const [kbAllowInternet, setKbAllowInternet] = useState(
     () => Boolean(agent.kb_allow_internet_search),
   );
+  const [voiceOptions, setVoiceOptions] = useState<VoiceOption[]>([]);
 
   const resetForm = useCallback(() => {
     setFormData(agentToForm(agent));
@@ -86,6 +89,12 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
     resetForm();
     setTab('knowledge');
   }, [agent.id, resetForm]);
+
+  useEffect(() => {
+    fetchVoices(aiConfig.language)
+      .then((data) => setVoiceOptions(data.voices))
+      .catch(() => setVoiceOptions([]));
+  }, [aiConfig.language]);
 
   useEffect(() => {
     if (!agent.id) return;
@@ -498,49 +507,29 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
               <div>
                 <label className={labelCls}>{t('Select Voice', 'Seleccionar voz')}</label>
                 {isEditing ? (
-                  <select
+                  <VoiceSelect
                     value={formData.voice_id || aiConfig.tts_voice}
-                    onChange={e => {
-                      const selectedVoice = e.target.value;
-                      const isVozBuena = selectedVoice === 'd4db5fb9-f44b-4bd1-85fa-192e0f0d75f9';
+                    languageFilter={aiConfig.language}
+                    className={inputCls}
+                    onChange={(selectedVoice, meta) => {
                       setAiConfig({
                         ...aiConfig,
                         tts_voice: selectedVoice,
-                        tts_model: isVozBuena ? 'sonic-3' : 'sonic-multilingual',
+                        tts_model: meta?.tts_model || aiConfig.tts_model,
                       });
                       setFormData({
                         ...formData,
                         voice_id: selectedVoice,
-                        speaking_speed: isVozBuena ? 1.15 : formData.speaking_speed,
+                        speaking_speed:
+                          meta?.speaking_speed !== undefined
+                            ? meta.speaking_speed
+                            : formData.speaking_speed,
                       });
                     }}
-                    className={inputCls}
-                  >
-                    <optgroup label="Español">
-                      <option value={AUSARTA_FEMALE_VOICE_ID}>Inés (España - Natural)</option>
-                      <option value="cefcb124-080b-4655-b31f-932f3ee743de">Raquel (España - Suave)</option>
-                      <option value="a2f12ebd-80df-4de7-83f3-809599135b1d">Marta (España - Corporativa)</option>
-                      <option value="50074b01-9420-4bf5-905e-3a992665e717">Alba (España - Narrativa)</option>
-                      <option value="692cd5ac-7140-49e5-950c-35cd0ebebc12">Javier (España - Hombre)</option>
-                      <option value="79a125e3-4d2a-4645-83e3-a618400030f0">Carlos (España - Hombre serio)</option>
-                      <option value="d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9">VOZ BUENA</option>
-                    </optgroup>
-                    <optgroup label="Euskera">
-                      <option value="99543693-cf6e-4e1d-9259-2e5cc9a0f76b">Ane (Chica Euskera)</option>
-                      <option value="a62209c3-9f0a-4474-9b51-84b191593f49">Ion (Chico Euskera)</option>
-                    </optgroup>
-                    <optgroup label="Gallego">
-                      <option value="96eade6e-d863-4f9a-8b08-5d7b74d1643b">Sabela (Chica Gallega)</option>
-                      <option value="4679c1e3-1fd5-45c0-a3a6-7f6e21ef82e2">Brais (Chico Gallego)</option>
-                    </optgroup>
-                    <optgroup label="Inglés">
-                      <option value="62ae83ad-4f6a-430b-af41-a9bede9286ca">Sarah (Chica Inglés)</option>
-                      <option value="0ad65e7f-006c-47cf-bd31-52279d487913">Mark (Chico Inglés)</option>
-                    </optgroup>
-                  </select>
+                  />
                 ) : (
-                  <p className="agent-mono text-xs text-gray-600 dark:text-gray-400">
-                    {agent.voice_id || agent.ai_config?.tts_voice || '—'}
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {getVoiceLabel(voiceOptions, agent.voice_id || agent.ai_config?.tts_voice)}
                   </p>
                 )}
               </div>

@@ -34,6 +34,7 @@ from routers.monitoring import router as monitoring_router
 from routers.knowledge import router as knowledge_router
 from routers.contacts import router as contacts_router
 from routers.usage import router as usage_router
+from routers.voices import router as voices_router
 # --- CONFIGURACIÓN DE LOGS ---
 # Logs en JSON estructurado (timestamp, level, logger, msg, empresa_id, request_id).
 # LOG_FORMAT=plain desactiva JSON (útil para desarrollo local).
@@ -188,6 +189,7 @@ app.include_router(monitoring_router)
 app.include_router(knowledge_router)
 app.include_router(contacts_router)
 app.include_router(usage_router)
+app.include_router(voices_router)
 
 # --- ENDPOINTS BASE ---
 
