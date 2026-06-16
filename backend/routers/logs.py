@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from fpdf import FPDF
 
-from services.auth import CurrentUser, get_current_user
+from services.auth import CurrentUser, get_current_user, require_superadmin
 from services.supabase_service import supabase
 
 router = APIRouter(tags=["logs"])
@@ -17,7 +17,10 @@ def _pdf_text(value: object) -> str:
 
 
 @router.get("/api/logs/sip")
-async def get_sip_logs(lines: int = 100):
+async def get_sip_logs(
+    lines: int = 100,
+    current_user: CurrentUser = Depends(require_superadmin),
+):
     try:
         log_path = "api.log"
         if os.path.exists(log_path):

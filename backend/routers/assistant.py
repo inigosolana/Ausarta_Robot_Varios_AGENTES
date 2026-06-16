@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 import os
 import json
@@ -6,14 +6,19 @@ import logging
 from openai import AsyncOpenAI
 from models.schemas import AssistantChatRequest
 from services.supabase_service import supabase
+from services.auth import CurrentUser, get_current_user
 
 logger = logging.getLogger("api-backend")
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 
 @router.post("/chat")
-async def assistant_chat(req: AssistantChatRequest):
+async def assistant_chat(
+    req: AssistantChatRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    effective_empresa_id = req.empresa_id if current_user.role == "superadmin" and req.empresa_id else current_user.empresa_id
     
     tools = [
         {
@@ -75,7 +80,7 @@ async def assistant_chat(req: AssistantChatRequest):
         }
     ]
 
-    system_prompt = f"Eres Ausarta Copilot, el asistente inteligente de la plataforma 'Ausarta Voice AI'. Eres un experto en la plataforma. Ahora mismo estás hablando con un usuario de la empresa {req.empresa_id}. Usa las herramientas a tu disposición si es necesario para responder o realizar acciones. Si no necesitas herramientas, simplemente responde de manera amigable y servicial. Puedes usar formato Markdown para presentar la información."
+    system_prompt = f"Eres Ausarta Copilot, el asistente inteligente de la plataforma 'Ausarta Voice AI'. Eres un experto en la plataforma. Ahora mismo estás hablando con un usuario de la empresa {effective_empresa_id}. Usa las herramientas a tu disposición si es necesario para responder o realizar acciones. Si no necesitas herramientas, simplemente responde de manera amigable y servicial. Puedes usar formato Markdown para presentar la información."
     
     try:
         response = await client.chat.completions.create(
@@ -105,8 +110,8 @@ async def assistant_chat(req: AssistantChatRequest):
                 tool_result = ""
                 
                 if function_name == "get_platform_stats":
-                    if req.empresa_id:
-                        res = supabase.table("encuestas").select("status").eq("empresa_id", req.empresa_id).execute()
+                    if effective_empresa_id:
+                        res = supabase.table("encuestas").select("status").eq("empresa_id", effective_empresa_id).execute()
                     else:
                         res = supabase.table("encuestas").select("status").execute()
                     
@@ -120,7 +125,7 @@ async def assistant_chat(req: AssistantChatRequest):
                 elif function_name == "create_voice_agent":
                     resolved_type = "ENCUESTA_NUMERICA"
                     insert_data = {
-                        "empresa_id": req.empresa_id,
+                        "empresa_id": effective_empresa_id,
                         "name": function_args.get("name"),
                         "use_case": function_args.get("use_case"),
                         "description": function_args.get("description"),

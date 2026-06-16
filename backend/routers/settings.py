@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from services.supabase_service import supabase, sb_query
 from models.schemas import AIPromptRequest
@@ -9,6 +9,7 @@ import logging
 import aiohttp
 import re
 from openai import AsyncOpenAI
+from services.auth import CurrentUser, require_admin
 
 logger = logging.getLogger("api-backend")
 
@@ -125,7 +126,10 @@ Salida:
 
 
 @router.post("/ai/company-context")
-async def generate_company_context(payload: dict):
+async def generate_company_context(
+    payload: dict,
+    current_user: CurrentUser = Depends(require_admin),
+):
     """
     Genera contexto de empresa usando información pública de internet.
     """
@@ -159,7 +163,10 @@ async def generate_company_context(payload: dict):
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @router.post("/ai/generate-prompt")
-async def generate_ai_prompt(req: AIPromptRequest):
+async def generate_ai_prompt(
+    req: AIPromptRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
     try:
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -230,7 +237,7 @@ IMPORTANTE: El usuario quiere ACTUALIZAR este agente con el nuevo request. Modif
 
 
 @router.get("/ai/config")
-async def get_ai_config():
+async def get_ai_config(current_user: CurrentUser = Depends(require_admin)):
     if not supabase: return {"llm_provider": "groq"}
     try:
         res = await sb_query(lambda: supabase.table("ai_config").select("*").limit(1).execute())
@@ -240,7 +247,10 @@ async def get_ai_config():
         return {}
 
 @router.post("/ai/config")
-async def update_ai_config(config: dict):
+async def update_ai_config(
+    config: dict,
+    current_user: CurrentUser = Depends(require_admin),
+):
     if not supabase: return {"error": "No DB"}
     try:
         curr = await sb_query(lambda: supabase.table("ai_config").select("id").limit(1).execute())
@@ -259,9 +269,12 @@ async def update_ai_config(config: dict):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.get("/settings")
-async def get_settings_alias():
-    return await get_ai_config()
+async def get_settings_alias(current_user: CurrentUser = Depends(require_admin)):
+    return await get_ai_config(current_user)
 
 @router.post("/settings")
-async def update_settings_alias(config: dict):
-    return await update_ai_config(config)
+async def update_settings_alias(
+    config: dict,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    return await update_ai_config(config, current_user)

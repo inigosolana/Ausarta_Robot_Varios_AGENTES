@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, Any
 from collections import defaultdict
 from services.supabase_service import supabase, get_ui_cache, sb_query
 from services.livekit_service import lkapi
+from services.auth import CurrentUser, get_current_user, require_admin
 import os
 import asyncio
 import aiohttp
@@ -15,14 +16,51 @@ logger = logging.getLogger("api-backend")
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
+
+def _resolve_empresa(user: CurrentUser, empresa_id_param: Optional[int]) -> Optional[int]:
+    if user.role == "superadmin":
+        return empresa_id_param
+    return int(user.empresa_id or 0)
+
+
+def _apply_tenant_filter(query, user: CurrentUser, empresa_id_param: Optional[int] = None):
+    eid = _resolve_empresa(user, empresa_id_param)
+    if eid:
+        return query.eq("empresa_id", eid)
+    return query
+
+
+async def _assert_room_allowed(room_name: str, user: CurrentUser) -> None:
+    if user.role == "superadmin":
+        return
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    import re
+
+    encuesta_match = re.search(r"encuesta_(\d+)", room_name)
+    if not encuesta_match:
+        raise HTTPException(status_code=403, detail="Sala no autorizada")
+    encuesta_id = int(encuesta_match.group(1))
+    res = await sb_query(
+        lambda eid=encuesta_id: supabase.table("encuestas")
+        .select("empresa_id")
+        .eq("id", eid)
+        .limit(1)
+        .execute()
+    )
+    if not res.data or int(res.data[0].get("empresa_id") or 0) != int(user.empresa_id or 0):
+        raise HTTPException(status_code=403, detail="Sala no autorizada")
+
 @router.get("/dashboard/stats")
 async def get_dashboard_stats(
     empresa_id: Optional[int] = None, 
     agent_id: Optional[int] = None, 
     campaign_id: Optional[int] = None,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
 ):
+    empresa_id = _resolve_empresa(current_user, empresa_id)
     if not supabase: return {"error": "Database not connected"}
     
     def fetch_total():
@@ -147,8 +185,10 @@ async def get_recent_calls(
     agent_id: Optional[int] = None, 
     campaign_id: Optional[int] = None,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
 ):
+    empresa_id = _resolve_empresa(current_user, empresa_id)
     if not supabase: return []
     try:
         def _fetch_recent():
@@ -166,12 +206,12 @@ async def get_recent_calls(
         empresas_map = {}
         agent_types_map = {}
         try:
-            emp_res = await sb_query(lambda: supabase.table("empresas").select("id, nombre").execute())
+            emp_res = await sb_query(lambda: _apply_tenant_filter(supabase.table("empresas").select("id, nombre"), current_user).execute())
             empresas_map = {e["id"]: e.get("nombre", "—") for e in (emp_res.data or [])}
         except Exception as e:
             logger.warning(f"⚠️ [dashboard] No se pudo cargar mapa de empresas: {e}")
         try:
-            agents_res = await sb_query(lambda: supabase.table("agent_config").select("id, tipo_resultados, name").execute())
+            agents_res = await sb_query(lambda: _apply_tenant_filter(supabase.table("agent_config").select("id, tipo_resultados, name"), current_user).execute())
             agent_types_map = {str(a["id"]): {"tipo": a.get("tipo_resultados"), "name": a.get("name")} for a in (agents_res.data or [])}
         except Exception as e:
             logger.warning(f"⚠️ [dashboard] No se pudo cargar mapa de agentes: {e}")
@@ -208,7 +248,8 @@ async def get_recent_calls(
 async def get_top_performers(
     empresa_id: Optional[int] = None,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Devuelve la campaña y agente más exitosos por tasa de completadas."""
     if not supabase:
@@ -216,6 +257,7 @@ async def get_top_performers(
     try:
         cols = "campaign_id, campaign_name, agent_id, status"
         q = supabase.table("encuestas").select(cols)
+        empresa_id = _resolve_empresa(current_user, empresa_id)
         if empresa_id:
             q = q.eq("empresa_id", empresa_id)
         if start_date:
@@ -260,7 +302,7 @@ async def get_top_performers(
         best_agent_rate = -1
         agent_names = {}
         try:
-            ag_res = supabase.table("agent_config").select("id, name").execute()
+            ag_res = _apply_tenant_filter(supabase.table("agent_config").select("id, name"), current_user).execute()
             agent_names = {a["id"]: a.get("name", "") for a in (ag_res.data or [])}
         except:
             pass
@@ -283,11 +325,13 @@ async def get_all_results(
     agent_id: Optional[int] = None, 
     campaign_id: Optional[int] = None,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     if not supabase: return []
     try:
         cols = "id, telefono, fecha, completada, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, campaign_id, campaign_name, agent_id, status, llm_model, seconds_used, empresa_id, datos_extra"
+        empresa_id = _resolve_empresa(current_user, empresa_id)
         query = supabase.table("encuestas").select(cols)
         if empresa_id: query = query.eq("empresa_id", empresa_id)
         if agent_id: query = query.eq("agent_id", agent_id)
@@ -297,7 +341,7 @@ async def get_all_results(
         response = query.order("fecha", desc=True).execute()
         results = response.data        
         try:
-            agents_res = supabase.table("agent_config").select("id, instructions, critical_rules, survey_type, tipo_resultados").execute()
+            agents_res = _apply_tenant_filter(supabase.table("agent_config").select("id, instructions, critical_rules, survey_type, tipo_resultados"), current_user).execute()
             qs_agents = set()
             agent_types = {}
             agent_critical_rules = {}
@@ -325,7 +369,7 @@ async def get_all_results(
                 if a.get("critical_rules"):
                     agent_critical_rules[aid] = a["critical_rules"]
                     
-            emp_res = supabase.table("empresas").select("id, nombre").execute()
+            emp_res = _apply_tenant_filter(supabase.table("empresas").select("id, nombre"), current_user).execute()
             empresas_map = { e["id"]: e.get("nombre", f"Empresa #{e['id']}") for e in (emp_res.data or []) }
                     
             for res in results:
@@ -342,24 +386,36 @@ async def get_all_results(
         return []
 
 @router.get("/users")
-async def get_users_list():
-    cached = await get_ui_cache("users_list")
-    if cached: return cached
+async def get_users_list(current_user: CurrentUser = Depends(require_admin)):
+    if current_user.role == "superadmin":
+        cached = await get_ui_cache("users_list")
+        if cached: return cached
     if not supabase: return []
     try:
-        res = await sb_query(lambda: supabase.table("user_profiles").select("*, empresas(*)").order("created_at", desc=True).execute())
+        def _fetch_users():
+            q = supabase.table("user_profiles").select("*, empresas(*)")
+            if current_user.role != "superadmin":
+                q = q.eq("empresa_id", current_user.empresa_id)
+            return q.order("created_at", desc=True).execute()
+        res = await sb_query(_fetch_users)
         return res.data
     except Exception as e:
         logger.error(f"Error users list: {e}")
         return []
 
 @router.get("/empresas")
-async def get_empresas_list():
-    cached = await get_ui_cache("empresas_list")
-    if cached: return cached
+async def get_empresas_list(current_user: CurrentUser = Depends(require_admin)):
+    if current_user.role == "superadmin":
+        cached = await get_ui_cache("empresas_list")
+        if cached: return cached
     if not supabase: return []
     try:
-        res = await sb_query(lambda: supabase.table("empresas").select("*").order("nombre").execute())
+        def _fetch_empresas():
+            q = supabase.table("empresas").select("*")
+            if current_user.role != "superadmin":
+                q = q.eq("id", current_user.empresa_id)
+            return q.order("nombre").execute()
+        res = await sb_query(_fetch_empresas)
         return res.data
     except Exception as e:
         logger.error(f"Error empresas list: {e}")
@@ -370,13 +426,15 @@ async def get_recent_insights(
     empresa_id: Optional[int] = None,
     agent_id: Optional[int] = None,
     campaign_id: Optional[int] = None,
-    limit: int = 5
+    limit: int = 5,
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Últimas llamadas con datos_extra no vacío — para la tarjeta de Insights."""
     if not supabase:
         return []
     try:
         cols = "id, telefono, fecha, status, datos_extra, campaign_name, tipo_resultados"
+        empresa_id = _resolve_empresa(current_user, empresa_id)
         query = supabase.table("encuestas").select(cols).neq("datos_extra", None)
         if empresa_id:
             query = query.eq("empresa_id", empresa_id)
@@ -407,9 +465,10 @@ async def get_recent_insights(
         return []
 
 @router.get("/alerts")
-async def get_alerts(empresa_id: Optional[int] = None):
+async def get_alerts(empresa_id: Optional[int] = None, current_user: CurrentUser = Depends(get_current_user)):
     if not supabase: return []
     try:
+        empresa_id = _resolve_empresa(current_user, empresa_id)
         query = supabase.table("encuestas").select("*").in_("status", ["fallida", "failed"])
         if empresa_id: query = query.eq("empresa_id", empresa_id)
         res = query.order("fecha", desc=True).limit(5).execute()
@@ -428,7 +487,7 @@ async def get_alerts(empresa_id: Optional[int] = None):
 
 
 @router.post("/alerts/{alert_id}/resolve")
-async def resolve_alert(alert_id: str):
+async def resolve_alert(alert_id: str, current_user: CurrentUser = Depends(get_current_user)):
     """
     Marca una alerta como vista en el panel.
     Las alertas se generan desde encuestas fallidas; el frontend también las oculta en cliente.
@@ -444,7 +503,7 @@ async def resolve_alert(alert_id: str):
 
 
 @router.get("/dashboard/integrations")
-async def get_integrations():
+async def get_integrations(current_user: CurrentUser = Depends(get_current_user)):
     integrations = [
         {"name": "LLM Engine", "provider": "Groq", "active": bool(os.getenv("GROQ_API_KEY")), "model": "Llama 3.3 70B"},
         {"name": "LLM Backup", "provider": "OpenAI", "active": bool(os.getenv("OPENAI_API_KEY")), "model": "GPT-4o"},
@@ -459,10 +518,12 @@ async def get_integrations():
 async def get_usage_stats(
     empresa_id: Optional[int] = None,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     if not supabase: return {"total_tokens": 0, "total_minutes": 0, "per_model_stats": []}
     try:
+        empresa_id = _resolve_empresa(current_user, empresa_id)
         query = supabase.table("encuestas").select("llm_model, seconds_used, status")
         if empresa_id: query = query.eq("empresa_id", empresa_id)
         if start_date: query = query.gte("fecha", start_date)
@@ -492,7 +553,7 @@ async def get_usage_stats(
         return {"total_tokens": 0, "total_minutes": 0, "per_model_stats": []}
 
 @router.get("/ai/limits")
-async def get_ai_limits():
+async def get_ai_limits(current_user: CurrentUser = Depends(get_current_user)):
     cached_all = await get_ui_cache("api_limits_all", max_age_minutes=60)
     if cached_all: return cached_all
 
@@ -518,7 +579,7 @@ async def get_ai_limits():
         return default_limits
 
 @router.get("/dashboard/live-sessions")
-async def get_live_sessions():
+async def get_live_sessions(current_user: CurrentUser = Depends(get_current_user)):
     """List active LiveKit rooms for supervision with enriched metadata."""
     if not lkapi:
         return []
@@ -549,6 +610,8 @@ async def get_live_sessions():
                     "campaign_id": int(campana_match.group(1)) if campana_match else None,
                 },
             }
+            if current_user.role != "superadmin" and session_data["metadata"]["empresa_id"] != current_user.empresa_id:
+                continue
 
             # Intentar obtener info de participantes
             participants = []
@@ -565,11 +628,16 @@ async def get_live_sessions():
         return []
 
 @router.get("/dashboard/token")
-async def get_monitoring_token(room_name: str, identity: str = "supervisor"):
+async def get_monitoring_token(
+    room_name: str,
+    identity: str = "supervisor",
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """Generate a LiveKit token for monitoring (supervisor)."""
     if not lkapi:
         raise HTTPException(status_code=500, detail="LiveKit not configured")
     try:
+        await _assert_room_allowed(room_name, current_user)
         from livekit import api
         # Create token
         token = (
@@ -590,7 +658,7 @@ async def get_monitoring_token(room_name: str, identity: str = "supervisor"):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/dashboard/api-status")
-async def get_api_status():
+async def get_api_status(current_user: CurrentUser = Depends(get_current_user)):
     """
     Check the connectivity and basic status of external APIs like OpenAI and LiveKit.
     Returns 'active' or 'inactive' to display in the UI Dashboard.

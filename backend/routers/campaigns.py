@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from typing import Optional, List
 from services.supabase_service import supabase
 from services.audit import log_audit_event
-from services.auth import CurrentUser, require_admin
+from services.auth import CurrentUser, get_current_user, require_admin
 from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
 from services.trunk_service import resolve_outbound_trunk_id
 from livekit import api as lk_api
@@ -57,6 +57,26 @@ def _load_empresa_kb_settings(empresa_id: int | None) -> dict:
     except Exception as exc:
         logger.warning("No se pudo cargar KB settings empresa %s: %s", empresa_id, exc)
         return {"company_context": "", "kb_allow_internet_search": False}
+
+
+def _resolve_empresa(user: CurrentUser, empresa_id_param: int | None = None) -> int | None:
+    if user.role == "superadmin" and empresa_id_param:
+        return empresa_id_param
+    return int(user.empresa_id or 0) if user.empresa_id else None
+
+
+def _raise_not_found_if_cross_tenant(user: CurrentUser, empresa_id: int | None) -> None:
+    if user.role != "superadmin" and int(empresa_id or 0) != int(user.empresa_id or 0):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+def _load_campaign_or_404(campaign_id: int, user: CurrentUser) -> dict:
+    res = supabase.table("campaigns").select("*").eq("id", campaign_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    campaign = res.data[0]
+    _raise_not_found_if_cross_tenant(user, campaign.get("empresa_id"))
+    return campaign
 
 
 def _load_external_db_allowed_queries(empresa_id: int | None) -> list[str]:
@@ -279,10 +299,14 @@ async def update_campaign(campaign_id: int, payload: dict, current_user: Current
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.get("/campaigns")
-async def list_campaigns(empresa_id: Optional[int] = None):
+async def list_campaigns(
+    empresa_id: Optional[int] = None,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     if not supabase: return []
     try:
         query = supabase.table("campaigns").select("*, empresas:empresa_id(nombre)")
+        empresa_id = _resolve_empresa(current_user, empresa_id)
         if empresa_id:
             query = query.eq("empresa_id", empresa_id)
         res = query.order("created_at", desc=True).limit(100).execute()
@@ -304,7 +328,10 @@ async def list_campaigns(empresa_id: Optional[int] = None):
         return []
 
 @router.get("/campaigns/{campaign_id}")
-async def get_campaign_details(campaign_id: int):
+async def get_campaign_details(
+    campaign_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     if not supabase: return {"error": "No DB"}
     try:
         res_camp, res_leads = await asyncio.gather(
@@ -315,6 +342,7 @@ async def get_campaign_details(campaign_id: int):
             return JSONResponse(status_code=404, content={"error": "Campaign not found"})
 
         campaign = res_camp.data[0]
+        _raise_not_found_if_cross_tenant(current_user, campaign.get("empresa_id"))
         leads = res_leads.data
 
         # Detectar si el agente es de tipo pregunta-abierta
@@ -413,21 +441,33 @@ async def get_campaign_details(campaign_id: int):
         }
 
         return {"campaign": campaign, "metrics": metrics, "leads": enriched_leads}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting campaign details {campaign_id}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.get("/results/{result_id}/transcription")
-async def get_result_transcription(result_id: int):
+async def get_result_transcription(
+    result_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     if not supabase: return {"error": "Database not connected"}
     try:
-        res = supabase.table("encuestas").select("transcription").eq("id", result_id).limit(1).execute()
+        res = supabase.table("encuestas").select("transcription, empresa_id").eq("id", result_id).limit(1).execute()
+        if res.data:
+            _raise_not_found_if_cross_tenant(current_user, res.data[0].get("empresa_id"))
         return {"transcription": res.data[0].get("transcription") if res.data else None}
+    except HTTPException:
+        raise
     except Exception as e:
         return {"error": str(e)}
 
 @router.get("/agent_config_by_survey/{survey_id}")
-async def get_agent_config_by_survey(survey_id: int):
+async def get_agent_config_by_survey(
+    survey_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     if not supabase: return JSONResponse(status_code=500, content={"error": "Supabase not connected"})
     try:
         res_survey = supabase.table("encuestas").select(
@@ -435,6 +475,7 @@ async def get_agent_config_by_survey(survey_id: int):
         ).eq("id", survey_id).execute()
         if not res_survey.data:
             return JSONResponse(status_code=404, content={"error": "Survey not found"})
+        _raise_not_found_if_cross_tenant(current_user, res_survey.data[0].get("empresa_id"))
 
         agent_id = res_survey.data[0].get("agent_id")
         nombre_cliente = res_survey.data[0].get("nombre_cliente")
@@ -527,9 +568,10 @@ async def get_agent_config_by_survey(survey_id: int):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.post("/campaigns/{campaign_id}/retry")
-async def retry_campaign(campaign_id: int):
+async def retry_campaign(campaign_id: int, current_user: CurrentUser = Depends(require_admin)):
     if not supabase: return {"error": "No DB"}
     try:
+        _load_campaign_or_404(campaign_id, current_user)
         res = supabase.table("campaign_leads").update({
             "status": "pending", "retries_attempted": 0,
             "error_msg": None, "next_retry_at": None
@@ -543,14 +585,20 @@ async def retry_campaign(campaign_id: int):
             pass
         await _enqueue_scheduler_tick()
         return {"status": "success", "retried_count": len(res.data)}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrying campaign {campaign_id}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.post("/campaigns/leads/{lead_id}/retry")
-async def retry_lead(lead_id: int):
+async def retry_lead(lead_id: int, current_user: CurrentUser = Depends(require_admin)):
     if not supabase: return {"error": "No DB"}
     try:
+        lead_res = supabase.table("campaign_leads").select("campaign_id").eq("id", lead_id).limit(1).execute()
+        if not lead_res.data:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        _load_campaign_or_404(int(lead_res.data[0]["campaign_id"]), current_user)
         res = supabase.table("campaign_leads").update({
             "status": "pending", "retries_attempted": 0,
             "error_msg": None, "next_retry_at": None
@@ -567,19 +615,26 @@ async def retry_lead(lead_id: int):
                     pass
                 await _enqueue_scheduler_tick()
         return {"status": "success"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrying lead {lead_id}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @router.post("/campaigns/{campaign_id}/schedule-retry")
-async def schedule_campaign_retry(campaign_id: int, payload: ScheduleRetryRequest):
+async def schedule_campaign_retry(
+    campaign_id: int,
+    payload: ScheduleRetryRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
     """
     Programa reintento manual para leads no exitosos de una campaña
     en una fecha/hora concreta (ISO).
     """
     if not supabase:
         return {"error": "No DB"}
+    _load_campaign_or_404(campaign_id, current_user)
     try:
         retry_at_dt = datetime.fromisoformat(payload.retry_at.replace("Z", "+00:00"))
         retry_at_iso = retry_at_dt.astimezone(timezone.utc).isoformat()
@@ -601,14 +656,17 @@ async def schedule_campaign_retry(campaign_id: int, payload: ScheduleRetryReques
             pass
         await _enqueue_scheduler_tick()
         return {"status": "success", "scheduled_count": len(res.data or []), "retry_at": retry_at_iso}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error scheduling retry for campaign {campaign_id}: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.post("/campaigns/{campaign_id}/stop")
-async def stop_campaign(campaign_id: int):
+async def stop_campaign(campaign_id: int, current_user: CurrentUser = Depends(require_admin)):
     if not supabase: return {"error": "No DB"}
     try:
+        _load_campaign_or_404(campaign_id, current_user)
         supabase.table("campaigns").update({
             "status": "paused",
             "paused_by_health_check": False,
@@ -624,17 +682,24 @@ async def stop_campaign(campaign_id: int):
         except Exception:
             pass
         return {"status": "ok", "message": "Campaña pausada"}
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @router.get("/agent_config_by_agent/{agent_id}")
-async def get_agent_config_by_agent(agent_id: int, empresa_id: Optional[int] = None):
+async def get_agent_config_by_agent(
+    agent_id: int,
+    empresa_id: Optional[int] = None,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """Config interna para llamadas entrantes SIP, donde no existe encuesta previa."""
     if not supabase:
         return JSONResponse(status_code=500, content={"error": "Supabase not connected"})
     try:
         query = supabase.table("agent_config").select("*").eq("id", agent_id).limit(1)
+        empresa_id = _resolve_empresa(current_user, empresa_id)
         if empresa_id:
             query = query.eq("empresa_id", empresa_id)
         res_agent = query.execute()
@@ -1006,10 +1071,11 @@ async def campaign_scheduler_loop():
 # ──────────────────────────────────────────────
 
 @router.post("/campaigns/{campaign_id}/start")
-async def start_campaign(campaign_id: int):
+async def start_campaign(campaign_id: int, current_user: CurrentUser = Depends(require_admin)):
     """Marca la campaña como 'active' para que el scheduler la procese."""
     if not supabase: return {"error": "No DB"}
     try:
+        _load_campaign_or_404(campaign_id, current_user)
         res = supabase.table("campaigns").select("*").eq("id", campaign_id).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Campaña no encontrada")
@@ -1028,6 +1094,8 @@ async def start_campaign(campaign_id: int):
             pass
         await _enqueue_scheduler_tick()
         return {"status": "ok", "message": "Campaña marcada como activa. El scheduler la procesará en el próximo ciclo."}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error al iniciar campaña: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})

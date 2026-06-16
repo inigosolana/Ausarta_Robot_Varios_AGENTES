@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from typing import Optional
 from services.supabase_service import supabase, get_ui_cache, clear_ui_cache
 from services.audit import log_audit_event
-from services.auth import CurrentUser, require_admin
+from services.auth import CurrentUser, get_current_user, require_admin
 from services.queue_service import get_arq_pool
 from models.schemas import WorkflowValidateRequest, WorkflowValidateResponse
 from fastapi import Depends
@@ -118,10 +118,20 @@ def _to_legacy_survey_type(agent_type: str) -> str:
 
 router = APIRouter(prefix="/api", tags=["agents"])
 
+
+def _resolve_empresa(user: CurrentUser, empresa_id_param: Optional[int]) -> Optional[int]:
+    if user.role == "superadmin":
+        return empresa_id_param
+    return int(user.empresa_id or 0) if user.empresa_id else None
+
 @router.get("/agents")
-async def get_agents(empresa_id: Optional[int] = None):
+async def get_agents(
+    empresa_id: Optional[int] = None,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """Endpoint con cache para lista de agentes"""
-    if not empresa_id:
+    empresa_id = _resolve_empresa(current_user, empresa_id)
+    if not empresa_id and current_user.role == "superadmin":
         cached = await get_ui_cache("agents_list")
         if cached: return cached
 
@@ -145,20 +155,6 @@ async def get_agents(empresa_id: Optional[int] = None):
             effective_type = _normalize_agent_type(prev_tipo or prev_agent_type, prev_survey_type)
             agent["tipo_resultados"] = effective_type
             agent["agent_type"] = effective_type
-            if (
-                prev_tipo != effective_type
-                or prev_agent_type != effective_type
-                or not prev_survey_type
-            ):
-                try:
-                    supabase.table("agent_config").update({
-                        "tipo_resultados": effective_type,
-                        "agent_type": effective_type,
-                        "survey_type": _to_legacy_survey_type(effective_type),
-                        "updated_at": datetime.utcnow().isoformat(),
-                    }).eq("id", int(agent["id"])).execute()
-                except Exception as sync_err:
-                    logger.warning(f"No se pudo sincronizar tipo de agente {agent.get('id')}: {sync_err}")
             agent['id'] = str(agent['id'])
             agents.append(agent)
         return agents
@@ -167,9 +163,42 @@ async def get_agents(empresa_id: Optional[int] = None):
         return []
 
 @router.get("/prompts")
-async def get_prompts_alias():
+async def get_prompts_alias(
+    empresa_id: Optional[int] = None,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """Alias para que el frontend pueda cargar las instrucciones si usa este endpoint"""
-    return await get_agents()
+    return await get_agents(empresa_id, current_user)
+
+
+@router.post("/admin/agents/sync-types")
+async def sync_agent_types(current_user: CurrentUser = Depends(require_admin)):
+    if not supabase:
+        return {"error": "No DB"}
+    query = supabase.table("agent_config").select("id,tipo_resultados,agent_type,survey_type")
+    if current_user.role != "superadmin":
+        query = query.eq("empresa_id", current_user.empresa_id)
+    res = query.execute()
+    updated = 0
+    for agent in (res.data or []):
+        effective_type = _normalize_agent_type(
+            agent.get("tipo_resultados") or agent.get("agent_type"),
+            agent.get("survey_type"),
+        )
+        if (
+            agent.get("tipo_resultados") != effective_type
+            or agent.get("agent_type") != effective_type
+            or not agent.get("survey_type")
+        ):
+            supabase.table("agent_config").update({
+                "tipo_resultados": effective_type,
+                "agent_type": effective_type,
+                "survey_type": _to_legacy_survey_type(effective_type),
+                "updated_at": datetime.utcnow().isoformat(),
+            }).eq("id", int(agent["id"])).execute()
+            updated += 1
+    await clear_ui_cache("agents_list")
+    return {"status": "ok", "updated": updated}
 
 @router.put("/agents/{agent_id}")
 async def update_agent(agent_id: str, config: dict, current_user: CurrentUser = Depends(require_admin)):
