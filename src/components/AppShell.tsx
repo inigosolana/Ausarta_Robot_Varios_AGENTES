@@ -65,6 +65,7 @@ const AppShell: React.FC = () => {
   useEffect(() => {
     const pathToPermission: Record<string, string> = {
       '/campaigns': 'campaigns',
+      '/calls': 'overview',
       '/empresas': 'empresas',
       '/agents': 'agents',
       '/test-call': 'test-call',
@@ -247,6 +248,9 @@ const AppShell: React.FC = () => {
             )}
             {hasPermission('campaigns') && (
               <SidebarItem icon={<Megaphone size={18} />} label={t('Campaigns', 'Campañas')} to="/campaigns" collapsed={!isSidebarOpen} />
+            )}
+            {hasPermission('overview') && (
+              <SidebarItem icon={<Phone size={18} />} label={t('Live Calls', 'Llamadas')} to="/calls" collapsed={!isSidebarOpen} />
             )}
 
             <div className={`mt-6 mb-2 px-3 text-[10px] uppercase tracking-wider font-bold text-gray-400 ${!isSidebarOpen && 'hidden'}`}>

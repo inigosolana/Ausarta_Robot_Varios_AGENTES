@@ -20,6 +20,7 @@ const AssistantView      = lazy(() => import('./views/AssistantView'));
 const ProfileView        = lazy(() => import('./views/ProfileView'));
 const KnowledgeBaseView  = lazy(() => import('./views/KnowledgeBaseView').then(m => ({ default: m.KnowledgeBaseView })));
 const ContactsView       = lazy(() => import('./views/ContactsView').then(m => ({ default: m.ContactsView })));
+const CallsView          = lazy(() => import('./views/CallsView'));
 
 const LoadingFallback = () => (
   <div className="flex items-center justify-center min-h-[60vh]">
@@ -41,6 +42,7 @@ const App: React.FC = () => (
       <Route element={<AppShell />}>
         <Route index element={<PermissionGate view="overview"><DashboardView /></PermissionGate>} />
         <Route path="campaigns" element={<PermissionGate view="campaigns"><CampaignsView /></PermissionGate>} />
+        <Route path="calls"     element={<PermissionGate view="overview"><CallsView /></PermissionGate>} />
         <Route path="empresas"  element={<PermissionGate view="empresas"><AgentListView /></PermissionGate>} />
         <Route path="agents"    element={<PermissionGate view="agents"><AgentManagementView /></PermissionGate>} />
         <Route path="test-call" element={<PermissionGate view="test-call"><TestCallView /></PermissionGate>} />

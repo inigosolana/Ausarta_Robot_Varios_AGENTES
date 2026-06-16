@@ -36,6 +36,7 @@ from routers.contacts import router as contacts_router
 from routers.usage import router as usage_router
 from routers.voices import router as voices_router
 from routers.campaign_webhook import router as campaign_webhook_router
+from routers.calls import router as calls_router
 # --- CONFIGURACIÓN DE LOGS ---
 # Logs en JSON estructurado (timestamp, level, logger, msg, empresa_id, request_id).
 # LOG_FORMAT=plain desactiva JSON (útil para desarrollo local).
@@ -192,6 +193,7 @@ app.include_router(contacts_router)
 app.include_router(usage_router)
 app.include_router(voices_router)
 app.include_router(campaign_webhook_router)
+app.include_router(calls_router)
 
 # --- ENDPOINTS BASE ---
 
