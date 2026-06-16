@@ -166,6 +166,15 @@ export const ALL_MODULES: { key: string; label: string }[] = [
 
 export type Sentimiento = 'Positivo' | 'Neutral' | 'Negativo';
 
+export interface AgentCallResults {
+  schema_version?: number;
+  agent_type?: string;
+  scores?: Record<string, number | null>;
+  notes?: Record<string, unknown>;
+  extracted?: Record<string, unknown>;
+  analysis?: Record<string, unknown>;
+}
+
 export interface SurveyResult {
   id: number;
   telefono: string;
@@ -181,6 +190,8 @@ export interface SurveyResult {
   llm_model: string | null;
   seconds_used?: number | null;
   tipo_resultados?: string | null;
+  agent_type?: string | null;
+  agent_results?: AgentCallResults | null;
   datos_extra?: Record<string, any> | null;
   customer_name?: string | null;
   empresa_name?: string | null;

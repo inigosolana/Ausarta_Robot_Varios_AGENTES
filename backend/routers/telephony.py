@@ -48,6 +48,7 @@ from services.yeastar_webhook_service import (
 )
 from services.trunk_service import resolve_outbound_trunk_id
 from services.agent_router import build_outbound_room_metadata, resolve_outbound_agent
+from services.call_results_service import build_encuesta_results_update
 from services.auth import get_current_user, CurrentUser, require_admin, require_outbound_auth
 from services.crypto_service import encrypt_data, decrypt_data
 from services.rate_limiter import limiter
@@ -1837,33 +1838,54 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
     # --- Construir payload de actualización ---
     from typing import Any
     update_data: dict[str, Any] = {}
-    if datos.nota_comercial is not None:  update_data["puntuacion_comercial"] = datos.nota_comercial
-    if datos.nota_instalador is not None: update_data["puntuacion_instalador"] = datos.nota_instalador
-    if datos.nota_rapidez is not None:    update_data["puntuacion_rapidez"] = datos.nota_rapidez
-    if datos.comentarios is not None:     update_data["comentarios"] = datos.comentarios
-    if datos.transcription is not None:   update_data["transcription"] = datos.transcription
-    if datos.seconds_used is not None:    update_data["seconds_used"] = datos.seconds_used
-    if datos.llm_model is not None:       update_data["llm_model"] = datos.llm_model
-    if datos.datos_extra is not None:     update_data["datos_extra"] = datos.datos_extra
+    if datos.transcription is not None:
+        update_data["transcription"] = datos.transcription
+    if datos.seconds_used is not None:
+        update_data["seconds_used"] = datos.seconds_used
+    if datos.llm_model is not None:
+        update_data["llm_model"] = datos.llm_model
+    if datos.datos_extra is not None:
+        update_data["datos_extra"] = datos.datos_extra
 
-    # Fase 1 SaaS: si datos_extra contiene resumen_narrativo generado por call_analyzer,
-    # lo persiste también en la columna dedicada encuestas.resumen_llamada para consultas
-    # rápidas sin necesidad de deserializar el JSONB en cada listado.
+    # Fase 1 SaaS: resumen narrativo en columna dedicada
     if isinstance(datos.datos_extra, dict):
         resumen = datos.datos_extra.get("resumen_narrativo")
         if resumen and isinstance(resumen, str) and resumen.strip():
             update_data["resumen_llamada"] = resumen.strip()[:2000]
+
+    curr = await sb_query(
+        lambda: supabase.table("encuestas")
+        .select("status, empresa_id, telefono, agent_type, agent_results")
+        .eq("id", datos.id_encuesta)
+        .execute()
+    )
+    curr_data = curr.data[0] if curr.data else {}
+
+    resolved_agent_type = (
+        curr_data.get("agent_type")
+        or (
+            (datos.datos_extra or {}).get("agent_type")
+            if isinstance(datos.datos_extra, dict)
+            else None
+        )
+    )
+    results_update = build_encuesta_results_update(
+        agent_type=resolved_agent_type,
+        existing_agent_results=curr_data.get("agent_results"),
+        nota_comercial=datos.nota_comercial,
+        nota_instalador=datos.nota_instalador,
+        nota_rapidez=datos.nota_rapidez,
+        comentarios=datos.comentarios,
+        datos_extra=datos.datos_extra if isinstance(datos.datos_extra, dict) else None,
+        agent_results_patch=getattr(datos, "agent_results", None),
+    )
+    update_data.update(results_update)
 
     normalized_status = _STATUS_MAP.get((datos.status or "").strip().lower()) if datos.status else None
 
     if not update_data and not normalized_status:
         return {"status": "ignored", "message": "No data to update"}
 
-    # Leer el estado actual de la encuesta en BD
-    curr = await sb_query(
-        lambda: supabase.table("encuestas").select("status, empresa_id, telefono").eq("id", datos.id_encuesta).execute()
-    )
-    curr_data = curr.data[0] if curr.data else {}
     (curr_data.get("status") or "")
 
     # Si llegaron datos pero sin status explícito:
@@ -2306,6 +2328,7 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
                 "status": "initiated",
                 "completada": 0,
                 "agent_id": agent_id,
+                "agent_type": resolved_agent_type,
                 "empresa_id": emp_id,
                 "campaign_id": campaign_id,
                 "campaign_name": campaign_name,

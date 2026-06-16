@@ -815,6 +815,7 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
                     "status": "initiated",
                     "completada": 0,
                     "agent_id": resolved_agent_id,
+                    "agent_type": resolved_agent_type,
                     "empresa_id": empresa_id,
                     "campaign_id": campaign_id,
                     "campaign_name": campaign.get("name"),

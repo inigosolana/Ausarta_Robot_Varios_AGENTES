@@ -330,7 +330,7 @@ async def get_all_results(
 ):
     if not supabase: return []
     try:
-        cols = "id, telefono, fecha, completada, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, campaign_id, campaign_name, agent_id, status, llm_model, seconds_used, empresa_id, datos_extra"
+        cols = "id, telefono, fecha, completada, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, campaign_id, campaign_name, agent_id, agent_type, agent_results, status, llm_model, seconds_used, empresa_id, datos_extra"
         empresa_id = _resolve_empresa(current_user, empresa_id)
         query = supabase.table("encuestas").select(cols)
         if empresa_id: query = query.eq("empresa_id", empresa_id)

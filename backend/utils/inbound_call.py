@@ -150,6 +150,7 @@ async def create_inbound_encuesta_record(
         "status": status,
         "completada": 0,
         "agent_id": agent_id,
+        "agent_type": agent_type,
         "empresa_id": empresa_id,
         "campaign_id": None,
         "datos_extra": merged_extra,

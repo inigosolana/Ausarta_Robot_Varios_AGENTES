@@ -75,7 +75,7 @@ export function useAnalyticsFromSupabase(filters: {
         let query = supabase
           .from('encuestas')
           .select(
-            'id, telefono, fecha, completada, status, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, transcription, seconds_used, tipo_resultados, datos_extra, campaign_name, empresa_id, campaign_id, agent_id'
+            'id, telefono, fecha, completada, status, puntuacion_comercial, puntuacion_instalador, puntuacion_rapidez, comentarios, transcription, seconds_used, tipo_resultados, agent_type, agent_results, datos_extra, campaign_name, empresa_id, campaign_id, agent_id'
           )
           .order('fecha', { ascending: false })
           .limit(5000);

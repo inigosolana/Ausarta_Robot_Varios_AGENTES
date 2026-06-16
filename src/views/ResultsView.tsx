@@ -10,6 +10,7 @@ import { DateRangePicker, getDatesFromRange, DateRange } from '../components/Dat
 import { CallResultModal } from '../components/CallResultModal';
 import { SurveyResult, ExtractionSchemaProperty, getSentimiento, getIdioma, Sentimiento } from '../types';
 import { fetchSurveyResults } from '../lib/resultsSupabase';
+import { extractCallResultItems } from '../lib/callResults';
 
 interface Props {
     empresaId?: number;
@@ -637,70 +638,8 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
 type MixedItemType = 'number' | 'text' | 'choice';
 type MixedItem = { label: string; value: any; type: MixedItemType };
 
-function prettifyKey(raw: string): string {
-    return raw
-        .replace(/_/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function isLikelyChoice(value: any): boolean {
-    if (typeof value !== 'string') return false;
-    const v = value.trim().toLowerCase();
-    const choices = [
-        'comercial', 'tecnico', 'técnico', 'calidad-precio', 'calidad precio',
-        'servicio', 'servicio general', 'si', 'sí', 'no'
-    ];
-    return choices.includes(v);
-}
-
 function extractMixedItems(row: SurveyResult): MixedItem[] {
-    const extra: Record<string, any> = (row.datos_extra && typeof row.datos_extra === 'object') ? row.datos_extra : {};
-    const items: MixedItem[] = [];
-    const seen = new Set<string>();
-    const add = (label: string, value: any, type: MixedItemType) => {
-        const key = `${label}:${String(value)}`;
-        if (value === null || value === undefined || value === '' || seen.has(key)) return;
-        seen.add(key);
-        items.push({ label, value, type });
-    };
-
-    add('Experiencia', extra.experiencia_general ?? row.puntuacion_rapidez, 'number');
-    add('Comercial', row.puntuacion_comercial ?? extra.nota_comercial, 'number');
-    add('Tecnico', row.puntuacion_instalador ?? extra.nota_tecnico ?? extra.nota_instalador, 'number');
-    add('Motivo', extra.motivo_contratacion, isLikelyChoice(extra.motivo_contratacion) ? 'choice' : 'text');
-    add('Detalle', extra.detalle_problema, 'text');
-
-    const dynamicArrays = [extra.respuestas, extra.preguntas, extra.answers, extra.questions];
-    for (const arr of dynamicArrays) {
-        if (!Array.isArray(arr)) continue;
-        for (const e of arr) {
-            if (!e || typeof e !== 'object') continue;
-            const label = e.label || e.pregunta || e.question || e.name || 'Respuesta';
-            const value = e.value ?? e.respuesta ?? e.answer;
-            const typeRaw = (e.type || e.tipo || '').toString().toLowerCase();
-            const type: MixedItemType =
-                typeRaw.includes('num') ? 'number'
-                    : typeRaw.includes('open') || typeRaw.includes('text') ? 'text'
-                        : typeRaw.includes('choice') || typeRaw.includes('option') ? 'choice'
-                            : (typeof value === 'number' ? 'number' : (isLikelyChoice(value) ? 'choice' : 'text'));
-            add(label, value, type);
-        }
-    }
-
-    const reserved = new Set([
-        'experiencia_general', 'nota_comercial', 'nota_tecnico', 'nota_instalador',
-        'motivo_contratacion', 'detalle_problema', 'respuestas', 'preguntas', 'answers', 'questions'
-    ]);
-    Object.entries(extra).forEach(([k, v]) => {
-        if (reserved.has(k)) return;
-        if (Array.isArray(v) || (v && typeof v === 'object')) return;
-        const type: MixedItemType = typeof v === 'number' ? 'number' : (isLikelyChoice(v) ? 'choice' : 'text');
-        add(prettifyKey(k), v, type);
-    });
-
-    return items;
+    return extractCallResultItems(row) as MixedItem[];
 }
 
 function getScoreColor(score: number | null): string {

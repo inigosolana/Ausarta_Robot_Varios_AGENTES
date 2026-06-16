@@ -72,6 +72,7 @@ class EncuestaData(BaseModel):
     seconds_used: Optional[int] = None
     llm_model: Optional[str] = None
     datos_extra: Optional[dict] = None
+    agent_results: Optional[dict] = None
 
 class InboundCallRegisterRequest(BaseModel):
     """Registro de llamada entrante al conectar el agente (antes de colgar)."""

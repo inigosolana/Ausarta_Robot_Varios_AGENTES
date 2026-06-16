@@ -212,6 +212,7 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
                         "status": "initiated",
                         "completada": 0,
                         "agent_id": resolved_agent_id,
+                        "agent_type": resolved_agent_type,
                         "empresa_id": _empresa_id,
                         "campaign_id": _camp_id,
                         "campaign_name": _camp_name,
