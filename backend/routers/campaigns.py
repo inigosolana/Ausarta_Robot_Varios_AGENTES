@@ -19,6 +19,7 @@ from services.audit import log_audit_event
 from services.auth import CurrentUser, get_current_user, require_admin
 from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
 from services.trunk_service import resolve_outbound_trunk_id
+from services.agent_router import build_outbound_room_metadata, resolve_outbound_agent
 from livekit import api as lk_api
 from pydantic import BaseModel
 from models.schemas import CampaignModel, CampaignLeadModel
@@ -789,6 +790,21 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
     try:
         logger.info(f"☎️  [Drip] Iniciando lead {lead_id} ({phone}) → empresa={empresa_id} camp={campaign_id}")
 
+        resolved = await resolve_outbound_agent(
+            empresa_id=int(empresa_id) if empresa_id else None,
+            campaign_agent_id=campaign.get("agent_id"),
+            agent_type=campaign.get("agent_type"),
+            call_purpose=campaign.get("call_purpose"),
+        )
+        resolved_agent_id = resolved["agent_id"]
+        resolved_agent_type = resolved["agent_type"]
+        logger.info(
+            "🤖 [Drip] Agente resuelto id=%s tipo=%s camp=%s",
+            resolved_agent_id,
+            resolved_agent_type,
+            campaign_id,
+        )
+
         # 1. Crear encuesta en BD y vincular al lead
         try:
             enc_res = await asyncio.to_thread(
@@ -798,7 +814,7 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
                     "fecha": datetime.now(timezone.utc).isoformat(),
                     "status": "initiated",
                     "completada": 0,
-                    "agent_id": campaign.get("agent_id"),
+                    "agent_id": resolved_agent_id,
                     "empresa_id": empresa_id,
                     "campaign_id": campaign_id,
                     "campaign_name": campaign.get("name"),
@@ -823,15 +839,14 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
 
         # 2. Nombre de sala aislado estricto
         room_name = f"llamada_ausarta_empresa_{empresa_id}_campana_{campaign_id}_contacto_{lead_id}_encuesta_{encuesta_id}"
-        room_metadata = {
-            "empresa_id": int(empresa_id or 0),
-            "campaign_id": int(campaign_id),
-            "campana_id": int(campaign_id),
-            "contacto_id": int(lead_id),
-            "client_id": int(lead_id),
-            "lead_id": int(lead_id),
-            "survey_id": int(encuesta_id),
-        }
+        room_metadata = build_outbound_room_metadata(
+            empresa_id=int(empresa_id or 0),
+            survey_id=int(encuesta_id),
+            agent_id=int(resolved_agent_id),
+            agent_type=resolved_agent_type,
+            campaign_id=int(campaign_id),
+            contacto_id=int(lead_id),
+        )
 
         try:
             await create_isolated_room(room_name, metadata=room_metadata)
@@ -845,7 +860,9 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
                 agent_name=agent_name_dispatch,
                 metadata=room_metadata,
             )
-            logger.info(f"🚀 [Drip] Agente '{agent_name_dispatch}' despachado a {room_name}")
+            logger.info(
+                f"🚀 [Drip] Agente '{agent_name_dispatch}' (tipo={resolved_agent_type}) despachado a {room_name}"
+            )
             # Breve espera para que el agente entre antes de iniciar la llamada SIP
             await asyncio.sleep(float(os.getenv("DRIP_AGENT_JOIN_DELAY_SECONDS", "3")))
         except Exception as dispatch_err:

@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from utils.call_schedule import is_call_allowed
+from services.agent_router import build_outbound_room_metadata, resolve_outbound_agent
 
 logger = logging.getLogger("arq-worker")
 
@@ -197,13 +198,20 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
 
         async with semaphore:
             try:
+                resolved = await resolve_outbound_agent(
+                    empresa_id=int(_empresa_id) if _empresa_id else None,
+                    campaign_agent_id=_agent_id,
+                )
+                resolved_agent_id = resolved["agent_id"]
+                resolved_agent_type = resolved["agent_type"]
+
                 enc_res = await sb_query(
                     lambda: supabase.table("encuestas").insert({
                         "telefono": phone,
                         "fecha": datetime.now(timezone.utc).isoformat(),
                         "status": "initiated",
                         "completada": 0,
-                        "agent_id": _agent_id,
+                        "agent_id": resolved_agent_id,
                         "empresa_id": _empresa_id,
                         "campaign_id": _camp_id,
                         "campaign_name": _camp_name,
@@ -224,15 +232,14 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
                     f"_contacto_{lead_id}"
                     f"_encuesta_{encuesta_id}"
                 )
-                room_metadata = {
-                    "empresa_id": int(_empresa_id),
-                    "campaign_id": int(_camp_id or 0),
-                    "campana_id": int(_camp_id or 0),
-                    "contacto_id": int(lead_id),
-                    "client_id": int(lead_id),
-                    "lead_id": int(lead_id),
-                    "survey_id": int(encuesta_id),
-                }
+                room_metadata = build_outbound_room_metadata(
+                    empresa_id=int(_empresa_id),
+                    survey_id=int(encuesta_id),
+                    agent_id=int(resolved_agent_id),
+                    agent_type=resolved_agent_type,
+                    campaign_id=int(_camp_id or 0),
+                    contacto_id=int(lead_id),
+                )
 
                 await create_isolated_room(room_name, metadata=room_metadata)
 
@@ -242,7 +249,12 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
                     agent_name=agent_name,
                     metadata=room_metadata,
                 )
-                logger.info("[CampEmpresa] Agente despachado lead=%s sala=%s", lead_id, room_name)
+                logger.info(
+                    "[CampEmpresa] Agente despachado lead=%s tipo=%s sala=%s",
+                    lead_id,
+                    resolved_agent_type,
+                    room_name,
+                )
 
                 agent_ready = await wait_for_agent_ready(room_name)
                 if not agent_ready:

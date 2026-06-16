@@ -54,6 +54,7 @@ function agentToForm(agent: AgentRow): AgentConfig {
     speaking_speed: agent.speaking_speed ?? 1.0,
     empresa_id: agent.empresa_id ?? null,
     tipo_resultados: agent.tipo_resultados,
+    agent_type: agent.agent_type || agent.tipo_resultados,
     agent_mode: agent.agent_mode,
     workflow_definition: agent.workflow_definition,
     kb_allow_internet_search: Boolean(agent.kb_allow_internet_search),
@@ -410,7 +411,10 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
                 {isEditing ? (
                   <select
                     value={formData.tipo_resultados || ''}
-                    onChange={e => setFormData({ ...formData, tipo_resultados: e.target.value || undefined })}
+                    onChange={e => {
+                      const v = e.target.value || undefined;
+                      setFormData({ ...formData, tipo_resultados: v, agent_type: v });
+                    }}
                     className={inputCls}
                   >
                     <option value="">— Selecciona tipo —</option>
@@ -425,6 +429,11 @@ export const AgentWorkspacePanel: React.FC<Props> = ({ agent, onTest, onDelete, 
                 ) : (
                   <p className="text-sm text-gray-600 dark:text-gray-400">
                     {getTipoResultadosLabel(agent.tipo_resultados || agent.agent_type)}
+                  </p>
+                )}
+                {isEditing && (
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Define el comportamiento del agente en llamadas salientes y campañas.
                   </p>
                 )}
               </div>

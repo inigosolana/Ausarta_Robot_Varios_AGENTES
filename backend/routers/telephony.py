@@ -47,6 +47,7 @@ from services.yeastar_webhook_service import (
     process_yeastar_webhook_payload,
 )
 from services.trunk_service import resolve_outbound_trunk_id
+from services.agent_router import build_outbound_room_metadata, resolve_outbound_agent
 from services.auth import get_current_user, CurrentUser, require_admin, require_outbound_auth
 from services.crypto_service import encrypt_data, decrypt_data
 from services.rate_limiter import limiter
@@ -2253,6 +2254,7 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
         return JSONResponse(status_code=400, content={"error": "Phone number is required"})
 
     encuesta_id = None
+    resolved_agent_type = "ENCUESTA_NUMERICA"
 
     try:
         if supabase:
@@ -2270,6 +2272,21 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
             # Fase 1 SaaS: verificar cuota mensual antes de crear la encuesta/llamada.
             if emp_id:
                 await _check_and_increment_call_limit(int(emp_id))
+
+            resolved = await resolve_outbound_agent(
+                empresa_id=int(emp_id) if emp_id else None,
+                agent_id=agent_id,
+                agent_type=request.get("agentType"),
+                call_purpose=request.get("callPurpose"),
+            )
+            agent_id = resolved["agent_id"]
+            resolved_agent_type = resolved["agent_type"]
+            logger.info(
+                "🤖 [outbound] Agente resuelto id=%s tipo=%s empresa=%s",
+                agent_id,
+                resolved_agent_type,
+                emp_id,
+            )
 
             campaign_name = request.get("campaignName")
             if campaign_id and not campaign_name:
@@ -2319,15 +2336,14 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
             logger.warning(f"⚠️ Despacho ya en curso para {room_name}. Ignorando.")
             return {"status": "ok", "message": "Call already initiated", "roomName": room_name}
 
-        room_metadata = {
-            "empresa_id": int(emp_id or 0),
-            "campaign_id": int(campaign_id or 0),
-            "campana_id": int(campaign_id or 0),
-            "contacto_id": contacto_id,
-            "client_id": contacto_id,
-            "lead_id": contacto_id,
-            "survey_id": int(encuesta_id),
-        }
+        room_metadata = build_outbound_room_metadata(
+            empresa_id=int(emp_id or 0),
+            survey_id=int(encuesta_id),
+            agent_id=int(agent_id),
+            agent_type=resolved_agent_type,
+            campaign_id=int(campaign_id or 0),
+            contacto_id=contacto_id,
+        )
 
         try:
             await create_isolated_room(room_name, metadata=room_metadata)
@@ -2341,7 +2357,9 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
                 agent_name=agent_name_dispatch,
                 metadata=room_metadata,
             )
-            logger.info(f"✅ Agente {agent_name_dispatch} despachado a sala {room_name}")
+            logger.info(
+                f"✅ Agente {agent_name_dispatch} (tipo={resolved_agent_type}) despachado a sala {room_name}"
+            )
             # FIX 1: polling real en vez de sleep fijo para evitar llamada muda
             agent_ready = await wait_for_agent_ready(room_name)
             if not agent_ready:
