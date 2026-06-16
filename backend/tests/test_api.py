@@ -21,3 +21,17 @@ async def test_get_voices_requires_auth():
         response = await ac.get("/api/voices")
     assert response.status_code == 401
 
+
+@pytest.mark.asyncio
+async def test_campaign_webhook_requires_auth():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post(
+            "/api/webhook/campaign",
+            json={
+                "empresa_id": 1,
+                "name": "Test",
+                "leads": [{"phone_number": "+34600000000", "customer_name": "Test"}],
+            },
+        )
+    assert response.status_code == 403
+

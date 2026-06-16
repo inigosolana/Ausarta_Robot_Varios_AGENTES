@@ -39,6 +39,30 @@ class CampaignLeadModel(BaseModel):
     customer_name: str
     id: Optional[int] = None # ID opcional si viene de fuera
 
+class CampaignWebhookLead(BaseModel):
+    phone_number: str
+    customer_name: str = "Cliente"
+
+class CampaignWebhookRequest(BaseModel):
+    """Payload para POST /api/webhook/campaign (n8n / integraciones)."""
+
+    action: Literal["create", "create_and_start", "add_leads", "start"] = "create_and_start"
+    empresa_id: int
+    name: Optional[str] = None
+    agent_id: Optional[int] = None
+    agent_type: Optional[str] = None
+    call_purpose: Optional[str] = None
+    campaign_id: Optional[int] = None
+    leads: List[CampaignWebhookLead] = Field(default_factory=list)
+    status: Optional[str] = None
+    auto_start: bool = False
+    retries_count: int = 3
+    retry_interval: int = 180
+    retry_unit: str = "minutes"
+    interval_minutes: int = 2
+    extraction_schema: Optional[List[ExtractionSchemaProperty]] = None
+    scheduled_time: Optional[datetime] = None
+
 class CampaignModel(BaseModel):
     name: str
     agent_id: int
