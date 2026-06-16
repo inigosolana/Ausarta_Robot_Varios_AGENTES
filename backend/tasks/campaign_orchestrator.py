@@ -20,6 +20,7 @@ from typing import Any
 
 from utils.call_schedule import is_call_allowed
 from services.agent_router import build_outbound_room_metadata, resolve_outbound_agent
+from services.sip_call_service import create_sip_participant_with_retry, mark_call_failed, sip_retry_max_attempts
 
 logger = logging.getLogger("arq-worker")
 
@@ -260,7 +261,16 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
                 agent_ready = await wait_for_agent_ready(room_name)
                 if not agent_ready:
                     logger.error(
-                        "[CampEmpresa] Agente no listo lead=%s sala=%s. Revirtiendo.", lead_id, room_name
+                        "[CampEmpresa] Agente no listo lead=%s sala=%s. Marcando failed.", lead_id, room_name
+                    )
+                    await mark_call_failed(
+                        int(encuesta_id),
+                        "Agente no disponible antes del SIP",
+                        error_code="agent_not_ready",
+                        source="campaign_orchestrator",
+                        empresa_id=int(_empresa_id) if _empresa_id else None,
+                        phone=str(phone),
+                        room_name=room_name,
                     )
                     await sb_query(
                         lambda: supabase.table("campaign_leads")
@@ -271,16 +281,36 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
                     return
 
                 sip_trunk_id = await resolve_outbound_trunk_id(int(_empresa_id) if _empresa_id else None)
-                await lkapi.sip.create_sip_participant(
-                    lk_api.CreateSIPParticipantRequest(
-                        sip_trunk_id=sip_trunk_id,
-                        sip_call_to=phone,
-                        room_name=room_name,
-                        participant_identity=f"user_{phone}_{encuesta_id}",
-                        participant_name="Cliente",
+                try:
+                    await create_sip_participant_with_retry(
+                        lk_api.CreateSIPParticipantRequest(
+                            sip_trunk_id=sip_trunk_id,
+                            sip_call_to=phone,
+                            room_name=room_name,
+                            participant_identity=f"user_{phone}_{encuesta_id}",
+                            participant_name="Cliente",
+                        )
                     )
-                )
-                logger.info("✅ [CampEmpresa] Llamada SIP iniciada lead=%s → %s", lead_id, phone)
+                    logger.info("✅ [CampEmpresa] Llamada SIP iniciada lead=%s → %s", lead_id, phone)
+                except Exception as sip_err:
+                    logger.error("❌ [CampEmpresa] Error SIP lead=%s: %s", lead_id, sip_err)
+                    await mark_call_failed(
+                        int(encuesta_id),
+                        str(sip_err),
+                        error_code="sip_dispatch_failed",
+                        source="campaign_orchestrator",
+                        empresa_id=int(_empresa_id) if _empresa_id else None,
+                        phone=str(phone),
+                        room_name=room_name,
+                        sip_attempts=sip_retry_max_attempts(),
+                    )
+                    await sb_query(
+                        lambda: supabase.table("campaign_leads")
+                        .update({"status": "pending"})
+                        .eq("id", lead_id)
+                        .execute()
+                    )
+                    return
 
             except Exception as e:
                 logger.error("❌ [CampEmpresa] Error despachando lead=%s (%s): %s", lead_id, phone, e)

@@ -20,6 +20,7 @@ from services.auth import CurrentUser, get_current_user, require_admin
 from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
 from services.trunk_service import resolve_outbound_trunk_id
 from services.agent_router import build_outbound_room_metadata, resolve_outbound_agent
+from services.sip_call_service import create_sip_participant_with_retry, mark_call_failed, sip_retry_max_attempts
 from livekit import api as lk_api
 from pydantic import BaseModel
 from models.schemas import CampaignModel, CampaignLeadModel
@@ -871,24 +872,29 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
 
         # 4. Lanzar SIP (cliente escuchará al agente al descolgar)
         try:
-            await lkapi.sip.create_sip_participant(lk_api.CreateSIPParticipantRequest(
-                sip_trunk_id=sip_trunk_id,
-                sip_call_to=phone,
-                room_name=room_name,
-                participant_identity=f"user_{phone}_{encuesta_id}",
-                participant_name="Cliente",
-            ))
+            await create_sip_participant_with_retry(
+                lk_api.CreateSIPParticipantRequest(
+                    sip_trunk_id=sip_trunk_id,
+                    sip_call_to=phone,
+                    room_name=room_name,
+                    participant_identity=f"user_{phone}_{encuesta_id}",
+                    participant_name="Cliente",
+                )
+            )
             logger.info(f"☎️ [Drip] SIP lanzado: {phone} → {room_name}")
         except Exception as sip_err:
             logger.error(f"❌ [Drip] Error SIP lead {lead_id}: {sip_err}")
-            await asyncio.to_thread(
-                supabase.table("campaign_leads").update(
-                    {"status": "failed", "error_msg": str(sip_err)}
-                ).eq("id", lead_id).execute
+            await mark_call_failed(
+                int(encuesta_id),
+                str(sip_err),
+                error_code="sip_dispatch_failed",
+                source="campaign_drip",
+                empresa_id=int(empresa_id) if empresa_id else None,
+                phone=str(phone),
+                room_name=room_name,
+                sip_attempts=sip_retry_max_attempts(),
             )
-            await asyncio.to_thread(
-                supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute
-            )
+            await _apply_retry_after_failure(lead_id=lead_id, campaign=campaign)
             return
 
         # 5. Polling ligero hasta status terminal (el webhook también actuará en paralelo)

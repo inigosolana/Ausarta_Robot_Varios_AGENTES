@@ -104,7 +104,9 @@ async def create_outbound_call(
         empresa_id,
         survey_id,
     )
-    return await lkapi.sip.create_sip_participant(req)
+    from services.sip_call_service import create_sip_participant_with_retry
+
+    return await create_sip_participant_with_retry(req)
 
 
 async def wait_for_agent_ready(room_name: str, timeout: float = 15.0) -> bool:

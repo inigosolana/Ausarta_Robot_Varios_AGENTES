@@ -48,7 +48,7 @@ async def agent_post_guardar_encuesta(ctx: dict[str, Any], payload: dict) -> Non
         status = (encuesta.get("status") or payload.get("status") or "").strip().lower()
 
         if status == "failed":
-            from worker import _schedule_failed_survey_retry
+            from tasks.transcription_processor import _schedule_failed_survey_retry
 
             await _schedule_failed_survey_retry(encuesta)
 

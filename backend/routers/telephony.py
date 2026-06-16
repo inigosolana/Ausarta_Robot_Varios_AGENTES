@@ -49,6 +49,11 @@ from services.yeastar_webhook_service import (
 from services.trunk_service import resolve_outbound_trunk_id
 from services.agent_router import build_outbound_room_metadata, resolve_outbound_agent
 from services.call_results_service import build_encuesta_results_update
+from services.sip_call_service import (
+    create_sip_participant_with_retry,
+    mark_call_failed,
+    sip_retry_max_attempts,
+)
 from services.auth import get_current_user, CurrentUser, require_admin, require_outbound_auth
 from services.crypto_service import encrypt_data, decrypt_data
 from services.rate_limiter import limiter
@@ -2391,15 +2396,15 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
                     "Marcando encuesta como failed y abortando SIP."
                 )
                 if supabase and encuesta_id:
-                    try:
-                        await sb_query(
-                            lambda: supabase.table("encuestas")
-                            .update({"status": "failed"})
-                            .eq("id", encuesta_id)
-                            .execute()
-                        )
-                    except Exception:
-                        pass
+                    await mark_call_failed(
+                        int(encuesta_id),
+                        "Agente no disponible antes del SIP",
+                        error_code="agent_not_ready",
+                        source="outbound",
+                        empresa_id=int(emp_id) if emp_id else None,
+                        phone=str(phone),
+                        room_name=room_name,
+                    )
                 await _release_room_lock(room_name)
                 return JSONResponse(
                     status_code=503,
@@ -2409,18 +2414,32 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
             logger.warning(f"⚠️ Dispatch explícito fallido (auto-dispatch como fallback): {dispatch_err}")
 
         try:
-            await lkapi.sip.create_sip_participant(api.CreateSIPParticipantRequest(
-                sip_trunk_id=sip_trunk_id,
-                sip_call_to=phone,
-                room_name=room_name,
-                participant_identity=f"user_{phone}_{encuesta_id}",
-                participant_name="Cliente",
-            ))
+            await create_sip_participant_with_retry(
+                api.CreateSIPParticipantRequest(
+                    sip_trunk_id=sip_trunk_id,
+                    sip_call_to=phone,
+                    room_name=room_name,
+                    participant_identity=f"user_{phone}_{encuesta_id}",
+                    participant_name="Cliente",
+                )
+            )
         except Exception as sip_err:
             await _release_room_lock(room_name)
-            raise sip_err
-        except Exception as dispatch_err:
-            logger.warning(f"⚠️ Dispatch explícito fallido (auto-dispatch como fallback): {dispatch_err}")
+            if supabase and encuesta_id:
+                await mark_call_failed(
+                    int(encuesta_id),
+                    str(sip_err),
+                    error_code="sip_dispatch_failed",
+                    source="outbound",
+                    empresa_id=int(emp_id) if emp_id else None,
+                    phone=str(phone),
+                    room_name=room_name,
+                    sip_attempts=sip_retry_max_attempts(),
+                )
+            return JSONResponse(
+                status_code=502,
+                content={"error": f"Error SIP tras reintentos: {sip_err}"},
+            )
 
         async def clear_lock(rname: str) -> None:
             await asyncio.sleep(10)
@@ -2436,6 +2455,19 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
     except Exception as e:
         if "room_name" in locals():
             await _release_room_lock(room_name)
+        if supabase and encuesta_id:
+            try:
+                await mark_call_failed(
+                    int(encuesta_id),
+                    str(e),
+                    error_code="outbound_fatal",
+                    source="outbound",
+                    empresa_id=int(emp_id) if "emp_id" in locals() and emp_id else None,
+                    phone=str(phone) if phone else None,
+                    room_name=room_name if "room_name" in locals() else None,
+                )
+            except Exception:
+                pass
         logger.error(f"❌ Error fatal en outbound call: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
