@@ -47,6 +47,7 @@ backend/venv/
 *.env
 stack.env
 !.env.example
+*.backup
 
 # Runtime data / logs
 data/*.jsonl
