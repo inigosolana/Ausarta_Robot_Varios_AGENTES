@@ -208,3 +208,6 @@ Backend API
 ## 📄 Licencia
 
 Ausarta © 2026
+# Security TODO
+
+TODO: rotate the leaked Supabase service_role key manually in Supabase (Settings -> API -> Roll service_role secret) and update `SUPABASE_SERVICE_ROLE_KEY` in Portainer/`stack.env`.
