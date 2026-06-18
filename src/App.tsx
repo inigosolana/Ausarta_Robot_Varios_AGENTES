@@ -50,11 +50,11 @@ const App: React.FC = () => (
         <Route path="copilot"   element={<PermissionGate view="assistant"><AssistantView /></PermissionGate>} />
         <Route path="usage"     element={<PermissionGate view="usage"><UsageView /></PermissionGate>} />
         <Route path="admin"     element={<PermissionGate view="admin"><UserManagementView /></PermissionGate>} />
-        <Route path="crm"       element={<CrmIntegrationView />} />
+        <Route path="crm"       element={<PermissionGate view="crm"><CrmIntegrationView /></PermissionGate>} />
         <Route path="telephony" element={<PermissionGate view="admin"><TelephonyView /></PermissionGate>} />
         <Route path="trunks"    element={<PermissionGate view="admin"><TrunksView /></PermissionGate>} />
         <Route path="knowledge" element={<PermissionGate view="admin"><KnowledgeBaseView /></PermissionGate>} />
-        <Route path="contacts"  element={<ContactsView />} />
+        <Route path="contacts"  element={<PermissionGate view="contacts"><ContactsView /></PermissionGate>} />
         <Route path="profile"   element={<ProfileView />} />
       </Route>
     </Route>

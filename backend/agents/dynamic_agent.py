@@ -2,16 +2,13 @@ import logging
 from typing import Optional, Any
 import os
 import time
-import aiohttp
 import asyncio
-from datetime import datetime
 import sys
 import json
 import re
 import random
 from dotenv import load_dotenv
 from config import settings
-from services.redis_service import get_redis
 
 # Solo cargar .env en desarrollo local; en producción Docker las vars vienen del entorno del contenedor.
 if os.getenv("ENVIRONMENT", "production") == "development":
@@ -58,18 +55,21 @@ from agents.agent_common import (
     ALLOWED_ROOM_PREFIXES,
     BRIDGE_SERVER_URL_INTERNAL,
     DISPATCH_AGENT_NAME,
-    _REDIS_URL,
-    _AGENT_CONFIG_CACHE_TTL,
-    _build_inbound_datos_extra,
     _extract_transcript_from_session,
     _is_inbound_agent_config,
     _normalize_message_text,
     _parse_inbound_caller_from_room,
     _room_name_allowed,
-    _validate_agent_config_tenant,
 )
 from agents.agent_lifecycle import CallSessionLifecycleMixin, DynamicAgentLifecycleMixin
 from agents.agent_tools import AgentToolsMixin
+from agents.config_fetcher import (
+    _fetch_with_retries,
+    _register_inbound_call_record,
+    fetch_agent_config,
+    fetch_agent_config_by_agent_id,
+)
+from agents.post_call_processor import finalize_call_session
 from agents.stt_tts_builder import (
     DEFAULT_CARTESIA_VOICE,
     _build_stt_plugin,
@@ -144,7 +144,6 @@ def _build_guardar_encuesta_raw_schema(extraction_schema: list) -> dict[str, Any
     }
 
 from prompts import _LANG_OVERRIDE_MSGS
-from utils.call_analyzer import analyze_call_disposition
 from utils.kb_settings import resolve_kb_allow_internet
 from utils.prompt_builder import build_agent_prompt
 from utils.workflow_compiler import compile_workflow_to_prompt
@@ -188,7 +187,10 @@ class DynamicAgent(Agent, AgentToolsMixin, DynamicAgentLifecycleMixin):
             if not self.survey_id.isdigit() and len(parts) >= 2:
                 # Si el último no es dígito, probamos con el penúltimo
                 self.survey_id = parts[-2]
-        except:
+        except Exception as survey_parse_err:
+            logger.warning(
+                f"Error parseando survey_id desde room_name '{room_name}': {survey_parse_err}"
+            )
             self.survey_id = "0"
 
         try:
@@ -639,341 +641,8 @@ class CallSession(CallSessionLifecycleMixin):
             t.cancel()
 
     async def finalize(self) -> None:
-        """
-        Post-procesamiento tras el fin de la llamada: extrae transcripción,
-        clasifica disposición con LLM y encola la persistencia de resultados.
-        """
-        try:
-            raw_messages: list[dict] = []
-            transcript = ""
-            try:
-                raw_messages, transcript = _extract_transcript_from_session(self.session)
-                logger.info(
-                    f"📝 [{self.job_id}] Transcripción extraída en finally: {len(transcript)} chars"
-                )
-                if not transcript:
-                    raw_messages, transcript = self._build_transcript_from_event_buffer()
-                    if transcript:
-                        logger.info(
-                            f"📝 [{self.job_id}] Usando buffer de eventos: {len(transcript)} chars"
-                        )
-                if not transcript and self.transcript_snapshot.get("transcript"):
-                    transcript = self.transcript_snapshot["transcript"]
-                    raw_messages = self.transcript_snapshot.get("raw", [])
-                    logger.info(
-                        f"📝 [{self.job_id}] Usando snapshot de transcripción: {len(transcript)} chars"
-                    )
-            except Exception as ex:
-                logger.error(f"Error procesando historia para transcripción local: {ex}")
-                if not transcript:
-                    raw_messages, transcript = self._build_transcript_from_event_buffer()
-                if not transcript and self.transcript_snapshot.get("transcript"):
-                    transcript = self.transcript_snapshot["transcript"]
-                    raw_messages = self.transcript_snapshot.get("raw", [])
-
-            seconds_used = 0
-            if self.call_start_time is not None:
-                seconds_used = max(0, int(time.time() - self.call_start_time))
-
-            agent_type = self.agent_config.get("agent_type", "ENCUESTA_NUMERICA")
-            data_saved = getattr(self.agent_instance, "data_saved", False)
-            datos_extra = None
-            call_disposition = None
-
-            if transcript:
-                logger.info(
-                    f"🧠 Clasificando disposición de llamada y extrayendo datos "
-                    f"para encuesta {self.survey_id} (Tipo: {agent_type})"
-                )
-                call_direction = (
-                    "inbound"
-                    if _is_inbound_agent_config(self.agent_config)
-                    else "outbound"
-                )
-                call_disposition, datos_extra = await analyze_call_disposition(
-                    transcript,
-                    agent_type,
-                    data_saved,
-                    self.lang_state.get("active_lang", self.language),
-                    call_direction=call_direction,
-                )
-                if _is_inbound_agent_config(self.agent_config):
-                    datos_extra = _build_inbound_datos_extra(
-                        self.agent_config,
-                        self.room_name,
-                        datos_extra,
-                    )
-            else:
-                if _is_inbound_agent_config(self.agent_config):
-                    call_disposition = "no_contesta"
-                else:
-                    call_disposition = "no_contesta"
-                datos_extra = {
-                    "sentimiento_cliente": "Neutral",
-                    "idioma": self.lang_state.get("active_lang", self.language),
-                }
-                logger.info(
-                    f"📵 Sin transcripción para encuesta {self.survey_id} → "
-                    f"disposición: {call_disposition}"
-                )
-
-            if not call_disposition:
-                call_disposition = "completada" if data_saved else "parcial"
-
-            inbound_fb_comentarios = None
-            if _is_inbound_agent_config(self.agent_config):
-                from utils.inbound_call import (
-                    build_inbound_fallback_comentarios,
-                    normalize_inbound_disposition,
-                )
-
-                call_disposition = normalize_inbound_disposition(
-                    call_disposition,
-                    transcript,
-                    data_saved,
-                    agent_type,
-                )
-                datos_extra = _build_inbound_datos_extra(
-                    self.agent_config,
-                    self.room_name,
-                    datos_extra,
-                )
-                inbound_fb_comentarios = build_inbound_fallback_comentarios
-
-            enc_id = int(self.survey_id) if str(self.survey_id).isdigit() else 0
-
-            if data_saved:
-                logger.info(
-                    f"📝 Guardando transcripción/disposición/datos_extra para encuesta "
-                    f"{self.survey_id} (datos numéricos ya guardados por tool)"
-                )
-                try:
-                    _enc_job = await enqueue_guardar_encuesta({
-                        "id_encuesta": enc_id,
-                        "transcription": transcript,
-                        "datos_extra": datos_extra,
-                        "seconds_used": seconds_used,
-                    })
-                    logger.info(f"📬 Extras post-llamada encolados (job={_enc_job})")
-                except Exception as save_err:
-                    logger.error(f"Error encolando extras: {save_err}")
-            else:
-                logger.warning(
-                    f"⚠️ La sesión terminó sin guardar datos explícitos por tool "
-                    f"(Survey ID: {self.survey_id}) → Disposición: {call_disposition}"
-                )
-                try:
-                    if inbound_fb_comentarios is not None:
-                        comentarios_fb = inbound_fb_comentarios(
-                            call_disposition,
-                            datos_extra,
-                            agent_type,
-                        )
-                    else:
-                        comentarios_fb = (
-                            "Llamada finalizada sin interacción"
-                            if call_disposition == "no_contesta"
-                            else f"Llamada {call_disposition} via post-call"
-                        )
-                    _enc_job = await enqueue_guardar_encuesta({
-                        "id_encuesta": enc_id,
-                        "transcription": transcript,
-                        "status": call_disposition,
-                        "comentarios": comentarios_fb,
-                        "datos_extra": datos_extra,
-                        "seconds_used": seconds_used,
-                    })
-                    logger.info(
-                        f"📬 Fallback post-llamada encolado "
-                        f"(disposición: {call_disposition}, job={_enc_job})"
-                    )
-                except Exception as save_err:
-                    logger.error(f"Error encolando fallback: {save_err}")
-
-            # Fase 2 — Actualizar ficha de contacto post-llamada (no bloqueante)
-            try:
-                from utils.call_analyzer import upsert_contacto_post_call
-                _telefono = (
-                    (datos_extra or {}).get("telefono")
-                    or self.agent_config.get("contacto_phone")
-                    or ""
-                )
-                _nombre = getattr(self.agent_instance, "_detected_customer_name", "") or None
-                _empresa_id_int = int(self.agent_config.get("empresa_id") or 0)
-                if _telefono and _empresa_id_int:
-                    resumen = (datos_extra or {}).get("resumen_narrativo")
-                    asyncio.create_task(
-                        upsert_contacto_post_call(
-                            empresa_id=_empresa_id_int,
-                            telefono=str(_telefono),
-                            nombre_detectado=_nombre,
-                            disposicion=call_disposition,
-                            resumen=resumen,
-                            datos_llamada={
-                                "encuesta_id": enc_id,
-                                "duracion_segundos": seconds_used,
-                                "agent_name": self.agent_config.get("name"),
-                                "fecha": datetime.now().isoformat(),
-                                "notas_agente": datos_extra or {},
-                            },
-                        )
-                    )
-            except Exception as contact_err:
-                logger.warning("[%s] Error actualizando ficha de contacto: %s", self.job_id, contact_err)
-
-        except Exception as fatal_post:
-            logger.error(
-                f"🚨 [{self.job_id}] EXCEPCIÓN FATAL NO CAPTURADA en finalize: {fatal_post}"
-            )
-
-
-# ============================================================================
-# FUNCIÓN PARA OBTENER LA CONFIGURACIÓN DEL AGENTE DESDE LA API
-async def fetch_agent_config(survey_id: str, expected_empresa_id: str = "0") -> dict:
-    """Consulta config del agente: Redis (TTL 1h) → HTTP fallback → escribe en Redis."""
-    cache_key = f"ausarta:agent_config:survey_{survey_id}"
-
-    try:
-        redis_client = await get_redis()
-        cached_raw = await redis_client.get(cache_key)
-        if cached_raw:
-            config = json.loads(cached_raw)
-            _validate_agent_config_tenant(config, expected_empresa_id)
-            logger.info(f"📋 Config desde Redis para survey {survey_id}")
-            return config
-    except Exception as cache_err:
-        logger.warning(f"⚠️ Redis cache miss/error para survey {survey_id}: {cache_err}")
-
-    server_url = BRIDGE_SERVER_URL_INTERNAL
-    max_attempts = 3
-    for attempt in range(1, max_attempts + 1):
-        url = f"{server_url}/api/agent_config_by_survey/{survey_id}?_ts={int(asyncio.get_running_loop().time() * 1000)}"
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url,
-                    timeout=5,
-                    headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
-                ) as resp:
-                    if resp.status == 200:
-                        config = await resp.json()
-                        _validate_agent_config_tenant(config, expected_empresa_id)
-
-                        try:
-                            redis_client = await get_redis()
-                            await redis_client.set(
-                                cache_key,
-                                json.dumps(config, ensure_ascii=False),
-                                ex=_AGENT_CONFIG_CACHE_TTL,
-                            )
-                        except Exception as write_err:
-                            logger.warning(
-                                f"⚠️ No se pudo cachear config en Redis survey {survey_id}: {write_err}"
-                            )
-
-                        logger.info(
-                            f"📋 Config HTTP para survey {survey_id} (attempt {attempt}/{max_attempts}): "
-                            f"nombre='{config.get('name')}', modelo='{config.get('llm_model')}', "
-                            f"cfg_updated_at='{config.get('config_updated_at')}'"
-                        )
-                        return config
-                    logger.warning(
-                        f"⚠️ Intento {attempt}/{max_attempts}: no se pudo obtener config (HTTP {resp.status})"
-                    )
-        except Exception as e:
-            if "Violación de seguridad" in str(e):
-                raise
-            logger.warning(
-                f"⚠️ Intento {attempt}/{max_attempts}: error obteniendo config de agente: {e}"
-            )
-
-        if attempt < max_attempts:
-            await asyncio.sleep(0.25 * attempt)
-
-    logger.warning("⚠️ No se pudo obtener config fresca tras reintentos. Usando defaults.")
-    return {}
-
-
-async def fetch_agent_config_by_agent_id(agent_id: str, expected_empresa_id: str = "0") -> dict:
-    """Consulta config directa por agent_id para llamadas entrantes SIP sin encuesta previa."""
-    cache_key = f"ausarta:agent_config:agent_{agent_id}:empresa_{expected_empresa_id or '0'}"
-    try:
-        redis_client = await get_redis()
-        cached_raw = await redis_client.get(cache_key)
-        if cached_raw:
-            config = json.loads(cached_raw)
-            _validate_agent_config_tenant(config, expected_empresa_id)
-            logger.info(f"Config inbound desde Redis para agent_id {agent_id}")
-            return config
-    except Exception as cache_err:
-        logger.warning(f"Redis cache miss/error para agent_id {agent_id}: {cache_err}")
-
-    server_url = BRIDGE_SERVER_URL_INTERNAL
-    query_empresa = f"&empresa_id={expected_empresa_id}" if expected_empresa_id and expected_empresa_id != "0" else ""
-    url = f"{server_url}/api/agent_config_by_agent/{agent_id}?_ts={int(asyncio.get_running_loop().time() * 1000)}{query_empresa}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            url,
-            timeout=5,
-            headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
-        ) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"No se pudo obtener config por agent_id={agent_id} (HTTP {resp.status})")
-            config = await resp.json()
-            _validate_agent_config_tenant(config, expected_empresa_id)
-            try:
-                redis_client = await get_redis()
-                await redis_client.set(
-                    cache_key,
-                    json.dumps(config, ensure_ascii=False),
-                    ex=_AGENT_CONFIG_CACHE_TTL,
-                )
-            except Exception as write_err:
-                logger.warning(f"No se pudo cachear config inbound agent_id={agent_id}: {write_err}")
-            return config
-
-
-async def _register_inbound_call_record(
-    agent_config: dict,
-    room_name: str,
-    empresa_id: str,
-) -> int:
-    """Registra la llamada entrante en backend y devuelve encuesta_id numérico."""
-    server_url = BRIDGE_SERVER_URL_INTERNAL
-    telefono = _parse_inbound_caller_from_room(room_name)
-    try:
-        empresa_id_int = int(empresa_id) if str(empresa_id).isdigit() else int(agent_config.get("empresa_id") or 0)
-    except (TypeError, ValueError):
-        empresa_id_int = 0
-    raw_agent_id = agent_config.get("id") or agent_config.get("agent_id")
-    try:
-        agent_id_int = int(raw_agent_id) if raw_agent_id is not None else None
-    except (TypeError, ValueError):
-        agent_id_int = None
-
-    payload = {
-        "empresa_id": empresa_id_int,
-        "agent_id": agent_id_int,
-        "telefono": telefono,
-        "room_name": room_name,
-        "agent_type": agent_config.get("agent_type"),
-    }
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{server_url}/inbound-call/register",
-                json=payload,
-                timeout=5,
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return int(data.get("encuesta_id") or 0)
-                logger.warning(
-                    "inbound-call/register HTTP %s room=%s", resp.status, room_name
-                )
-    except Exception as exc:
-        logger.warning("No se pudo registrar inbound call: %s", exc)
-    return 0
+        """Delega el post-procesamiento al módulo post_call_processor."""
+        await finalize_call_session(self)
 
 
 # ============================================================================

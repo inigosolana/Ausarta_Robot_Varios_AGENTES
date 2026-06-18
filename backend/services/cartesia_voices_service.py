@@ -297,6 +297,6 @@ async def list_voices(language: str | None = None) -> dict[str, Any]:
     return {
         "voices": filtered or voices,
         "source": source,
-        "default_voice_id": settings.default_cartesia_voice_id,
+        "default_voice_id": settings.default_cartesia_voice,
         "count": len(filtered or voices),
     }

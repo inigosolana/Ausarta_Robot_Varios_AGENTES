@@ -227,7 +227,7 @@ async def health_check():
             raise RuntimeError("cliente no inicializado")
         # Query trivial para verificar conectividad real
         await _asyncio.wait_for(
-            __import__("asyncio").get_event_loop().run_in_executor(
+            _asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: supabase.table("empresas").select("id").limit(1).execute(),
             ),
