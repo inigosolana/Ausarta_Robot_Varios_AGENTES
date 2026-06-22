@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arq-worker
+  namespace: ausarta-voice
+  labels:
+    app.kubernetes.io/name: arq-worker
+    app.kubernetes.io/component: campaign-worker
+    app.kubernetes.io/part-of: ausarta-voice-agent
+spec:
+  # Réplicas gestionadas por KEDA (ScaledObject). No fijar replicas aquí.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: arq-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: arq-worker
+        app.kubernetes.io/component: campaign-worker
+    spec:
+      serviceAccountName: arq-worker
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: arq-worker
+          # Misma imagen que backend/livekit-agent (backend/Dockerfile)
+          image: ghcr.io/ausarta/voice-agent-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["arq"]
+          args: ["worker.WorkerSettings"]
+          workingDir: /app
+          envFrom:
+            - configMapRef:
+                name: arq-worker-config
+            - secretRef:
+                name: ausarta-backend-secrets
+          env:
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ausarta-backend-secrets
+                  key: REDIS_URL
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          livenessProbe:
+            exec:
+              command: ["arq", "worker.WorkerSettings", "--check"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["arq", "worker.WorkerSettings", "--check"]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 3
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: arq-worker
+                topologyKey: kubernetes.io/hostname

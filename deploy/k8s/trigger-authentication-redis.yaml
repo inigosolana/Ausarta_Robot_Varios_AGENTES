@@ -1,0 +1,13 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-redis-auth
+  namespace: ausarta-voice
+  labels:
+    app.kubernetes.io/name: arq-worker
+    app.kubernetes.io/component: keda
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: ausarta-backend-secrets
+      key: REDIS_PASSWORD
