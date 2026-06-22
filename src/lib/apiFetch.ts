@@ -10,6 +10,7 @@
  *   const res = await apiFetch('/api/admin/users/123', { method: 'DELETE' });
  */
 import { supabase } from './supabase';
+import { clearSessionAuth, getImpersonateToken } from './sessionAuthStore';
 
 // Caché en memoria del access_token activo.
 // Se hidrata en la importación inicial y se mantiene sincronizado por el listener.
@@ -27,9 +28,7 @@ supabase.auth.onAuthStateChange((_event, session) => {
 
 async function _forceLogout(): Promise<never> {
     _cachedToken = null;
-    localStorage.removeItem('impersonateToken');
-    localStorage.removeItem('spoofedRole');
-    localStorage.removeItem('spoofedEmpresa');
+    clearSessionAuth();
     await supabase.auth.signOut();
     window.location.href = '/login?session_expired=true';
     throw new Error('Sesión expirada');
@@ -67,7 +66,7 @@ export async function apiFetch(
 
     headers['Authorization'] = `Bearer ${token}`;
 
-    const impersonateToken = localStorage.getItem('impersonateToken');
+    const impersonateToken = getImpersonateToken();
     if (impersonateToken) {
         headers['X-Impersonate-Token'] = impersonateToken;
     }

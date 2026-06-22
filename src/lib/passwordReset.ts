@@ -66,8 +66,12 @@ export async function updatePasswordAfterRecovery(
 }
 
 export function passwordResetRedirectUrl(): string {
-    const productionUrl = 'http://15.216.15.30/login';
-    if (typeof window === 'undefined') return productionUrl;
-    if (window.location.origin.includes('localhost')) return productionUrl;
-    return `${window.location.origin}/login`;
+    const base =
+        typeof window !== 'undefined'
+            ? window.location.origin
+            : (import.meta as { env?: { VITE_FRONTEND_URL?: string } }).env?.VITE_FRONTEND_URL || '';
+    if (!base) {
+        throw new Error('URL del frontend no configurada (VITE_FRONTEND_URL o window.location)');
+    }
+    return `${base.replace(/\/$/, '')}/login`;
 }

@@ -2,20 +2,21 @@
 recording_service.py — Grabación de llamadas via LiveKit Egress + Supabase Storage.
 
 Configuración requerida en .env / docker-compose.yml:
-    ENABLE_RECORDING=true          # Activa el sistema de grabación
-    RECORDING_BUCKET=call-recordings  # Nombre del bucket en Supabase Storage (debe ser público o con signed URLs)
-    SUPABASE_S3_ACCESS_KEY         # Clave de acceso S3 de Supabase Storage (Dashboard → Storage → S3 Access)
-    SUPABASE_S3_SECRET_KEY         # Secreto S3 de Supabase Storage
-    SUPABASE_URL                   # Ya existente (para construir la URL pública)
+    ENABLE_RECORDING=true
+    RECORDING_BUCKET=call-recordings
+    SUPABASE_S3_ACCESS_KEY
+    SUPABASE_S3_SECRET_KEY
+    SUPABASE_URL
 
 Pasos en Supabase (solo una vez):
-    1. Storage → New bucket → nombre: "call-recordings" → Public: ON
+    1. Storage → New bucket → nombre: "call-recordings" → Public: OFF
     2. Storage → S3 Access → Copiar Access Key ID y Secret Access Key
     3. Añadir esas credenciales al .env con los nombres indicados arriba.
 """
 
-import os
+import asyncio
 import logging
+import os
 from typing import Optional
 
 logger = logging.getLogger("api-backend")
@@ -25,6 +26,7 @@ SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
 SUPABASE_S3_ACCESS_KEY: str = os.getenv("SUPABASE_S3_ACCESS_KEY", "")
 SUPABASE_S3_SECRET_KEY: str = os.getenv("SUPABASE_S3_SECRET_KEY", "")
 RECORDING_BUCKET: str = os.getenv("RECORDING_BUCKET", "call-recordings")
+SIGNED_URL_TTL_SECONDS: int = int(os.getenv("RECORDING_SIGNED_URL_TTL", "3600"))
 
 # encuesta_id → egress_id (en memoria — el worker es un proceso único por container)
 _active_egress: dict[int, str] = {}
@@ -36,13 +38,31 @@ def _s3_endpoint() -> str:
     return f"https://{project_ref}.supabase.co/storage/v1/s3"
 
 
-def _public_url(encuesta_id: int) -> str:
-    """URL pública del archivo de audio en Supabase Storage."""
-    project_ref = SUPABASE_URL.replace("https://", "").split(".")[0]
-    return (
-        f"https://{project_ref}.supabase.co/storage/v1/object/public"
-        f"/{RECORDING_BUCKET}/recordings/{encuesta_id}.ogg"
-    )
+def _recording_path(encuesta_id: int) -> str:
+    return f"recordings/{encuesta_id}.ogg"
+
+
+async def create_signed_recording_url(encuesta_id: int, *, expires_in: int | None = None) -> Optional[str]:
+    """Genera URL firmada de corta duración para un archivo de grabación privado."""
+    from services.supabase_service import supabase
+
+    if not supabase:
+        return None
+
+    ttl = expires_in if expires_in is not None else SIGNED_URL_TTL_SECONDS
+    path = _recording_path(encuesta_id)
+
+    def _sign() -> dict:
+        return supabase.storage.from_(RECORDING_BUCKET).create_signed_url(path, ttl)
+
+    try:
+        result = await asyncio.to_thread(_sign)
+        if isinstance(result, dict):
+            return result.get("signedURL") or result.get("signed_url")
+        return getattr(result, "signedURL", None) or getattr(result, "signed_url", None)
+    except Exception as exc:
+        logger.warning("[Recording] No se pudo firmar URL para encuesta %s: %s", encuesta_id, exc)
+        return None
 
 
 async def start_recording(room_name: str, encuesta_id: int) -> Optional[str]:
@@ -77,7 +97,7 @@ async def start_recording(room_name: str, encuesta_id: int) -> Optional[str]:
                 file_outputs=[
                     EncodedFileOutput(
                         file_type=EncodedFileType.OGG,
-                        filepath=f"recordings/{encuesta_id}.ogg",
+                        filepath=_recording_path(encuesta_id),
                         s3=S3Upload(
                             access_key=SUPABASE_S3_ACCESS_KEY,
                             secret=SUPABASE_S3_SECRET_KEY,
@@ -93,18 +113,18 @@ async def start_recording(room_name: str, encuesta_id: int) -> Optional[str]:
 
         egress_id: str = egress_info.egress_id
         _active_egress[encuesta_id] = egress_id
-        logger.info(f"🎙️ [Recording] Egress iniciado egress_id={egress_id} para encuesta {encuesta_id}")
+        logger.info("🎙️ [Recording] Egress iniciado egress_id=%s para encuesta %s", egress_id, encuesta_id)
         return egress_id
 
     except Exception as exc:
-        logger.warning(f"⚠️ [Recording] No se pudo iniciar grabación para encuesta {encuesta_id}: {exc}")
+        logger.warning("⚠️ [Recording] No se pudo iniciar grabación para encuesta %s: %s", encuesta_id, exc)
         return None
 
 
 async def stop_recording(encuesta_id: int) -> Optional[str]:
     """
     Para la grabación asociada a una encuesta.
-    Retorna la URL pública del audio si el egress estaba activo, None si no.
+    Retorna una signed URL (bucket privado) si el egress estaba activo, None si no.
     """
     if not ENABLE_RECORDING:
         return None
@@ -118,10 +138,10 @@ async def stop_recording(encuesta_id: int) -> Optional[str]:
         from livekit.api import StopEgressRequest
 
         await lkapi.egress.stop_egress(StopEgressRequest(egress_id=egress_id))
-        url = _public_url(encuesta_id)
-        logger.info(f"✅ [Recording] Grabación parada egress_id={egress_id} → {url}")
+        url = await create_signed_recording_url(encuesta_id)
+        logger.info("✅ [Recording] Grabación parada egress_id=%s encuesta=%s", egress_id, encuesta_id)
         return url
 
     except Exception as exc:
-        logger.warning(f"⚠️ [Recording] Error al parar egress {egress_id}: {exc}")
+        logger.warning("⚠️ [Recording] Error al parar egress %s: %s", egress_id, exc)
         return None

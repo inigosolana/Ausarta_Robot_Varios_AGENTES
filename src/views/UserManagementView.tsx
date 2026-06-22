@@ -169,9 +169,7 @@ const UserManagementView: React.FC = () => {
                     full_name: newName,
                     role: newRole,
                     empresa_id: finalEmpresaId || null,
-                    redirect_to: window.location.origin.includes('localhost')
-                        ? 'http://15.216.15.30'
-                        : window.location.origin,
+                    redirect_to: window.location.origin,
                 }),
             });
 
@@ -233,7 +231,7 @@ const UserManagementView: React.FC = () => {
     const handleResendInvite = async (email: string) => {
         try {
             const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                redirectTo: window.location.origin.includes('localhost') ? 'http://15.216.15.30' : window.location.origin,
+                redirectTo: window.location.origin,
             });
             if (error) throw error;
             toast.success(`${t('Invitation email resent to', 'Email de invitación reenviado a')} ${email}`);

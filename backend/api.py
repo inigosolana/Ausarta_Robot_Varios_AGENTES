@@ -81,8 +81,13 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("✅ JWT de sesión: SUPABASE_JWT_SECRET cargada correctamente.")
 
-    for issue in validate_startup_config():
-        logger.critical("🚨 Configuración insegura/incompleta: %s", issue)
+    startup_issues = validate_startup_config()
+    if startup_issues:
+        for issue in startup_issues:
+            logger.critical("🚨 Configuración insegura/incompleta: %s", issue)
+        raise RuntimeError(
+            "Configuración obligatoria incompleta: " + ", ".join(startup_issues)
+        )
 
     try:
         await get_redis()

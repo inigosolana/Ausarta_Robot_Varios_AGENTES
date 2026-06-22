@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Sparkles, Loader2, X, MessageSquare, BotMessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
+import { sanitizeAssistantHtml } from '../lib/sanitizeHtml';
 
 interface Message {
     id: string;
@@ -159,7 +160,7 @@ const AssistantPanel: React.FC<AssistantPanelProps> = ({ isOpen, onClose }) => {
                             }`}>
                             <div
                                 className="whitespace-pre-wrap leading-relaxed text-[14px]"
-                                dangerouslySetInnerHTML={{ __html: message.content.replace(/\n/g, '<br/>') }}
+                                dangerouslySetInnerHTML={{ __html: sanitizeAssistantHtml(message.content) }}
                             />
                         </div>
                     </div>

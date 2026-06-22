@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from services.supabase_service import supabase, sb_query
 from services.auth import CurrentUser, require_admin, get_current_user
+from utils.postgrest_escape import escape_postgrest_ilike
 
 logger = logging.getLogger("api-backend")
 
@@ -63,8 +64,8 @@ async def list_contacts(
     )
 
     if q:
-        # Búsqueda por nombre o teléfono (ilike)
-        qb = qb.or_(f"nombre.ilike.%{q}%,telefono.ilike.%{q}%")
+        safe_q = escape_postgrest_ilike(q)
+        qb = qb.or_(f"nombre.ilike.%{safe_q}%,telefono.ilike.%{safe_q}%")
     if disposicion:
         qb = qb.eq("ultima_disposicion", disposicion)
     if etiqueta:

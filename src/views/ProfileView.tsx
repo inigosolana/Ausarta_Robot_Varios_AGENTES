@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { passwordResetRedirectUrl, requestPasswordReset } from '../lib/passwordReset';
 import { useAuth } from '../contexts/AuthContext';
+import { canUseSimulationMode } from '../lib/platformAccess';
 import type { UserProfile, UserRole, Empresa } from '../types';
 import { toast } from 'react-hot-toast';
 
@@ -19,8 +20,7 @@ export const ProfileView: React.FC = () => {
     // For now, let's assume if they have access to this view and were once superadmin, they can switch.
     // Use realProfile to check their actual privileges regardless of spoofing
     const actualProfile = realProfile || profile;
-    const isRootEmail = actualProfile?.email === 'admin@ausarta.net';
-    const canSwitch = actualProfile?.role === 'superadmin' || isRootEmail;
+    const canSwitch = canUseSimulationMode(actualProfile);
 
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);

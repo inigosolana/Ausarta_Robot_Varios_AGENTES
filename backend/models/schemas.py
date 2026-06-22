@@ -140,7 +140,7 @@ class AIPromptRequest(BaseModel):
     current_critical_rules: Optional[str] = None
 
 class AssistantChatRequest(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1, max_length=4000)
     empresa_id: Optional[int] = None
     user_id: Optional[str] = None
 

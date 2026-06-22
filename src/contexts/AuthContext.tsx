@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
+import { canUseSimulationMode, isAusartaEmpresa } from '../lib/platformAccess';
+import { clearSessionAuth, setImpersonateToken as storeImpersonateToken } from '../lib/sessionAuthStore';
 import type { UserProfile, UserPermission, UserRole, Empresa } from '../types';
 import type { User, Session } from '@supabase/supabase-js';
 
@@ -43,30 +45,29 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const [realProfile, setRealProfile] = useState<UserProfile | null>(null);
 
-    // Initialize spoofing from localStorage
+    // Simulación de rol/empresa: sessionStorage (se limpia al cerrar pestaña)
     const [spoofedRole, setSpoofedRoleState] = useState<UserRole | null>(() => {
-        return (localStorage.getItem('spoofedRole') as UserRole) || null;
+        return (sessionStorage.getItem('spoofedRole') as UserRole) || null;
     });
     const [spoofedEmpresa, setSpoofedEmpresaState] = useState<number | null>(() => {
-        const val = localStorage.getItem('spoofedEmpresa');
+        const val = sessionStorage.getItem('spoofedEmpresa');
         return val ? Number(val) : null;
     });
 
     const setSpoofedRole = (role: UserRole | null) => {
-        if (role) localStorage.setItem('spoofedRole', role);
-        else localStorage.removeItem('spoofedRole');
+        if (role) sessionStorage.setItem('spoofedRole', role);
+        else sessionStorage.removeItem('spoofedRole');
         setSpoofedRoleState(role);
     };
 
     const setSpoofedEmpresa = (empresaId: number | null) => {
-        if (empresaId) localStorage.setItem('spoofedEmpresa', empresaId.toString());
-        else localStorage.removeItem('spoofedEmpresa');
+        if (empresaId) sessionStorage.setItem('spoofedEmpresa', empresaId.toString());
+        else sessionStorage.removeItem('spoofedEmpresa');
         setSpoofedEmpresaState(empresaId);
     };
 
     const setImpersonateToken = (token: string | null) => {
-        if (token) localStorage.setItem('impersonateToken', token);
-        else localStorage.removeItem('impersonateToken');
+        storeImpersonateToken(token);
     };
 
     // Load profile and permissions
@@ -102,8 +103,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return;
         }
 
-        const isActuallyAusarta = realProfile.empresas?.nombre?.toLowerCase() === 'ausarta' || realProfile.email === 'admin@ausarta.net';
-        const canSpoof = realProfile.role === 'superadmin' || ((realProfile.role === 'admin' || realProfile.email === 'admin@ausarta.net') && isActuallyAusarta);
+        const canSpoof = canUseSimulationMode(realProfile);
 
         if (canSpoof && (spoofedRole || spoofedEmpresa)) {
             // Need to fetch company data if spoofedEmpresa is set
@@ -130,6 +130,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const refreshProfile = async () => {
         if (user) await loadUserData(user.id);
     };
+
+    useEffect(() => {
+        localStorage.removeItem('impersonateToken');
+        localStorage.removeItem('spoofedRole');
+        localStorage.removeItem('spoofedEmpresa');
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -189,12 +195,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return { error: error as Error | null };
     };
 
-    const signUp = async (email: string, password: string, fullName: string, role: UserRole = 'user') => {
+    const signUp = async (email: string, password: string, fullName: string, _role?: UserRole) => {
         const { error } = await supabase.auth.signUp({
             email,
             password,
             options: {
-                data: { full_name: fullName, role }
+                data: { full_name: fullName }
             }
         });
         return { error: error as Error | null };
@@ -208,7 +214,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setPermissions([]);
         setSpoofedRole(null);
         setSpoofedEmpresa(null);
-        setImpersonateToken(null);
+        clearSessionAuth();
     };
 
     const hasPermission = (module: string): boolean => {
@@ -216,8 +222,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         // Superadmin y admin de Ausarta: acceso completo a módulos (misma visibilidad de datos)
         const isAusartaAdmin =
-            profile.role === 'admin' &&
-            (profile.empresas?.nombre?.toLowerCase() === 'ausarta' || profile.empresa_id === 1);
+            profile.role === 'admin' && isAusartaEmpresa(profile);
         if (profile.role === 'superadmin' || isAusartaAdmin) return true;
 
         // Modules enabled for the company
@@ -249,7 +254,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Plataforma Ausarta: admin de empresa Ausarta o superadmin
     const isPlatformOwner =
         !!profile &&
-        (profile.empresas?.nombre?.toLowerCase() === 'ausarta' || profile.role === 'superadmin') &&
+        isAusartaEmpresa(profile) &&
         (profile.role === 'superadmin' || profile.role === 'admin');
 
     const hasGlobalAccess = isPlatformOwner;

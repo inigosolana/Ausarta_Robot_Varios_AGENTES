@@ -27,6 +27,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Toaster, toast } from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { canUseSimulationMode } from '../lib/platformAccess';
 import SidebarItem from './SidebarItem';
 import AssistantPanel from './AssistantPanel';
 
@@ -53,13 +54,7 @@ const AppShell: React.FC = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
 
-  const isRootUser =
-    realProfile?.email === 'admin@ausarta.net' ||
-    realProfile?.email === 'inigo2.solana@ausarta.net' ||
-    realProfile?.email === 'inigosolana@gmail.com';
-  const isAusartaAdmin =
-    realProfile?.empresas?.nombre?.toLowerCase() === 'ausarta' && realProfile?.role === 'admin';
-  const canSimulation = realProfile?.role === 'superadmin' || isRootUser || isAusartaAdmin;
+  const canSimulation = canUseSimulationMode(realProfile);
 
   // Redirect to "/" if role change makes current path inaccessible
   useEffect(() => {
