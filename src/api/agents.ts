@@ -15,6 +15,14 @@ export const companyUserKeys = {
   list: (empresaId: number) => [...companyUserKeys.all, empresaId] as const,
 };
 
+export const aiConfigKeys = {
+  detail: (agentId: number) => ['agents', 'ai-config', agentId] as const,
+};
+
+export const promptTemplateKeys = {
+  all: ['prompt-templates'] as const,
+};
+
 function normalizeAgentId<T extends { id?: number | string }>(agent: T): T & { id?: number } {
   if (agent.id == null) return agent as T & { id?: number };
   const numeric = typeof agent.id === 'string' ? Number(agent.id) : agent.id;
@@ -29,6 +37,22 @@ export async function fetchAgentsWithAI(
   const data = await res.json();
   if (!Array.isArray(data)) return [];
   return data.map((agent) => normalizeAgentId(agent as AgentConfig & { ai_config?: AIConfig }));
+}
+
+export async function fetchAIConfig(agentId: number): Promise<AIConfig | null> {
+  const { data, error } = await supabase
+    .from('ai_config')
+    .select('*')
+    .eq('agent_id', agentId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function fetchPromptTemplates(): Promise<{ id: number; name: string; content: string }[]> {
+  const { data, error } = await supabase.from('prompt_templates').select('id, name, content');
+  if (error) throw error;
+  return data || [];
 }
 
 export async function fetchCompanyUsers(empresaId: number): Promise<UserProfile[]> {
@@ -46,6 +70,24 @@ export function useAgentsWithAI(empresaId?: number, enabled = true) {
     queryFn: () => fetchAgentsWithAI(empresaId),
     enabled,
     staleTime: 30_000,
+  });
+}
+
+export function useAIConfig(agentId?: number, enabled = true) {
+  return useQuery({
+    queryKey: aiConfigKeys.detail(agentId ?? 0),
+    queryFn: () => fetchAIConfig(agentId!),
+    enabled: enabled && Boolean(agentId),
+    staleTime: 60_000,
+  });
+}
+
+export function usePromptTemplates(enabled = true) {
+  return useQuery({
+    queryKey: promptTemplateKeys.all,
+    queryFn: fetchPromptTemplates,
+    enabled,
+    staleTime: 300_000,
   });
 }
 

@@ -1,86 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { BarChart3, Globe, Cpu, Mic, Volume2, AlertTriangle, XCircle, Zap, Terminal, RefreshCw, Phone, Clock, Coins } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../lib/apiFetch';
-
-const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8002/api';
+import { useMiConsumo, useSipLogs, useUsageDashboard } from '../api/usage';
 
 const UsageView: React.FC = () => {
     const { profile, isRole, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
-    const [integrations, setIntegrations] = useState<any[]>([]);
-    const [usage, setUsage] = useState<any>(null);
-    const [miConsumo, setMiConsumo] = useState<any>(null);
-    const [isMiConsumoLoading, setIsMiConsumoLoading] = useState(true);
-    const [alerts, setAlerts] = useState<any[]>([]);
-    const [liveLimits, setLiveLimits] = useState<any>(null);
-    const [sipLogs, setSipLogs] = useState<string[]>([]);
-    const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
-    const [isLoading, setIsLoading] = useState(true);
 
-    useEffect(() => {
-        loadData();
-    }, [profile]);
+    const empresaId = !isPlatformOwner && profile?.empresa_id ? profile.empresa_id : undefined;
+    const dashboardQuery = useUsageDashboard(empresaId, Boolean(profile));
+    const miConsumoQuery = useMiConsumo(Boolean(profile));
+    const sipLogsQuery = useSipLogs(Boolean(profile));
 
-    const loadSipLogs = async () => {
-        try {
-            setIsRefreshingLogs(true);
-            const res = await fetch(`${API_URL}/logs/sip`);
-            if (res.ok) {
-                const data = await res.json();
-                setSipLogs(data.logs || []);
-            }
-        } catch (e) {
-            console.error("Error loading SIP logs:", e);
-        } finally {
-            setIsRefreshingLogs(false);
-        }
-    };
+    const integrations = dashboardQuery.data?.integrations ?? [];
+    const usage = dashboardQuery.data?.usage ?? null;
+    const liveLimits = dashboardQuery.data?.liveLimits ?? null;
+    const alerts = dashboardQuery.data?.alerts ?? [];
+    const miConsumo = miConsumoQuery.data ?? null;
+    const sipLogs = sipLogsQuery.data ?? [];
 
-    const loadMiConsumo = async () => {
-        try {
-            setIsMiConsumoLoading(true);
-            const res = await apiFetch('/api/usage/mi-consumo');
-            if (res.ok) setMiConsumo(await res.json());
-        } catch (e) {
-            console.error('Error loading mi-consumo:', e);
-        } finally {
-            setIsMiConsumoLoading(false);
-        }
-    };
-
-    const loadData = async () => {
-        try {
-            setIsLoading(true);
-            const params = new URLSearchParams();
-
-            if (!isPlatformOwner && profile?.empresa_id) {
-                params.append('empresa_id', String(profile.empresa_id));
-            }
-            const queryParams = params.toString() ? `?${params.toString()}` : '';
-
-            const [intRes, usageRes, limitsRes] = await Promise.all([
-                fetch(`${API_URL}/dashboard/integrations`),
-                fetch(`${API_URL}/dashboard/usage-stats${queryParams}`),
-                fetch(`${API_URL}/ai/limits`)
-            ]);
-
-            if (intRes.ok) setIntegrations(await intRes.json());
-            if (usageRes.ok) setUsage(await usageRes.json());
-            if (limitsRes.ok) setLiveLimits(await limitsRes.json());
-
-            const alertsRes = await fetch(`${API_URL}/alerts${queryParams}`);
-            if (alertsRes.ok) setAlerts(await alertsRes.json());
-
-            await Promise.all([loadSipLogs(), loadMiConsumo()]);
-
-        } catch (error) {
-            console.error('Error loading usage data:', error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
+    const isLoading = dashboardQuery.isLoading;
+    const isMiConsumoLoading = miConsumoQuery.isLoading;
+    const isRefreshingLogs = sipLogsQuery.isFetching;
 
     if (isLoading) return <div className="p-8 text-center text-gray-500">{t('Loading usage data...', 'Cargando datos de uso...')}</div>;
 
@@ -120,7 +63,7 @@ const UsageView: React.FC = () => {
                         )}
                     </h3>
                     <button
-                        onClick={loadMiConsumo}
+                        onClick={() => miConsumoQuery.refetch()}
                         disabled={isMiConsumoLoading}
                         className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-black uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-green-500/25 disabled:opacity-50"
                     >
@@ -603,7 +546,7 @@ const UsageView: React.FC = () => {
                         {t('Telephony System Logs (SIP)', 'Logs del Sistema de Telefonía (SIP)')}
                     </h3>
                     <button
-                        onClick={loadSipLogs}
+                        onClick={() => sipLogsQuery.refetch()}
                         disabled={isRefreshingLogs}
                         className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-blue-500/25 disabled:opacity-50"
                     >

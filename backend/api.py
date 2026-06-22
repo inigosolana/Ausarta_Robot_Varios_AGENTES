@@ -27,6 +27,7 @@ from routers.agents import router as agents_router
 from routers.telephony import router as telephony_router
 from routers.admin import router as admin_router
 from routers.campaigns import router as campaigns_router
+from routers.campaign_agent_config import router as campaign_agent_config_router
 from routers.n8n_proxy import router as n8n_proxy_router
 from routers.auth_public import router as auth_public_router
 from routers.assistant import router as assistant_router
@@ -218,6 +219,7 @@ app.include_router(agents_router)
 app.include_router(telephony_router)
 app.include_router(admin_router)
 app.include_router(campaigns_router)
+app.include_router(campaign_agent_config_router)
 app.include_router(n8n_proxy_router)
 app.include_router(auth_public_router)
 app.include_router(assistant_router)

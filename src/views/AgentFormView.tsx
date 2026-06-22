@@ -13,6 +13,8 @@ import { VoiceSelect } from '../components/agents/VoiceSelect';
 import { Link } from 'react-router-dom';
 import './agents.css';
 import { apiFetch } from '../lib/apiFetch';
+import { useEmpresasAdmin } from '../api/empresas';
+import { useAIConfig, usePromptTemplates } from '../api/agents';
 
 const AUSARTA_FEMALE_VOICE_ID = 'b5aa8098-49ef-475d-89b0-c9262ecf33fd';  // Chica castellano Cartesia
 
@@ -42,7 +44,13 @@ const AgentFormView: React.FC<Props> = ({ agent, empresaName, onSave, onCancel }
     const isRegularUser = isRole('user');
 
     const isEditing = !!agent?.id;
-    const [empresas, setEmpresas] = useState<Empresa[]>([]);
+    const empresasQuery = useEmpresasAdmin(undefined, isPlatformOwner);
+    const empresas = (empresasQuery.data ?? []) as Empresa[];
+    const isLoadingEmpresas = empresasQuery.isLoading;
+
+    const aiConfigQuery = useAIConfig(isEditing ? Number(agent?.id) : undefined, isEditing);
+    const templatesQuery = usePromptTemplates();
+    const templates = templatesQuery.data ?? [];
 
     const [formData, setFormData] = useState<AgentConfig>({
         name: agent?.name || '',
@@ -61,9 +69,7 @@ const AgentFormView: React.FC<Props> = ({ agent, empresaName, onSave, onCancel }
 
     const [aiConfig, setAiConfig] = useState<AIConfig>({ ...defaultAIConfig });
     const [isSaving, setIsSaving] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
-    const [isLoadingEmpresas, setIsLoadingEmpresas] = useState(false);
-    const [templates, setTemplates] = useState<{ id: number; name: string; content: string }[]>([]);
+    const isLoading = aiConfigQuery.isLoading && isEditing;
     const [activeTab, setActiveTab] = useState<'config' | 'overview' | 'results'>('config');
 
     // AI Prompt Generation State
@@ -89,62 +95,10 @@ const AgentFormView: React.FC<Props> = ({ agent, empresaName, onSave, onCancel }
 
 
     useEffect(() => {
-        if (isEditing && agent?.id) {
-            loadAIConfig(Number(agent.id));
+        if (aiConfigQuery.data) {
+            setAiConfig(aiConfigQuery.data as AIConfig);
         }
-    }, [isEditing, agent?.id]);
-
-    useEffect(() => {
-        loadTemplates();
-    }, []);
-
-    useEffect(() => {
-        if (isPlatformOwner) {
-            loadEmpresas();
-        }
-    }, [isPlatformOwner]);
-
-    const loadEmpresas = async () => {
-        setIsLoadingEmpresas(true);
-        try {
-            const API_URL = (import.meta as any).env.VITE_API_URL || '';
-            const resp = await fetch(`${API_URL}/api/empresas`);
-            if (!resp.ok) throw new Error('No se pudo cargar empresas');
-            const data = await resp.json();
-            setEmpresas(Array.isArray(data) ? data : []);
-        } catch (err) {
-            console.error('Error loading empresas:', err);
-            setEmpresas([]);
-        } finally {
-            setIsLoadingEmpresas(false);
-        }
-    };
-
-    const loadAIConfig = async (agentId: number) => {
-        setIsLoading(true);
-        try {
-            const result = await Promise.race([
-                supabase
-                    .from('ai_config')
-                    .select('*')
-                    .eq('agent_id', agentId)
-                    .maybeSingle(),
-                new Promise<never>((_, reject) =>
-                    setTimeout(() => reject(new Error('Timeout loading AI config')), 10000)
-                ),
-            ]) as { data: AIConfig | null };
-            if (result?.data) setAiConfig(result.data as AIConfig);
-        } catch (err) {
-            console.error('Error loading AI config:', err);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const loadTemplates = async () => {
-        const { data } = await supabase.from('prompt_templates').select('id, name, content');
-        if (data) setTemplates(data);
-    };
+    }, [aiConfigQuery.data]);
 
     const handleSave = async () => {
         if (!formData.name.trim()) {
