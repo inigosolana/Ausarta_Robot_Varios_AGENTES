@@ -1,10 +1,13 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useRef } from "react";
 import { Bot, Loader2, Search, Building2, ChevronRight, ArrowLeft, Users, Mail, Trash2, Settings, Phone, Megaphone, BarChart3, Zap, Upload, X, ImageIcon } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useTranslation } from "react-i18next";
 import type { AgentConfig, AIConfig, Empresa, UserProfile } from "../types";
 import { apiFetch } from "../lib/apiFetch";
+import { empresaAdminKeys, useEmpresasAdmin, useInvalidateEmpresasAdmin } from "../api/empresas";
+import { useAgentsWithAI, useCompanyUsers, useInvalidateAgents } from "../api/agents";
 
 const SkeletonCard = () => (
     <div className="bg-white rounded-2xl border border-gray-100 p-8 flex flex-col items-center space-y-4 animate-pulse">
@@ -19,16 +22,27 @@ const SkeletonCard = () => (
 );
 
 const AgentListView: React.FC = () => {
-    const { profile, isRole, isPlatformOwner } = useAuth();
+    const { profile, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
+    const queryClient = useQueryClient();
+    const invalidateEmpresas = useInvalidateEmpresasAdmin();
+    const invalidateAgents = useInvalidateAgents();
 
-    const [empresas, setEmpresas] = useState<Empresa[]>([]);
-    const [agents, setAgents] = useState<(AgentConfig & { ai_config?: AIConfig })[]>([]);
-    const [companyUsers, setCompanyUsers] = useState<UserProfile[]>([]);
+    const empresasFilter = !isPlatformOwner && profile?.empresa_id ? profile.empresa_id : undefined;
+    const empresasQuery = useEmpresasAdmin(empresasFilter, Boolean(profile));
 
-    // View States
-    const [loading, setLoading] = useState(true);
     const [selectedEmpresa, setSelectedEmpresa] = useState<Empresa | null>(null);
+    const selectedEmpresaId = selectedEmpresa?.id;
+
+    const agentsQuery = useAgentsWithAI(selectedEmpresaId, Boolean(selectedEmpresaId));
+    const usersQuery = useCompanyUsers(selectedEmpresaId, Boolean(selectedEmpresaId));
+
+    const empresas = empresasQuery.data ?? [];
+    const agents = (agentsQuery.data ?? []) as (AgentConfig & { ai_config?: AIConfig })[];
+    const companyUsers = (usersQuery.data ?? []) as UserProfile[];
+    const listLoading = empresasQuery.isLoading;
+    const detailLoading = agentsQuery.isLoading || usersQuery.isLoading;
+
     const [activeTab, setActiveTab] = useState<"agents" | "users">("agents");
     const [search, setSearch] = useState("");
     const [selectedResponsable, setSelectedResponsable] = useState<string>("all");
@@ -114,7 +128,7 @@ const AgentListView: React.FC = () => {
                 if (error) throw error;
             }
             setModalOpen(false);
-            loadEmpresas();
+            invalidateEmpresas();
         } catch (err) {
             alert(t('Error saving company', 'Error al guardar la empresa'));
         } finally {
@@ -123,87 +137,10 @@ const AgentListView: React.FC = () => {
     };
     // ──────────────────────────────────────────────────────────────────────────
 
-    useEffect(() => {
-        loadEmpresas();
-    }, []);
-
-    const loadEmpresas = async () => {
-        setLoading(true);
-        try {
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000));
-            // Use cached API endpoint
-            const fetchPromise = fetch(`${(import.meta as any).env.VITE_API_URL || ''}/api/empresas`);
-            const res = (await Promise.race([fetchPromise, timeoutPromise])) as Response;
-            const data = await res.json();
-
-            if (Array.isArray(data)) {
-                let filtered = data;
-                if (!isPlatformOwner && profile?.empresa_id) {
-                    filtered = data.filter(e => e.id === profile.empresa_id);
-                }
-                setEmpresas(filtered);
-            }
-        } catch (err) {
-            console.error("Error loading empresas:", err);
-            // Fallback to direct Supabase
-            try {
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000));
-
-                const fetchSupabase = async () => {
-                    let query = supabase.from("empresas").select("*").order("created_at", { ascending: true });
-                    if (!isPlatformOwner && profile?.empresa_id) {
-                        query = query.eq('id', profile.empresa_id);
-                    }
-                    const { data } = await query;
-                    setEmpresas(data || []);
-                };
-                await Promise.race([fetchSupabase(), timeoutPromise]);
-            } catch (e2) {
-                console.error("Fallback also failed:", e2);
-            }
-        } finally {
-            setTimeout(() => setLoading(false), 200);
-        }
-    };
-
-    const loadCompanyData = async (empresaId: number) => {
-        setLoading(true);
-        try {
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000));
-            const fetchData = async () => {
-                // Load Agents
-                const { data: agentsData } = await supabase
-                    .from("agent_config")
-                    .select("*")
-                    .eq("empresa_id", empresaId)
-                    .order("created_at", { ascending: false });
-
-                const agentIds = (agentsData || []).map(a => a.id);
-                const { data: aiConfigsData } = await supabase
-                    .from("ai_config")
-                    .select("*")
-                    .in("agent_id", agentIds);
-
-                const agentsWithAI = (agentsData || []).map(agent => ({
-                    ...agent,
-                    ai_config: (aiConfigsData || []).find(c => c.agent_id === agent.id)
-                }));
-                setAgents(agentsWithAI);
-
-                // Load Users
-                const { data: usersData } = await supabase
-                    .from("user_profiles")
-                    .select("*")
-                    .eq("empresa_id", empresaId);
-                setCompanyUsers(usersData || []);
-            };
-
-            await Promise.race([fetchData(), timeoutPromise]);
-        } catch (err) {
-            console.error("Error loading company data:", err);
-        } finally {
-            setLoading(false);
-        }
+    const refreshEmpresasCache = (updater: (list: Empresa[]) => Empresa[]) => {
+        queryClient.setQueryData(empresaAdminKeys.list(empresasFilter), (prev: Empresa[] | undefined) =>
+            updater(prev ?? [])
+        );
     };
 
     const toggleCompanyModule = async (moduleKey: string) => {
@@ -224,8 +161,9 @@ const AgentListView: React.FC = () => {
             if (error) throw error;
 
             setSelectedEmpresa({ ...selectedEmpresa, enabled_modules: newModules });
-            // Update local list too
-            setEmpresas(prev => prev.map(e => e.id === selectedEmpresa.id ? { ...e, enabled_modules: newModules } : e));
+            refreshEmpresasCache((prev) =>
+                prev.map((e) => (e.id === selectedEmpresa.id ? { ...e, enabled_modules: newModules } : e))
+            );
         } catch (err) {
             alert(t('Error updating permissions', 'Error al actualizar permisos'));
         } finally {
@@ -240,7 +178,7 @@ const AgentListView: React.FC = () => {
         if (!confirm(t("Are you sure you want to delete this company and ALL its agents?", "¿Seguro que quieres eliminar esta empresa y TODOS sus agentes?"))) return;
         try {
             await supabase.from("empresas").delete().eq("id", id);
-            loadEmpresas();
+            invalidateEmpresas();
         } catch (err) {
             alert(t("Error deleting", "Error al eliminar"));
         }
@@ -258,7 +196,6 @@ const AgentListView: React.FC = () => {
         if (!confirm(confirmMsg)) return;
 
         try {
-            setLoading(true);
             const res = await apiFetch(`/api/agents/${id}`, {
                 method: 'DELETE',
             });
@@ -268,13 +205,11 @@ const AgentListView: React.FC = () => {
                 throw new Error(result.error || "Error deleting agent");
             }
 
-            setAgents(prev => prev.filter(a => a.id !== id));
+            if (selectedEmpresaId) invalidateAgents();
             alert(t("Agent and all related data deleted successfully", "El agente y todos sus datos relacionados han sido eliminados correctamente."));
         } catch (err: any) {
             console.error("Error deleting agent:", err);
             alert(`${t("Error deleting agent", "Error al eliminar el agente")}: ${err.message || "Unknown error"}`);
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -330,7 +265,7 @@ const AgentListView: React.FC = () => {
                     />
                 </div>
 
-                {loading ? (
+                {detailLoading ? (
                     <div className="flex justify-center py-20"><Loader2 className="animate-spin text-blue-500" size={32} /></div>
                 ) : activeTab === "agents" ? (
                     <>
@@ -490,7 +425,7 @@ const AgentListView: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in duration-700">
-                {loading ? (
+                {listLoading ? (
                     <>{[1, 2, 3, 4, 5, 6].map(i => <SkeletonCard key={i} />)}</>
                 ) : empresas.length === 0 ? (
                     <div className="col-span-full text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200">
@@ -506,7 +441,7 @@ const AgentListView: React.FC = () => {
                             (empresa.responsable && empresa.responsable.toLowerCase().includes(search.toLowerCase()))
                         )
                         .map((empresa) => (
-                            <div key={empresa.id} onClick={() => { setSelectedEmpresa(empresa); loadCompanyData(empresa.id!); setSearch(""); }} className="group relative bg-white rounded-2xl border border-gray-100 p-8 flex flex-col items-center text-center space-y-4 hover:border-blue-400 hover:shadow-2xl hover:shadow-blue-500/10 transition-all cursor-pointer">
+                            <div key={empresa.id} onClick={() => { setSelectedEmpresa(empresa); setSearch(""); }} className="group relative bg-white rounded-2xl border border-gray-100 p-8 flex flex-col items-center text-center space-y-4 hover:border-blue-400 hover:shadow-2xl hover:shadow-blue-500/10 transition-all cursor-pointer">
                                 {isPlatformOwner && (
                                     <div className="absolute top-4 right-4 flex gap-2">
                                         <button onClick={(e) => handleEditEmpresa(e, empresa)} className="p-2 opacity-0 group-hover:opacity-100 hover:bg-blue-50 text-gray-300 hover:text-blue-500 rounded-xl transition-all">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
     User, Mail, Building2, Shield, ShieldCheck, Save, Loader2,
     ArrowLeft, Briefcase, Calendar, CheckCircle, AlertTriangle, Lock
@@ -10,6 +10,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { canUseSimulationMode } from '../lib/platformAccess';
 import type { UserProfile, UserRole, Empresa } from '../types';
 import { toast } from 'react-hot-toast';
+import { useEmpresasAdmin } from '../api/empresas';
 
 export const ProfileView: React.FC = () => {
     const { profile, realProfile, refreshProfile, setSpoofedRole, setSpoofedEmpresa } = useAuth();
@@ -22,9 +23,10 @@ export const ProfileView: React.FC = () => {
     const actualProfile = realProfile || profile;
     const canSwitch = canUseSimulationMode(actualProfile);
 
-    const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
-    const [empresas, setEmpresas] = useState<Empresa[]>([]);
+    const empresasQuery = useEmpresasAdmin(undefined, canSwitch);
+    const empresas = (empresasQuery.data ?? []) as Empresa[];
+    const loading = empresasQuery.isLoading;
     const [sendingReset, setSendingReset] = useState(false);
     const [resetSent, setResetSent] = useState(false);
 
@@ -33,28 +35,6 @@ export const ProfileView: React.FC = () => {
     const [position, setPosition] = useState(profile?.position || '');
     const [role, setRole] = useState<UserRole>(profile?.role || 'user');
     const [empresaId, setEmpresaId] = useState<number | null>(profile?.empresa_id || null);
-
-    useEffect(() => {
-        if (canSwitch) {
-            loadEmpresas();
-        }
-    }, [canSwitch]);
-
-    const loadEmpresas = async () => {
-        setLoading(true);
-        try {
-            const API_URL = (import.meta as any).env.VITE_API_URL || '';
-            const res = await fetch(`${API_URL}/api/empresas`);
-            if (res.ok) {
-                const data = await res.json();
-                setEmpresas(data);
-            }
-        } catch (err) {
-            console.error('Error loading empresas:', err);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const handleRequestPasswordChange = async () => {
         if (!profile?.email) return;

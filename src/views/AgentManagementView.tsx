@@ -9,28 +9,35 @@ import { AgentTemplateGallery } from "../components/AgentTemplateGallery";
 import type { AgentTemplate } from "../components/AgentTemplateGallery";
 import { AgentRosterCard } from "../components/agents/AgentRosterCard";
 import { AgentWorkspacePanel } from "../components/agents/AgentWorkspacePanel";
+import { apiFetch } from "../lib/apiFetch";
+import { useEmpresasAdmin } from "../api/empresas";
+import { useAgentsWithAI, useInvalidateAgents } from "../api/agents";
 import "./agents.css";
 
 const AgentManagementView: React.FC = () => {
     const { profile, isRole, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
     const isSuperadmin = isPlatformOwner;
+    const invalidateAgents = useInvalidateAgents();
 
-    const [empresas, setEmpresas] = useState<Empresa[]>([]);
-    const [agents, setAgents] = useState<(AgentConfig & { ai_config?: AIConfig; empresas?: Empresa })[]>([]);
-    const [loading, setLoading] = useState(true);
+    const empresaFilter = !isPlatformOwner && profile?.empresa_id ? profile.empresa_id : undefined;
+    const empresasQuery = useEmpresasAdmin(empresaFilter, Boolean(profile));
+
+    const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | "all">("all");
+    const agentsEmpresaId = selectedEmpresaId !== "all" ? selectedEmpresaId : undefined;
+    const agentsQuery = useAgentsWithAI(agentsEmpresaId, true);
+
+    const empresas = (empresasQuery.data ?? []) as Empresa[];
+    const agents = (agentsQuery.data ?? []) as (AgentConfig & { ai_config?: AIConfig; empresas?: Empresa })[];
+    const loading = empresasQuery.isLoading || agentsQuery.isLoading;
+
     const [search, setSearch] = useState("");
     const [isCreatingAgent, setIsCreatingAgent] = useState(false);
     const [showTemplateGallery, setShowTemplateGallery] = useState(false);
-    const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | "all">("all");
     const [templatePreload, setTemplatePreload] = useState<Partial<AgentConfig> | null>(null);
     const [testCallAgent, setTestCallAgent] = useState<AgentConfig | null>(null);
     const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
     const [agentToDelete, setAgentToDelete] = useState<number | null>(null);
-
-    useEffect(() => {
-        loadData();
-    }, [selectedEmpresaId]);
 
     useEffect(() => {
         if (!isSuperadmin && profile?.empresa_id) {
@@ -44,40 +51,13 @@ const AgentManagementView: React.FC = () => {
         }
     }, [empresas, isSuperadmin]);
 
-    const loadData = async () => {
-        setLoading(true);
-        try {
-            const API_URL = (import.meta as any).env.VITE_API_URL || '';
-
-            const empRes = await fetch(`${API_URL}/api/empresas`);
-            const empData = await empRes.json();
-            if (Array.isArray(empData)) {
-                setEmpresas(empData);
-            }
-
-            const empresaFilter = selectedEmpresaId !== "all" ? `?empresa_id=${selectedEmpresaId}` : "";
-            const res = await fetch(`${API_URL}/api/agents${empresaFilter}`);
-            const data = await res.json();
-
-            if (Array.isArray(data)) {
-                setAgents(data);
-            } else {
-                setAgents([]);
-            }
-        } catch (err) {
-            console.error("Error loading data:", err);
-        } finally {
-            setLoading(false);
-        }
-    };
+    const refreshAgents = () => invalidateAgents();
 
     const executeDelete = async () => {
         if (!agentToDelete) return;
         try {
-            setLoading(true);
-            const API_URL = (import.meta as any).env.VITE_API_URL || '';
-            const res = await fetch(`${API_URL}/api/agents/${agentToDelete}`, {
-                method: 'DELETE'
+            const res = await apiFetch(`/api/agents/${agentToDelete}`, {
+                method: 'DELETE',
             });
             const result = await res.json();
 
@@ -85,16 +65,14 @@ const AgentManagementView: React.FC = () => {
                 throw new Error(result.error || "Error deleting agent");
             }
 
-            setAgents(prev => prev.filter(a => a.id !== agentToDelete));
             if (selectedAgentId === agentToDelete) {
                 setSelectedAgentId(null);
             }
             setAgentToDelete(null);
+            refreshAgents();
         } catch (err: any) {
             console.error("Error deleting agent:", err);
             alert(`${t("Error deleting agent", "Error al eliminar el agente")}: ${err.message || "Unknown error"}`);
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -172,7 +150,7 @@ const AgentManagementView: React.FC = () => {
                 onSave={async () => {
                     setIsCreatingAgent(false);
                     setTemplatePreload(null);
-                    await loadData();
+                    refreshAgents();
                 }}
                 onCancel={() => {
                     setIsCreatingAgent(false);
@@ -359,7 +337,7 @@ const AgentManagementView: React.FC = () => {
                                     agent={selectedAgent}
                                     onTest={() => setTestCallAgent(selectedAgent)}
                                     onDelete={() => setAgentToDelete(selectedAgent.id!)}
-                                    onSaved={loadData}
+                                    onSaved={refreshAgents}
                                 />
                             ) : (
                                 <div className="agent-glass flex min-h-[560px] flex-col items-center justify-center rounded-2xl p-12 text-center">
