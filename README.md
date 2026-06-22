@@ -208,6 +208,12 @@ Backend API
 ## 📄 Licencia
 
 Ausarta © 2026
-# Security TODO
 
-TODO: rotate the leaked Supabase service_role key manually in Supabase (Settings -> API -> Roll service_role secret) and update `SUPABASE_SERVICE_ROLE_KEY` in Portainer/`stack.env`.
+## Seguridad — rotación de secretos
+
+Si una clave de servicio (`SUPABASE_SERVICE_ROLE_KEY`) pudo haberse expuesto, **rótala de inmediato** en Supabase → Settings → API → Roll service_role secret, y actualiza `SUPABASE_SERVICE_ROLE_KEY` en Portainer/`stack.env`.
+
+Variables obligatorias en producción:
+- `FRONTEND_URL` — URL pública del panel (sin IP hardcodeada en código)
+- `IMPERSONATION_SECRET` — secreto independiente para tokens de impersonación (no reutilizar `SERVICE_ROLE_KEY`)
+- `YEASTAR_WEBHOOK_SECRET` — secreto del webhook Event Push de Yeastar

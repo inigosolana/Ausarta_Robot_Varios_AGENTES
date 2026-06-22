@@ -55,6 +55,12 @@ data/*.jsonl
 # MCP secrets (use ~/.cursor/mcp.json on remote; do not commit tokens)
 .cursor/mcp.json
 
+# Secretos y certificados
+*.key
+*.pem
+*.p12
+secrets/
+
 # Database
 *.db
 *.sqlite

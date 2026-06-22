@@ -47,6 +47,11 @@ def _apply_eq_filters(query, filters: dict[str, Any]):
     return query
 
 
+def get_supabase_admin_client() -> Client:
+    """Cliente Supabase con service role (singleton)."""
+    return _client_or_raise()
+
+
 async def get_user_profile_async(user_id: str):
     if not supabase:
         return None

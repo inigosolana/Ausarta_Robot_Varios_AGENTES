@@ -76,7 +76,7 @@ async def proxy_n8n_invite(
     payload = await request.json()
 
     # Sanitizar: solo campos esperados para evitar inyección
-    safe_payload = {k: payload[k] for k in ("email", "password", "full_name", "role", "empresa_id", "redirect_to") if k in payload}
+    safe_payload = {k: payload[k] for k in ("email", "full_name", "role", "empresa_id", "redirect_to") if k in payload}
 
     webhook_url = f"{n8n_webhook_base_url()}/d0952789-a4a1-4eae-b0db-494356a9e3fa"
 

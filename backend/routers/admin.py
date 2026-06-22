@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from supabase import create_client
 from services.supabase_service import supabase, clear_ui_cache, sb_query
 from services.auth import CurrentUser, require_admin, require_superadmin, invalidate_user_profile_cache
 from services.platform_access import (
@@ -20,6 +19,8 @@ import hmac
 import hashlib
 import base64
 import time
+
+from utils.env_validation import get_impersonation_secret, resolve_frontend_url
 
 logger = logging.getLogger("api-backend")
 
@@ -69,7 +70,10 @@ def _sign_impersonation_payload(payload: dict) -> str:
     Token firmado (HMAC SHA-256) para modo impersonation.
     Formato: base64url(json).base64url(signature)
     """
-    secret = os.getenv("IMPERSONATION_SECRET") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
+    try:
+        secret = get_impersonation_secret()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     if not secret:
         raise HTTPException(status_code=500, detail="IMPERSONATION_SECRET no configurado")
     raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -560,7 +564,7 @@ async def create_auth_user(request: Request, payload: dict, current_user: Curren
         "full_name": full_name,
         "role": role,
         "empresa_id": empresa_id,
-        "redirect_to": payload.get("redirect_to") or os.getenv("INVITE_REDIRECT_TO") or os.getenv("FRONTEND_URL", "http://15.216.15.30")
+        "redirect_to": payload.get("redirect_to") or resolve_frontend_url(),
     }
 
     n8n_secret = os.getenv("N8N_PROXY_SECRET", "")
@@ -626,7 +630,7 @@ async def create_auth_user(request: Request, payload: dict, current_user: Curren
         logger.error(f"❌ [admin] Error inesperado: {e}")
         return JSONResponse(status_code=500, content={
             "error": "USER_CREATE_FAILED",
-            "message": str(e)
+            "message": "Error interno del servidor",
         })
 
     # Paso 2: Crear permisos por defecto (n8n no los crea)
@@ -667,20 +671,30 @@ async def _fallback_create_user(payload: dict) -> str:
     Fallback: crear usuario directamente vía Supabase Auth Admin SDK si n8n no responde.
     Siempre usa invite_user_by_email — nunca crea usuarios con contraseña predefinida.
     """
+    import asyncio
+
+    from services.supabase_service import get_supabase_admin_client
+
     email = payload["email"]
     full_name = payload["full_name"]
     role = payload["role"]
     empresa_id = payload.get("empresa_id")
 
-    service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
-    admin_client = create_client(os.getenv("SUPABASE_URL"), service_role_key)
+    admin_client = get_supabase_admin_client()
 
     # Invite flow siempre: el usuario establece su contraseña a través del email de Supabase.
     options: dict = {"data": {"full_name": full_name, "role": role}}
-    redirect_to = payload.get("redirect_to") or os.getenv("INVITE_REDIRECT_TO") or os.getenv("FRONTEND_URL")
+    try:
+        redirect_to = payload.get("redirect_to") or resolve_frontend_url()
+    except ValueError:
+        redirect_to = None
     if redirect_to:
         options["redirect_to"] = redirect_to
-    res = admin_client.auth.admin.invite_user_by_email(email, options)
+    res = await asyncio.to_thread(
+        admin_client.auth.admin.invite_user_by_email,
+        email,
+        options,
+    )
 
     user_id = res.user.id
 
@@ -737,7 +751,9 @@ async def delete_auth_user(request: Request, user_id: str, current_user: Current
             if target_role != "user":
                 raise HTTPException(status_code=403, detail="Admin de cliente solo puede borrar usuarios role=user")
 
-        admin_client = create_client(os.getenv("SUPABASE_URL"), service_role_key)
+        from services.supabase_service import get_supabase_admin_client
+
+        admin_client = get_supabase_admin_client()
         
         # 1. Borrado fuerte de Auth (primero)
         try:
@@ -773,7 +789,7 @@ async def delete_auth_user(request: Request, user_id: str, current_user: Current
         return {"status": "ok", "message": f"Usuario {user_id} eliminado correctamente"}
     except Exception as e:
         logger.error(f"❌ Error al borrar usuario admin: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return JSONResponse(status_code=500, content={"error": "Error interno del servidor"})
 
 
 @router.put("/users/{user_id}")

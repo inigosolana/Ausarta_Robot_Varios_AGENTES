@@ -23,6 +23,7 @@ import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 
 from services.supabase_service import supabase, sb_query
+from utils.url_safety import is_safe_external_url
 from services.auth import CurrentUser, require_admin, get_current_user
 from services.embedding_service import get_embedding, search_knowledge, _split_into_chunks
 from services.crypto_service import encrypt_data, decrypt_data
@@ -312,6 +313,8 @@ async def upload_knowledge_url(
     safe_url = (url or "").strip()
     if not re.match(r"^https?://", safe_url, flags=re.IGNORECASE):
         raise HTTPException(status_code=400, detail="La URL debe empezar por http:// o https://")
+    if not is_safe_external_url(safe_url):
+        raise HTTPException(status_code=400, detail="URL no permitida")
 
     texto = await _extract_text_from_url(safe_url)
     texto = texto.strip()

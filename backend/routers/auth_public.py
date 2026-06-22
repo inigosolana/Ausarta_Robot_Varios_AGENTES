@@ -71,7 +71,7 @@ async def request_password_reset(request: Request):
 
 
 class PasswordUpdateRequest(BaseModel):
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=12, max_length=128)
 
 
 @router.put("/password")
@@ -93,7 +93,7 @@ async def update_password(request: Request):
     except ValidationError:
         return JSONResponse(
             status_code=400,
-            content={"error": "La contraseña debe tener al menos 6 caracteres"},
+            content={"error": "La contraseña debe tener al menos 12 caracteres"},
         )
 
     try:

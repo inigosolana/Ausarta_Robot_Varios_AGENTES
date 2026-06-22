@@ -8,6 +8,8 @@ import aiohttp
 
 logger = logging.getLogger("api-backend")
 
+MAX_QUERY_LEN = 200
+
 
 async def _fetch_wikipedia(query: str) -> str:
     params = {
@@ -76,7 +78,7 @@ async def _fetch_duckduckgo(query: str) -> str:
 
 async def search_web(query: str, *, max_chars: int = 1200) -> str:
     """Busca información pública en internet. Devuelve texto vacío si no hay resultados."""
-    clean_query = re.sub(r"\s+", " ", (query or "").strip())
+    clean_query = re.sub(r"\s+", " ", (query or "").strip())[:MAX_QUERY_LEN]
     if not clean_query:
         return ""
 

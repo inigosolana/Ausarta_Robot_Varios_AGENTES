@@ -5,6 +5,9 @@ from pathlib import Path
 import pytest
 
 os.environ.setdefault("BRIDGE_SERVER_URL_INTERNAL", "http://backend:8001")
+os.environ.setdefault("ENVIRONMENT", "development")
+os.environ.setdefault("FRONTEND_URL", "http://localhost:8080")
+os.environ.setdefault("IMPERSONATION_SECRET", "test-impersonation-secret")
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
