@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from services.supabase_service import supabase, clear_ui_cache, sb_query
-from services.auth import CurrentUser, require_admin, require_superadmin, require_platform_admin, invalidate_user_profile_cache
+from services.auth import CurrentUser, require_admin, require_superadmin, require_platform_admin
+from services.profile_cache import invalidate_user_profile_cache
 from models.schemas import ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyListItem
 from services.api_key_service import create_api_key, list_api_keys, revoke_api_key
 from services.platform_access import (

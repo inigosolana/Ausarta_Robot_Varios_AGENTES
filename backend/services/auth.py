@@ -13,7 +13,6 @@ import time
 import hashlib
 import base64
 import binascii
-import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Optional
@@ -32,6 +31,7 @@ from services.api_key_service import (
     validate_api_key_from_db,
     has_scope,
 )
+from services.profile_cache import get_user_profile_cached, invalidate_user_profile_cache
 
 logger = logging.getLogger("api-backend")
 
@@ -249,138 +249,6 @@ def _verify_impersonation_token(token: str) -> dict:
         raise HTTPException(status_code=403, detail="Token de impersonation expirado")
 
     return payload
-
-
-_USER_PROFILE_CACHE_TTL = max(5, int(os.getenv("USER_PROFILE_CACHE_TTL_SECONDS", "60")))
-_MEM_PROFILE_CACHE_MAX = max(100, int(os.getenv("USER_PROFILE_CACHE_MAX_ENTRIES", "1000")))
-_MEM_PROFILE_CACHE: dict[str, tuple[float, dict]] = {}
-_MEM_PROFILE_LOCK = asyncio.Lock()
-
-_USER_PROFILE_CACHE_PREFIX = "ausarta:user_profile:"
-
-
-def _fetch_user_profile_row(user_id: str) -> dict:
-    if not supabase:
-        raise HTTPException(status_code=500, detail="No hay conexión con Supabase")
-    try:
-        prof_res = (
-            supabase.table("user_profiles")
-            .select("id,email,role,empresa_id,is_active")
-            .eq("id", user_id)
-            .limit(1)
-            .execute()
-        )
-    except Exception as e:
-        logger.error(f"[Auth] Error consultando user_profiles para {user_id}: {e}")
-        raise HTTPException(status_code=500, detail="Error cargando perfil de usuario") from e
-
-    if not prof_res.data:
-        raise HTTPException(status_code=403, detail="Perfil no encontrado en user_profiles")
-
-    return prof_res.data[0]
-
-
-def _profile_row_cache_blob(row: dict) -> str:
-    return json.dumps(
-        {
-            "id": row.get("id"),
-            "email": row.get("email"),
-            "role": row.get("role"),
-            "empresa_id": row.get("empresa_id"),
-            "is_active": row.get("is_active"),
-        },
-        separators=(",", ":"),
-    )
-
-
-def _profile_from_cache_blob(raw: str) -> dict:
-    data = json.loads(raw)
-    if not isinstance(data, dict):
-        raise ValueError("cache shape")
-    return data
-
-
-async def get_user_profile_cached(user_id: str) -> dict:
-    """
-    Carga user_profiles con caché Redis (si existe) y fallback en memoria con TTL,
-    para reducir presión sobre Supabase/Postgres bajo alto tráfico.
-    """
-    now = time.monotonic()
-
-    try:
-        from services.redis_service import get_redis
-
-        r = await get_redis()
-        key = f"{_USER_PROFILE_CACHE_PREFIX}{user_id}"
-        cached = await r.get(key)
-        if cached:
-            try:
-                return _profile_from_cache_blob(cached)
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-                await r.delete(key)
-    except Exception:
-        pass
-
-    async with _MEM_PROFILE_LOCK:
-        hit = _MEM_PROFILE_CACHE.get(user_id)
-        if hit is not None:
-            expires_at, row = hit
-            if now < expires_at:
-                return row
-        if len(_MEM_PROFILE_CACHE) >= _MEM_PROFILE_CACHE_MAX:
-            expired_keys = [
-                cache_key
-                for cache_key, (exp, _) in _MEM_PROFILE_CACHE.items()
-                if now >= exp
-            ]
-            for cache_key in expired_keys:
-                del _MEM_PROFILE_CACHE[cache_key]
-            if len(_MEM_PROFILE_CACHE) >= _MEM_PROFILE_CACHE_MAX:
-                oldest_key = min(_MEM_PROFILE_CACHE, key=lambda k: _MEM_PROFILE_CACHE[k][0])
-                del _MEM_PROFILE_CACHE[oldest_key]
-
-    row = await asyncio.to_thread(_fetch_user_profile_row, user_id)
-
-    try:
-        from services.redis_service import get_redis
-
-        r = await get_redis()
-        key = f"{_USER_PROFILE_CACHE_PREFIX}{user_id}"
-        await r.set(key, _profile_row_cache_blob(row), ex=_USER_PROFILE_CACHE_TTL)
-    except Exception:
-        pass
-
-    async with _MEM_PROFILE_LOCK:
-        _MEM_PROFILE_CACHE[user_id] = (now + float(_USER_PROFILE_CACHE_TTL), row)
-
-    return row
-
-
-async def invalidate_user_profile_cache(user_id: str) -> None:
-    """
-    Invalida la caché de perfil de un usuario en Redis y en memoria.
-
-    Llamar siempre que se elimine o modifique un usuario para revocar acceso
-    inmediatamente, sin esperar a que expire el TTL de caché (por defecto 60s).
-    Sin esto, un JWT de un usuario borrado o desactivado seguiría siendo válido
-    hasta el siguiente ciclo de TTL.
-    """
-    # 1. Invalidación en Redis (caché distribuida entre réplicas del backend)
-    try:
-        from services.redis_service import get_redis
-        r = await get_redis()
-        key = f"{_USER_PROFILE_CACHE_PREFIX}{user_id}"
-        deleted = await r.delete(key)
-        if deleted:
-            logger.info(f"[Auth] Caché Redis invalidada para user_id={user_id}")
-    except Exception as e:
-        logger.warning(f"[Auth] No se pudo invalidar caché Redis para user_id={user_id}: {e}")
-
-    # 2. Invalidación en caché de memoria (fallback local en el proceso)
-    async with _MEM_PROFILE_LOCK:
-        if user_id in _MEM_PROFILE_CACHE:
-            del _MEM_PROFILE_CACHE[user_id]
-            logger.info(f"[Auth] Caché memoria invalidada para user_id={user_id}")
 
 
 async def get_current_user(

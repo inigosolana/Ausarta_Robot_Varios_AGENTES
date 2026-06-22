@@ -21,7 +21,8 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import StreamingResponse
 
-from services.auth import CurrentUser, require_admin, _get_user_from_supabase_jwt, get_user_profile_cached
+from services.auth import CurrentUser, require_admin, _get_user_from_supabase_jwt
+from services.profile_cache import get_user_profile_cached
 
 logger = logging.getLogger("api-backend")
 
