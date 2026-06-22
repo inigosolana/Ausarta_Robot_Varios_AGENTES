@@ -139,6 +139,13 @@ class SemanticRouterService:
         )
 
     async def _classify_with_groq(self, text: str) -> SemanticRouteResult | None:
+        from services.provider_circuit_service import groq_llm_breaker
+
+        breaker = await groq_llm_breaker()
+        if await breaker.is_open():
+            logger.info("Groq classifier omitido: circuit %s abierto", breaker.name)
+            return None
+
         payload = {
             "model": self._model,
             "temperature": 0.0,
@@ -164,17 +171,23 @@ class SemanticRouterService:
                             resp.status,
                             body[:200],
                         )
+                        await breaker.record_failure(RuntimeError(f"HTTP {resp.status}"))
                         return None
                     data = await resp.json()
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
             logger.debug("Groq classifier timeout (%.0f ms)", self._timeout_s * 1000)
+            await breaker.record_failure(exc, extreme=True)
             return None
         except aiohttp.ClientError as exc:
             logger.warning("Groq classifier network error: %s", exc)
+            await breaker.record_failure(exc)
             return None
         except Exception as exc:
             logger.warning("Groq classifier unexpected error: %s", exc)
+            await breaker.record_failure(exc)
             return None
+
+        await breaker.record_success()
 
         try:
             raw = data["choices"][0]["message"]["content"]

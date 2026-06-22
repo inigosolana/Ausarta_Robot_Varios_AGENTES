@@ -205,11 +205,15 @@ def merge_voices(api_voices: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 async def _fetch_cartesia_api_voices() -> list[dict[str, Any]]:
-    api_key = (os.getenv("CARTESIA_API_KEY") or "").strip()
-    if not api_key:
-        return []
+    from services.provider_circuit_service import cartesia_breaker
 
-    try:
+    breaker = await cartesia_breaker()
+
+    async def _primary() -> list[dict[str, Any]]:
+        api_key = (os.getenv("CARTESIA_API_KEY") or "").strip()
+        if not api_key:
+            return []
+
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 CARTESIA_VOICES_URL,
@@ -220,19 +224,20 @@ async def _fetch_cartesia_api_voices() -> list[dict[str, Any]]:
                 timeout=aiohttp.ClientTimeout(total=5),
             ) as resp:
                 if resp.status != 200:
-                    logger.warning("🎙️ [voices] Cartesia HTTP %s", resp.status)
-                    return []
+                    raise RuntimeError(f"Cartesia HTTP {resp.status}")
                 payload = await resp.json()
-    except Exception as exc:
-        logger.warning("🎙️ [voices] Error Cartesia API: %s", exc)
+
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            data = payload.get("data") or payload.get("voices") or []
+            return data if isinstance(data, list) else []
         return []
 
-    if isinstance(payload, list):
-        return payload
-    if isinstance(payload, dict):
-        data = payload.get("data") or payload.get("voices") or []
-        return data if isinstance(data, list) else []
-    return []
+    async def _fallback() -> list[dict[str, Any]]:
+        return []
+
+    return await breaker.execute_with_fallback(_primary, _fallback, timeout=5.0)
 
 
 async def _read_cache() -> tuple[list[dict[str, Any]], str] | None:

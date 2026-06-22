@@ -78,6 +78,8 @@ from agents.stt_tts_builder import (
     DEFAULT_CARTESIA_VOICE,
     _build_stt_plugin,
     _build_tts_plugin,
+    build_resilient_stt_plugin,
+    build_resilient_tts_plugin,
     get_vad_model,
 )
 
@@ -1000,7 +1002,9 @@ async def entrypoint(ctx: JobContext):
             f"Lang='{language}', STT='{stt_provider}/{stt_model}', Speed='{speaking_speed}'"
         )
 
-        stt_plugin, delegate_turn_to_stt = _build_stt_plugin(stt_provider, stt_model, language)
+        stt_plugin, delegate_turn_to_stt = await build_resilient_stt_plugin(
+            stt_provider, stt_model, language
+        )
 
         # VAD Silero solo si el STT no gestiona el turno (p. ej. OpenAI Whisper)
         vad_model = None
@@ -1057,7 +1061,7 @@ async def entrypoint(ctx: JobContext):
         session_kwargs: dict[str, Any] = {
             "stt": stt_plugin,
             "llm": final_llm,
-            "tts": _build_tts_plugin(
+            "tts": await build_resilient_tts_plugin(
                 voice_id=voice_id,
                 language=language,
                 speaking_speed=speaking_speed,
