@@ -125,7 +125,7 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
     from services.supabase_service import supabase, sb_query
     from services.livekit_service import create_isolated_room, dispatch_agent_explicit, wait_for_agent_ready
     from services.trunk_service import resolve_outbound_trunk_id
-    from routers.campaigns import _get_active_call_count_for_empresa
+    from services.campaign_locks import get_active_call_count_for_empresa as _get_active_call_count_for_empresa
     from livekit import api as lk_api
 
     if not supabase:

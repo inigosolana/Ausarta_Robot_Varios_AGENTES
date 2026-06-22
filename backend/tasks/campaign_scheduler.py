@@ -23,10 +23,13 @@ async def campaign_scheduler_task(ctx: dict[str, Any]) -> None:
     el siguiente ciclo de 30s retoma el trabajo sin pérdida de estado.
     """
     from services.supabase_service import supabase
-    from routers.campaigns import (
-        _is_empresa_locked, _acquire_empresa_lock, _check_campaign_completion,
-        _get_active_call_count, _get_active_call_count_for_empresa,
+    from services.campaign_locks import (
+        acquire_empresa_lock as _acquire_empresa_lock,
+        get_active_call_count as _get_active_call_count,
+        get_active_call_count_for_empresa as _get_active_call_count_for_empresa,
+        is_empresa_locked as _is_empresa_locked,
     )
+    from services.campaign_drip import check_campaign_completion as _check_campaign_completion
 
     if not supabase:
         logger.warning("[ARQ] Supabase no disponible en scheduler")

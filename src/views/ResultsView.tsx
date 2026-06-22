@@ -19,6 +19,7 @@ import {
 } from '../types';
 import { fetchSurveyResults } from '../lib/resultsSupabase';
 import { extractCallResultItems } from '../lib/callResults';
+import { useAgentsList, useEmpresasList } from '../api/campaigns';
 
 interface Props {
     empresaId?: number;
@@ -36,13 +37,20 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
     const queryClient = useQueryClient();
     const [searchTerm, setSearchTerm] = useState('');
     const [viewingTranscript, setViewingTranscript] = useState<SurveyResult | null>(null);
-    const [empresas, setEmpresas] = useState<any[]>([]);
-    const [agents, setAgents] = useState<any[]>([]);
     const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | 'all'>(empresaId || 'all');
 
     const effectiveEmpresaId = !isPlatformOwner && profile?.empresa_id
         ? profile.empresa_id
         : selectedEmpresaId;
+
+    const empresasQuery = useEmpresasList(undefined, Boolean(isPlatformOwner && !empresaId));
+    const empresas = empresasQuery.data ?? [];
+
+    const agentsEmpresaFilter =
+        effectiveEmpresaId !== 'all' ? effectiveEmpresaId : undefined;
+    const agentsQuery = useAgentsList(agentsEmpresaFilter, true);
+    const agents = agentsQuery.data ?? [];
+
     const [selectedAgentId, setSelectedAgentId] = useState<number | 'all'>('all');
     const [selectedTipo, setSelectedTipo] = useState<string | 'all'>('all');
     const [dateRange, setDateRange] = useState<DateRange>('all');
@@ -67,26 +75,6 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
         queryFn: fetchResults,
         staleTime: 30_000,
     });
-
-    useEffect(() => {
-        const fetchEmpresas = async () => {
-            if (isPlatformOwner) {
-                const { data } = await supabase.from('empresas').select('*').order('nombre');
-                setEmpresas(data || []);
-            }
-        };
-        fetchEmpresas();
-    }, []);
-
-    useEffect(() => {
-        const fetchAgents = async () => {
-            const BASE_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
-            const url = effectiveEmpresaId !== 'all' ? `${BASE_URL}/api/agents?empresa_id=${effectiveEmpresaId}` : `${BASE_URL}/api/agents`;
-            const res = await fetch(url);
-            if (res.ok) setAgents(await res.json());
-        };
-        fetchAgents();
-    }, [effectiveEmpresaId]);
 
     // Supabase Realtime: invalidate React Query cache on DB changes
     useEffect(() => {

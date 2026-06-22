@@ -27,7 +27,8 @@ async def dispatch_lead_drip_task(
         lock_token:  Token del drip lock de empresa adquirido en el scheduler.
     """
     from services.supabase_service import supabase
-    from routers.campaigns import _dispatch_single_lead_drip, _release_empresa_lock
+    from services.campaign_drip import dispatch_single_lead_drip as _dispatch_single_lead_drip
+    from services.campaign_locks import release_empresa_lock as _release_empresa_lock
 
     redis: ArqRedis = ctx["redis"]
     if not supabase:

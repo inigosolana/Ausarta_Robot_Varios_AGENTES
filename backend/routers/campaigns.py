@@ -17,20 +17,13 @@ from typing import Optional, List
 from services.supabase_service import supabase
 from services.audit import log_audit_event
 from services.auth import CurrentUser, get_current_user, require_admin
-from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
-from services.trunk_service import resolve_outbound_trunk_id
-from services.agent_router import build_outbound_room_metadata
-from services.campaign_dispatch_service import resolve_campaign_dispatch_agent
-from services.sip_call_service import create_sip_participant_with_retry, mark_call_failed, sip_retry_max_attempts
+from services.campaign_locks import enqueue_scheduler_tick
 from services.webhook_auth import require_campaign_webhook_auth
-from livekit import api as lk_api
 from pydantic import BaseModel
 from models.schemas import CampaignModel, CampaignLeadModel
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import asyncio
 import json
-import random
-import os
 import logging
 from config import settings
 
@@ -91,100 +84,6 @@ def _load_external_db_allowed_queries(empresa_id: int | None) -> list[str]:
 
 class ScheduleRetryRequest(BaseModel):
     retry_at: str
-
-# ──────────────────────────────────────────────
-# DRIP LOCK MULTITENANT (Redis distribuido)
-#
-# Cada empresa tiene un lock en Redis con TTL como safety net.
-# Si Redis no está disponible, se usa un set local como fallback.
-# ──────────────────────────────────────────────
-_empresas_en_llamada_fallback: set[int] = set()
-
-# Rango de cooldown entre llamadas de la misma empresa (segundos)
-_COOLDOWN_MIN = int(os.getenv("DRIP_COOLDOWN_MIN_SECONDS", str(settings.drip_cooldown_min)))
-_COOLDOWN_MAX = int(os.getenv("DRIP_COOLDOWN_MAX_SECONDS", str(settings.drip_cooldown_max)))
-
-# TTL del lock de empresa: cooldown máximo + tiempo máximo de llamada + margen
-_EMPRESA_LOCK_TTL = _COOLDOWN_MAX + 300 + 60  # ~540s
-
-
-async def _acquire_empresa_lock(empresa_id: int) -> str | None:
-    """Intenta adquirir el drip lock para una empresa. Devuelve token de propiedad."""
-    try:
-        from services.redis_service import acquire_lock
-
-        return await acquire_lock(f"empresa:{empresa_id}", ttl_seconds=_EMPRESA_LOCK_TTL)
-    except Exception:
-        if empresa_id in _empresas_en_llamada_fallback:
-            return None
-        _empresas_en_llamada_fallback.add(empresa_id)
-        return f"local-fallback:{empresa_id}"
-
-
-async def _release_empresa_lock(empresa_id: int, token: str | None = None) -> None:
-    """Libera el drip lock de una empresa (solo si el token coincide en Redis)."""
-    try:
-        from services.redis_service import release_lock
-
-        if token and not str(token).startswith("local-fallback:"):
-            await release_lock(f"empresa:{empresa_id}", token)
-        elif token is None:
-            await release_lock(f"empresa:{empresa_id}")
-    except Exception:
-        pass
-    _empresas_en_llamada_fallback.discard(empresa_id)
-
-
-async def _is_empresa_locked(empresa_id: int) -> bool:
-    """Comprueba si una empresa tiene lock activo."""
-    try:
-        from services.redis_service import is_locked
-        return await is_locked(f"empresa:{empresa_id}")
-    except Exception:
-        return empresa_id in _empresas_en_llamada_fallback
-
-
-async def _get_active_call_count() -> int:
-    """Retorna el número de empresas con llamada activa (distribuido)."""
-    try:
-        from services.redis_service import get_active_call_count
-        return await get_active_call_count()
-    except Exception:
-        return len(_empresas_en_llamada_fallback)
-
-
-async def _get_active_call_count_for_empresa(empresa_id: int) -> int:
-    """
-    Retorna el número de llamadas activas (status calling/initiated/called)
-    para una empresa específica. Usado por el rate limiter por empresa.
-    """
-    if not supabase or not empresa_id:
-        return 0
-    try:
-        res = await asyncio.to_thread(
-            supabase.table("encuestas")
-                .select("id", count="exact")
-                .eq("empresa_id", empresa_id)
-                .in_("status", ["calling", "initiated", "called"])
-                .execute
-        )
-        return res.count or 0
-    except Exception as e:
-        logger.warning(f"[RateLimit] Error contando llamadas activas para empresa {empresa_id}: {e}")
-        return 0
-
-
-async def _enqueue_scheduler_tick() -> None:
-    """
-    Encola una ejecución inmediata del scheduler ARQ.
-    Se usa al iniciar/reintentar campañas para no esperar al próximo cron (:00/:30).
-    """
-    try:
-        from services.queue_service import get_arq_pool
-        arq = await get_arq_pool()
-        await arq.enqueue_job("campaign_scheduler_task")
-    except Exception as e:
-        logger.warning(f"No se pudo encolar campaign_scheduler_task: {e}")
 
 
 # ──────────────────────────────────────────────
@@ -647,7 +546,7 @@ async def retry_campaign(campaign_id: int, current_user: CurrentUser = Depends(r
             await redis.delete(f"ausarta:campaign:cancel:{campaign_id}")
         except Exception:
             pass
-        await _enqueue_scheduler_tick()
+        await enqueue_scheduler_tick()
         return {"status": "success", "retried_count": len(res.data)}
     except HTTPException:
         raise
@@ -677,7 +576,7 @@ async def retry_lead(lead_id: int, current_user: CurrentUser = Depends(require_a
                     await redis.delete(f"ausarta:campaign:cancel:{camp_id}")
                 except Exception:
                     pass
-                await _enqueue_scheduler_tick()
+                await enqueue_scheduler_tick()
         return {"status": "success"}
     except HTTPException:
         raise
@@ -718,7 +617,7 @@ async def schedule_campaign_retry(
             await redis.delete(f"ausarta:campaign:cancel:{campaign_id}")
         except Exception:
             pass
-        await _enqueue_scheduler_tick()
+        await enqueue_scheduler_tick()
         return {"status": "success", "scheduled_count": len(res.data or []), "retry_at": retry_at_iso}
     except HTTPException:
         raise
@@ -823,368 +722,6 @@ async def get_agent_config_by_agent(
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-# ──────────────────────────────────────────────
-# MOTOR DE CAMPAÑAS — GOTEO CONTROLADO (DRIP)
-# ──────────────────────────────────────────────
-
-async def _dispatch_single_lead_drip(
-    lead: dict,
-    campaign: dict,
-    *,
-    lock_token: str | None = None,
-) -> None:
-    """
-    Lanza UNA llamada SIP para un lead y gestiona el drip lock de la empresa.
-
-    Flujo:
-      1. Adquiere el drip lock de la empresa (exclusión mutua estricta).
-      2. Crea encuesta en BD, asigna nombre de sala aislado, lanza SIP + dispatch agente.
-      3. Hace polling ligero (cada 15s) esperando que el estado en BD sea terminal.
-      4. Una vez terminal (o timeout de 5min), aplica cooldown de 120-180s antes
-         de liberar el lock, para respetar el goteo estricto.
-    """
-    lead_id = lead["id"]
-    phone = lead["phone_number"]
-    empresa_id = campaign.get("empresa_id") or 0
-    campaign_id = campaign["id"]
-    agent_name_dispatch = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip() or "default_agent"
-    sip_trunk_id = await resolve_outbound_trunk_id(int(empresa_id) if empresa_id else None)
-
-    # El lock ( _empresas_en_llamada.add(empresa_id) ) ya ha sido adquirido síncronamente
-    # en el campaign_scheduler_loop antes de llamar a esta función para evitar race conditions.
-    
-    encuesta_id = None
-
-    try:
-        logger.info(f"☎️  [Drip] Iniciando lead {lead_id} ({phone}) → empresa={empresa_id} camp={campaign_id}")
-
-        if empresa_id:
-            from services.billing_limits_service import (
-                TenantSpendingLimitExceeded,
-                enforce_tenant_spending_limit,
-            )
-
-            try:
-                await enforce_tenant_spending_limit(int(empresa_id), raise_http=False)
-            except TenantSpendingLimitExceeded as limit_exc:
-                logger.warning(
-                    "[Drip] Lead %s bloqueado por límite de gasto empresa %s: %s",
-                    lead_id,
-                    empresa_id,
-                    limit_exc.message,
-                )
-                await asyncio.to_thread(
-                    supabase.table("campaign_leads")
-                    .update({
-                        "status": "failed",
-                        "error_msg": limit_exc.message[:500],
-                    })
-                    .eq("id", lead_id)
-                    .execute
-                )
-                return
-
-        resolved = await resolve_campaign_dispatch_agent(campaign, int(lead_id))
-        resolved_agent_id = resolved["agent_id"]
-        resolved_agent_type = resolved["agent_type"]
-        ab_variant = resolved.get("ab_variant")
-        logger.info(
-            "🤖 [Drip] Agente resuelto id=%s tipo=%s camp=%s variante=%s",
-            resolved_agent_id,
-            resolved_agent_type,
-            campaign_id,
-            ab_variant,
-        )
-
-        # 1. Crear encuesta en BD y vincular al lead
-        try:
-            enc_res = await asyncio.to_thread(
-                supabase.table("encuestas").insert({
-                    "telefono": phone,
-                    "nombre_cliente": lead.get("customer_name", "Cliente"),
-                    "fecha": datetime.now(timezone.utc).isoformat(),
-                    "status": "initiated",
-                    "completada": 0,
-                    "agent_id": resolved_agent_id,
-                    "agent_type": resolved_agent_type,
-                    "empresa_id": empresa_id,
-                    "campaign_id": campaign_id,
-                    "campaign_name": campaign.get("name"),
-                    "ab_variant": ab_variant,
-                }).execute
-            )
-            encuesta_id = enc_res.data[0]["id"]
-            await asyncio.to_thread(
-                supabase.table("campaign_leads").update({
-                    "call_id": encuesta_id,
-                    "status": "calling",
-                    "last_call_at": datetime.now(timezone.utc).isoformat(),
-                    "ab_variant": ab_variant,
-                }).eq("id", lead_id).execute
-            )
-        except Exception as e:
-            logger.error(f"❌ [Drip] Error creando encuesta para lead {lead_id}: {e}")
-            await asyncio.to_thread(
-                supabase.table("campaign_leads").update(
-                    {"status": "failed", "error_msg": str(e)}
-                ).eq("id", lead_id).execute
-            )
-            return
-
-        # 2. Nombre de sala aislado estricto
-        room_name = f"llamada_ausarta_empresa_{empresa_id}_campana_{campaign_id}_contacto_{lead_id}_encuesta_{encuesta_id}"
-        room_metadata = build_outbound_room_metadata(
-            empresa_id=int(empresa_id or 0),
-            survey_id=int(encuesta_id),
-            agent_id=int(resolved_agent_id),
-            agent_type=resolved_agent_type,
-            campaign_id=int(campaign_id),
-            contacto_id=int(lead_id),
-            extra={"ab_variant": ab_variant} if ab_variant else None,
-        )
-
-        try:
-            await create_isolated_room(room_name, metadata=room_metadata)
-        except Exception as room_err:
-            logger.warning(f"⚠️ [Drip] Aviso creando sala {room_name}: {room_err}")
-
-        # 3. Dispatch agente PRIMERO para que esté en la sala cuando el cliente conteste
-        try:
-            await dispatch_agent_explicit(
-                room_name=room_name,
-                agent_name=agent_name_dispatch,
-                metadata=room_metadata,
-            )
-            logger.info(
-                f"🚀 [Drip] Agente '{agent_name_dispatch}' (tipo={resolved_agent_type}) despachado a {room_name}"
-            )
-            # Breve espera para que el agente entre antes de iniciar la llamada SIP
-            await asyncio.sleep(float(os.getenv("DRIP_AGENT_JOIN_DELAY_SECONDS", "3")))
-        except Exception as dispatch_err:
-            logger.warning(f"⚠️ [Drip] Dispatch explícito fallido (auto-dispatch como fallback): {dispatch_err}")
-
-        # 4. Lanzar SIP (cliente escuchará al agente al descolgar)
-        try:
-            await create_sip_participant_with_retry(
-                lk_api.CreateSIPParticipantRequest(
-                    sip_trunk_id=sip_trunk_id,
-                    sip_call_to=phone,
-                    room_name=room_name,
-                    participant_identity=f"user_{phone}_{encuesta_id}",
-                    participant_name="Cliente",
-                ),
-                empresa_id=int(empresa_id) if empresa_id else None,
-                phone=str(phone),
-                source="campaign_drip",
-            )
-            logger.info(f"☎️ [Drip] SIP lanzado: {phone} → {room_name}")
-        except Exception as sip_err:
-            logger.error(f"❌ [Drip] Error SIP lead {lead_id}: {sip_err}")
-            await mark_call_failed(
-                int(encuesta_id),
-                str(sip_err),
-                error_code="sip_dispatch_failed",
-                source="campaign_drip",
-                empresa_id=int(empresa_id) if empresa_id else None,
-                phone=str(phone),
-                room_name=room_name,
-                sip_attempts=sip_retry_max_attempts(),
-            )
-            await _apply_retry_after_failure(lead_id=lead_id, campaign=campaign)
-            return
-
-        # 5. Polling ligero hasta status terminal (el webhook también actuará en paralelo)
-        # Requisito negocio: máximo 30s para que descuelgue; si no, fallida reintentable.
-        TERMINAL = {"completed", "failed", "unreached", "incomplete", "rejected_opt_out"}
-        MAX_WAIT_SECONDS = 300   # 5 minutos como techo
-        ANSWER_TIMEOUT_SECONDS = int(os.getenv("DRIP_ANSWER_TIMEOUT_SECONDS", "30"))
-        POLL_INTERVAL_S  = 2
-        waited = 0
-        answer_timeout_applied = False
-        while waited < MAX_WAIT_SECONDS:
-            await asyncio.sleep(POLL_INTERVAL_S)
-            waited += POLL_INTERVAL_S
-            try:
-                enc_check = await asyncio.to_thread(
-                    supabase.table("encuestas").select("status")
-                        .eq("id", encuesta_id).limit(1).execute
-                )
-                current = enc_check.data[0].get("status") if enc_check.data else None
-                if current in TERMINAL:
-                    logger.info(f"✅ [Drip] Encuesta {encuesta_id} terminal ('{current}') tras {waited}s de espera")
-                    break
-                if waited >= ANSWER_TIMEOUT_SECONDS and current in (None, "", "initiated", "calling", "pending"):
-                    answer_timeout_applied = True
-                    logger.warning(f"⏱️ [Drip] Timeout {ANSWER_TIMEOUT_SECONDS}s sin respuesta (encuesta {encuesta_id}). Marcando failed y cerrando sala.")
-                    try:
-                        await lkapi.room.delete_room(lk_api.DeleteRoomRequest(room=room_name))
-                    except Exception:
-                        pass
-                    await asyncio.to_thread(
-                        supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute
-                    )
-                    await _apply_retry_after_failure(lead_id=lead_id, campaign=campaign)
-                    break
-            except Exception as poll_err:
-                logger.warning(f"[Drip] Error en poll de estado encuesta {encuesta_id}: {poll_err}")
-
-        if answer_timeout_applied:
-            logger.info(f"📵 [Drip] Lead {lead_id} marcado fallido por no contestar en tiempo.")
-
-        # 6. Cooldown obligatorio antes de liberar el lock
-        cooldown = random.randint(_COOLDOWN_MIN, _COOLDOWN_MAX)
-        logger.info(f"⏳ [Drip] Cooldown {cooldown}s para empresa {empresa_id} antes del siguiente lead...")
-        await asyncio.sleep(cooldown)
-
-    finally:
-        await _release_empresa_lock(empresa_id, lock_token)
-        logger.info(f"🔓 [Drip] Lock liberado para empresa {empresa_id}")
-
-
-async def _apply_retry_after_failure(lead_id: int, campaign: dict) -> None:
-    """
-    Programa el siguiente reintento para fallos/no respuesta según la campaña.
-    """
-    retry_seconds = int(campaign.get("retry_interval") or 3600)
-    max_retries = int(campaign.get("retries_count") or 3)
-    try:
-        lr = await asyncio.to_thread(
-            supabase.table("campaign_leads").select("retries_attempted").eq("id", lead_id).limit(1).execute
-        )
-        current_retries = (lr.data[0].get("retries_attempted") if lr.data else 0) or 0
-    except Exception:
-        current_retries = 0
-
-    new_retries = current_retries + 1
-    lead_update = {"status": "failed", "retries_attempted": new_retries}
-    if new_retries < max_retries:
-        lead_update["status"] = "pending"
-        lead_update["next_retry_at"] = (datetime.utcnow() + timedelta(seconds=retry_seconds)).isoformat()
-    try:
-        await asyncio.to_thread(
-            supabase.table("campaign_leads").update(lead_update).eq("id", lead_id).execute
-        )
-    except Exception as e:
-        logger.error(f"[Drip] Error programando reintento lead {lead_id}: {e}")
-
-
-async def _check_campaign_completion(campaign_id: int) -> bool:
-    """Retorna True si no quedan leads en estado pendiente/calling."""
-    try:
-        res = await asyncio.to_thread(
-            supabase.table("campaign_leads")
-                .select("id")
-                .eq("campaign_id", campaign_id)
-                .in_("status", ["pending", "calling"])
-                .limit(1)
-                .execute
-        )
-        return len(res.data) == 0
-    except Exception:
-        return False
-
-
-async def campaign_scheduler_loop():
-    """
-    Loop principal del motor de campañas. Se ejecuta como background task
-    en el arranque de la aplicación.
-
-    Lógica de goteo:
-      - Cada POLL_INTERVAL segundos lee campañas activas.
-      - Por cada campaña, si la empresa NO tiene lock activo, obtiene UN lead
-        y lanza _dispatch_single_lead_drip() como asyncio.create_task().
-      - Distintas empresas corren sus tareas de goteo de forma independiente.
-      - Una misma empresa nunca tiene más de una llamada activa simultánea.
-    """
-    POLL_INTERVAL = int(os.getenv("CAMPAIGN_POLL_INTERVAL_SECONDS", "30"))
-    logger.info(f"🔄 [Scheduler] Motor Drip iniciado (poll cada {POLL_INTERVAL}s, cooldown {_COOLDOWN_MIN}-{_COOLDOWN_MAX}s)")
-
-    while True:
-        try:
-            active_res = await asyncio.to_thread(
-                supabase.table("campaigns")
-                    .select("*")
-                    .in_("status", ["active", "running"])
-                    .execute
-            )
-            campaigns = active_res.data or []
-
-            if campaigns:
-                logger.info(f"[Scheduler] {len(campaigns)} campañas activas.")
-
-            now_iso = datetime.utcnow().isoformat()
-            
-            MAX_CONCURRENT_CALLS = int(os.getenv("MAX_CONCURRENT_CALLS", "10"))
-            
-            active_count = await _get_active_call_count()
-            if active_count >= MAX_CONCURRENT_CALLS:
-                logger.warning(f"Límite global de canales SIP alcanzado ({MAX_CONCURRENT_CALLS}). Esperando...")
-                await asyncio.sleep(POLL_INTERVAL)
-                continue
-
-            for camp in campaigns:
-                empresa_id = camp.get("empresa_id") or 0
-
-                # Si la empresa ya tiene un goteo en curso, no lanzamos más
-                if await _is_empresa_locked(empresa_id):
-                    logger.debug(f"[Scheduler] Empresa {empresa_id} en llamada activa, skipping campaña {camp['id']}.")
-                    continue
-
-                # Obtener el siguiente lead disponible (el más antiguo / con retry más próximo)
-                try:
-                    # Usamos variable local explícita para evitar cierre sobre 'camp' que puede mutar
-                    camp_id_local = camp["id"]
-                    leads_res = await asyncio.to_thread(
-                        supabase.table("campaign_leads")
-                            .select("*")
-                            .eq("campaign_id", camp_id_local)
-                            .eq("status", "pending")
-                            .or_(f"next_retry_at.is.null,next_retry_at.lte.{now_iso}")
-                            .order("next_retry_at", desc=False, nullsfirst=True)
-                            .limit(1)
-                            .execute
-                    )
-                except Exception as fetch_err:
-                    logger.error(f"[Scheduler] Error leyendo leads campaña {camp['id']}: {fetch_err}")
-                    continue
-
-                if not leads_res.data:
-                    # Sin leads disponibles: comprobar si terminó la campaña
-                    is_done = await _check_campaign_completion(camp["id"])
-                    if is_done:
-                        try:
-                            camp_id_done = camp["id"]
-                            await asyncio.to_thread(
-                                supabase.table("campaigns")
-                                    .update({"status": "completed"})
-                                    .eq("id", camp_id_done)
-                                    .execute
-                            )
-                            logger.info(f"✅ [Scheduler] Campaña {camp['id']} completada.")
-                        except Exception as done_err:
-                            logger.error(f"[Scheduler] Error marcando campaña {camp['id']} como completada: {done_err}")
-                    continue
-
-                lead = leads_res.data[0]
-                
-                # BLOQUEO DISTRIBUÍDO INMEDIATO:
-                # Evita que la siguiente campaña de esta misma empresa
-                # lance una llamada en este mismo ciclo del bucle.
-                lock_token = await _acquire_empresa_lock(empresa_id)
-                if not lock_token:
-                    logger.debug(f"[Scheduler] Lock empresa {empresa_id} ya adquirido por otra instancia, skipping.")
-                    continue
-
-                asyncio.create_task(_dispatch_single_lead_drip(lead, camp, lock_token=lock_token))
-
-        except Exception as e:
-            logger.error(f"❌ [Scheduler] Error en loop principal: {e}")
-
-        await asyncio.sleep(POLL_INTERVAL)
-
-
-
-
 @router.post("/campaigns/{campaign_id}/simulate")
 async def simulate_campaign(
     campaign_id: int,
@@ -1254,7 +791,7 @@ async def start_campaign(campaign_id: int, current_user: CurrentUser = Depends(r
             await redis.delete(f"ausarta:campaign:cancel:{campaign_id}")
         except Exception:
             pass
-        await _enqueue_scheduler_tick()
+        await enqueue_scheduler_tick()
         return {"status": "ok", "message": "Campaña marcada como activa. El scheduler la procesará en el próximo ciclo."}
     except HTTPException:
         raise
@@ -1307,3 +844,19 @@ async def receive_call_result(
         if event_id:
             await mark_webhook_event_processed(event_id, failed=True)
         return JSONResponse(status_code=500, content={"error": "Error procesando webhook"})
+
+# Re-exports para compatibilidad con tasks ARQ y código legacy
+from services.campaign_locks import (  # noqa: E402
+    acquire_empresa_lock as _acquire_empresa_lock,
+    get_active_call_count as _get_active_call_count,
+    get_active_call_count_for_empresa as _get_active_call_count_for_empresa,
+    is_empresa_locked as _is_empresa_locked,
+    release_empresa_lock as _release_empresa_lock,
+)
+from services.campaign_drip import (  # noqa: E402
+    apply_retry_after_failure as _apply_retry_after_failure,
+    campaign_scheduler_loop,
+    check_campaign_completion as _check_campaign_completion,
+    dispatch_single_lead_drip as _dispatch_single_lead_drip,
+)
+
