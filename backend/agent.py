@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from agents import CallSession, DynamicAgent, entrypoint  # noqa: E402
+from agents.entrypoint import server  # noqa: E402
 from agents.dynamic_agent import (  # noqa: E402
     BRIDGE_SERVER_URL_INTERNAL,
     DISPATCH_AGENT_NAME,

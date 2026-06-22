@@ -4,10 +4,16 @@ import {
   Bot, Users, CalendarClock, ChevronRight, ChevronLeft, Loader2, Check, Zap, FileSpreadsheet
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
-import { fetchCampaignsList, fetchEmpresasList, fetchAgentsList } from '../lib/campaignsSupabase';
+import {
+  campaignKeys,
+  useAgentsList,
+  useCampaignsList,
+  useEmpresasList,
+} from '../api/campaigns';
 import { Empresa, SurveyResult } from '../types';
 import DashboardView from './DashboardView';
 import ResultsView from './ResultsView';
@@ -59,8 +65,13 @@ interface Agent {
 export function CampaignsView() {
   const { profile, isRole, isPlatformOwner } = useAuth();
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
 
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const empresaFilter = !isPlatformOwner && profile?.empresa_id ? profile.empresa_id : undefined;
+
+  const campaignsQuery = useCampaignsList(empresaFilter, Boolean(profile));
+  const empresasQuery = useEmpresasList(empresaFilter, Boolean(profile));
+
   const [showCreate, setShowCreate] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const WIZARD_STEPS = [
@@ -68,12 +79,26 @@ export function CampaignsView() {
     { id: 1, key: 'contacts', label: t('Contactos', 'Contactos'), icon: Users },
     { id: 2, key: 'schedule', label: t('Programación', 'Programación'), icon: CalendarClock },
   ] as const;
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [selectedEmpresa, setSelectedEmpresa] = useState<number | null>(null);
+  const [quickEmpresaId, setQuickEmpresaId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
-  const [listLoading, setListLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const empresas = (empresasQuery.data ?? []) as Empresa[];
+  const listLoading = campaignsQuery.isLoading;
+
+  const agentsEmpresaFilter =
+    !isPlatformOwner && profile?.empresa_id
+      ? profile.empresa_id
+      : isPlatformOwner && (quickEmpresaId || selectedEmpresa)
+        ? (quickEmpresaId || selectedEmpresa) || undefined
+        : undefined;
+
+  const agentsQuery = useAgentsList(
+    agentsEmpresaFilter ?? undefined,
+    Boolean(profile) && (isPlatformOwner ? Boolean(quickEmpresaId || selectedEmpresa || empresas.length) : true),
+  );
+  const agents = (agentsQuery.data ?? []) as Agent[];
 
   // Selected Campaign Details
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
@@ -117,7 +142,23 @@ export function CampaignsView() {
   const [csvParsing, setCsvParsing] = useState(false);
   const [csvDragActive, setCsvDragActive] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
-  const [quickEmpresaId, setQuickEmpresaId] = useState<number | null>(null);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+
+  useEffect(() => {
+    if (campaignsQuery.data) {
+      setCampaigns(campaignsQuery.data as Campaign[]);
+    }
+  }, [campaignsQuery.data]);
+
+  const refreshCampaigns = () => {
+    queryClient.invalidateQueries({ queryKey: campaignKeys.all });
+  };
+
+  useEffect(() => {
+    if (agents.length > 0 && !selectedAgent) {
+      setSelectedAgent(agents[0].id);
+    }
+  }, [agents, selectedAgent]);
 
   // Dynamic Schema Extraction State
   const [extractionSchema, setExtractionSchema] = useState<{key: string; type: string; label: string; options?: string[]}[]>([]);
@@ -175,7 +216,7 @@ export function CampaignsView() {
       if (res.ok) {
         toast.success(t("Campaign updated!", "¡Campaña actualizada!"));
         setEditingCampaign(null);
-        loadCampaigns();
+        refreshCampaigns();
         if (selectedCampaign && selectedCampaign.id === editingCampaign.id) {
           const updatedCamp = await (await fetch(`${API_URL}/api/campaigns/${editingCampaign.id}`)).json();
           setSelectedCampaign(updatedCamp.campaign);
@@ -203,10 +244,7 @@ export function CampaignsView() {
   const groupedEntries = Object.entries(groupedCampaignsByCompany) as [string, Campaign[]][];
 
   useEffect(() => {
-    loadCampaigns();
-    loadEmpresas();
-
-    // Supabase Realtime for Campaigns
+    // Supabase Realtime: invalida caché React Query
     const channel = supabase
       .channel('campaigns-realtime-updates')
       .on(
@@ -218,15 +256,9 @@ export function CampaignsView() {
           filter: profile?.empresa_id && !isPlatformOwner ? `empresa_id=eq.${profile.empresa_id}` : undefined
         },
         (payload) => {
-          if (payload.eventType === 'UPDATE') {
-            setCampaigns(prev => prev.map(c => c.id === payload.new.id ? { ...c, ...payload.new } : c));
-            if (selectedCampaign && selectedCampaign.id === payload.new.id) {
-              setSelectedCampaign(prev => prev ? { ...prev, ...payload.new } : null);
-            }
-          } else if (payload.eventType === 'INSERT') {
-            setCampaigns(prev => [payload.new as Campaign, ...prev]);
-          } else if (payload.eventType === 'DELETE') {
-            setCampaigns(prev => prev.filter(c => c.id !== payload.old.id));
+          refreshCampaigns();
+          if (payload.eventType === 'UPDATE' && selectedCampaign && selectedCampaign.id === payload.new.id) {
+            setSelectedCampaign(prev => prev ? { ...prev, ...payload.new } : null);
           }
         }
       )
@@ -235,11 +267,7 @@ export function CampaignsView() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [profile, isPlatformOwner]);
-
-  useEffect(() => {
-    loadAgents();
-  }, [profile, isPlatformOwner, selectedEmpresa, quickEmpresaId]);
+  }, [profile, isPlatformOwner, selectedCampaign?.id]);
 
   useEffect(() => {
     if (!quickEmpresaId && empresas.length > 0) {
@@ -281,49 +309,6 @@ export function CampaignsView() {
     if (empresaId) setSelectedEmpresa(empresaId);
     else if (quickEmpresaId) setSelectedEmpresa(quickEmpresaId);
     setShowCreate(true);
-  };
-
-  const loadEmpresas = async () => {
-    try {
-      const empresaFilter = !isPlatformOwner && profile?.empresa_id ? profile.empresa_id : undefined;
-      const data = await fetchEmpresasList(empresaFilter);
-      setEmpresas(data as Empresa[]);
-    } catch (e) {
-      console.error('Error loading empresas from Supabase:', e);
-      setEmpresas([]);
-    }
-  };
-
-  const loadAgents = async () => {
-    try {
-      const empresaFilter =
-        !isPlatformOwner && profile?.empresa_id
-          ? profile.empresa_id
-          : isPlatformOwner && (quickEmpresaId || selectedEmpresa)
-            ? (quickEmpresaId || selectedEmpresa)
-            : undefined;
-      const data = await fetchAgentsList(empresaFilter);
-      setAgents(data);
-      if (data.length > 0) setSelectedAgent(data[0].id);
-      else setSelectedAgent('');
-    } catch (e) {
-      console.error('Error loading agents from Supabase:', e);
-      setAgents([]);
-    }
-  };
-
-  const loadCampaigns = async () => {
-    setListLoading(true);
-    try {
-      const empresaFilter = !isPlatformOwner && profile?.empresa_id ? profile.empresa_id : undefined;
-      const data = await fetchCampaignsList(empresaFilter);
-      setCampaigns(data as Campaign[]);
-    } catch (e) {
-      console.error('Error loading campaigns from Supabase:', e);
-      setCampaigns([]);
-    } finally {
-      setListLoading(false);
-    }
   };
 
   const loadCampaignDetails = async (campaign: Campaign) => {
@@ -497,7 +482,7 @@ export function CampaignsView() {
       setName('');
       setCsvFile(null);
       setExtractionSchema([]);
-      loadCampaigns();
+      refreshCampaigns();
       toast.success(t('Campaign created successfully!', '¡Campaña creada exitosamente!'));
 
     } catch (err: any) {
@@ -511,7 +496,7 @@ export function CampaignsView() {
     if (!confirm(t("Are you sure you want to delete this campaign? This cannot be undone.", "¿Estás seguro de que quieres eliminar esta campaña? Esto no se puede deshacer."))) return;
     try {
       await fetch(`${API_URL}/api/campaigns/${id}`, { method: 'DELETE' });
-      loadCampaigns();
+      refreshCampaigns();
       if (selectedCampaign?.id === id) setShowDetails(false);
     } catch (e) {
       toast.error(t("Error deleting campaign", "Error al eliminar la campaña"));
@@ -527,7 +512,7 @@ export function CampaignsView() {
       if (res.ok && data.status === 'success') {
         toast.success(t(`Successfully queued ${data.retried_count} failed calls for retry.`, `Se han encolado exitosamente ${data.retried_count} llamadas fallidas para reintento.`));
         if (selectedCampaign) loadCampaignDetails(selectedCampaign);
-        loadCampaigns();
+        refreshCampaigns();
       } else {
         toast.error(t("Failed to retry calls.", "Error al reintentar llamadas."));
       }
@@ -558,7 +543,7 @@ export function CampaignsView() {
       const res = await fetch(`${API_URL}/api/campaigns/${campaignId}/start`, { method: 'POST' });
       if (res.ok) {
         toast.success(t("Campaign started (Drip mode active)", "Campaña iniciada (Modo Goteo activo)"));
-        loadCampaigns();
+        refreshCampaigns();
         if (selectedCampaign?.id === campaignId) loadCampaignDetails(selectedCampaign);
       } else {
         toast.error(t("Error starting campaign", "Error al iniciar campaña"));
@@ -573,7 +558,7 @@ export function CampaignsView() {
       const res = await fetch(`${API_URL}/api/campaigns/${campaignId}/stop`, { method: 'POST' });
       if (res.ok) {
         toast.success(t("Campaign paused", "Campaña pausada"));
-        loadCampaigns();
+        refreshCampaigns();
         if (selectedCampaign?.id === campaignId) loadCampaignDetails(selectedCampaign);
       } else {
         toast.error(t("Error pausing campaign", "Error al pausar campaña"));
