@@ -3,13 +3,14 @@ redis_service.py — Servicio centralizado de Redis.
 
 Proporciona:
   - Conexión singleton (pool asíncrono) reutilizable en toda la app.
-  - Distributed Lock con TTL para reemplazar sets en memoria.
+  - Distributed Lock con TTL y token de propiedad (release seguro vía Lua).
   - Helpers para sets distribuidos (reemplazo de _processing_rooms).
 
 Configuración vía variable de entorno REDIS_URL (default: redis://redis:6379/0).
 """
 import os
 import logging
+import secrets
 from typing import Optional
 
 import redis.asyncio as aioredis
@@ -82,51 +83,71 @@ async def close_redis() -> None:
 
 LOCK_PREFIX = "ausarta:lock:"
 
+_RELEASE_LOCK_SCRIPT = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+"""
 
-async def acquire_lock(key: str, ttl_seconds: int = 600) -> bool:
+_EXTEND_LOCK_SCRIPT = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("expire", KEYS[1], ARGV[2])
+else
+    return 0
+end
+"""
+
+
+def _full_lock_key(key: str) -> str:
+    return f"{LOCK_PREFIX}{key}"
+
+
+async def acquire_lock(key: str, ttl_seconds: int = 600) -> str | None:
     """
-    Intenta adquirir un lock distribuido.
-
-    Args:
-        key: Identificador único del lock (ej: "empresa:42", "room:sala_xyz").
-        ttl_seconds: Tiempo máximo que el lock se mantiene antes de expirar
-                     automáticamente (safety net contra crashes).
+    Intenta adquirir un lock distribuido con token de propiedad.
 
     Returns:
-        True si se adquirió el lock, False si ya existe (otro proceso lo tiene).
+        Token de propiedad si se adquirió el lock; None si otro proceso lo tiene.
     """
     r = await get_redis()
-    full_key = f"{LOCK_PREFIX}{key}"
-    # SET NX = solo si no existe; EX = con expiración
-    acquired = await r.set(full_key, "1", nx=True, ex=ttl_seconds)
-    return acquired is not None and acquired is not False
+    token = secrets.token_urlsafe(16)
+    acquired = await r.set(_full_lock_key(key), token, nx=True, ex=ttl_seconds)
+    if acquired:
+        return token
+    return None
 
 
-async def release_lock(key: str) -> None:
-    """Libera un lock distribuido."""
+async def release_lock(key: str, token: str | None = None) -> bool:
+    """
+    Libera un lock distribuido.
+
+    Con token: solo borra si el lock sigue siendo del mismo propietario (Lua).
+    Sin token: borrado directo (legacy — evitar en código nuevo).
+    """
     r = await get_redis()
-    full_key = f"{LOCK_PREFIX}{key}"
+    full_key = _full_lock_key(key)
+    if token:
+        released = await r.eval(_RELEASE_LOCK_SCRIPT, 1, full_key, token)
+        return bool(released)
     await r.delete(full_key)
+    return True
 
 
 async def is_locked(key: str) -> bool:
     """Comprueba si un lock está activo sin modificarlo."""
     r = await get_redis()
-    full_key = f"{LOCK_PREFIX}{key}"
-    return await r.exists(full_key) > 0
+    return await r.exists(_full_lock_key(key)) > 0
 
 
-async def refresh_lock(key: str, ttl_seconds: int = 600) -> bool:
+async def refresh_lock(key: str, token: str, ttl_seconds: int = 600) -> bool:
     """
-    Renueva el TTL de un lock existente (heartbeat).
-    Útil para operaciones de larga duración como el drip de campañas.
-
-    Returns:
-        True si el lock existía y se renovó, False si ya no existe.
+    Renueva el TTL solo si el token de propiedad coincide.
     """
     r = await get_redis()
-    full_key = f"{LOCK_PREFIX}{key}"
-    return await r.expire(full_key, ttl_seconds)
+    extended = await r.eval(_EXTEND_LOCK_SCRIPT, 1, _full_lock_key(key), token, str(ttl_seconds))
+    return bool(extended)
 
 
 # ──────────────────────────────────────────────

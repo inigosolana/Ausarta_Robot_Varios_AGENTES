@@ -128,23 +128,28 @@ _COOLDOWN_MAX = int(os.getenv("DRIP_COOLDOWN_MAX_SECONDS", str(settings.drip_coo
 _EMPRESA_LOCK_TTL = _COOLDOWN_MAX + 300 + 60  # ~540s
 
 
-async def _acquire_empresa_lock(empresa_id: int) -> bool:
-    """Intenta adquirir el drip lock para una empresa. Fallback a set local."""
+async def _acquire_empresa_lock(empresa_id: int) -> str | None:
+    """Intenta adquirir el drip lock para una empresa. Devuelve token de propiedad."""
     try:
         from services.redis_service import acquire_lock
+
         return await acquire_lock(f"empresa:{empresa_id}", ttl_seconds=_EMPRESA_LOCK_TTL)
     except Exception:
         if empresa_id in _empresas_en_llamada_fallback:
-            return False
+            return None
         _empresas_en_llamada_fallback.add(empresa_id)
-        return True
+        return f"local-fallback:{empresa_id}"
 
 
-async def _release_empresa_lock(empresa_id: int) -> None:
-    """Libera el drip lock de una empresa."""
+async def _release_empresa_lock(empresa_id: int, token: str | None = None) -> None:
+    """Libera el drip lock de una empresa (solo si el token coincide en Redis)."""
     try:
         from services.redis_service import release_lock
-        await release_lock(f"empresa:{empresa_id}")
+
+        if token and not str(token).startswith("local-fallback:"):
+            await release_lock(f"empresa:{empresa_id}", token)
+        elif token is None:
+            await release_lock(f"empresa:{empresa_id}")
     except Exception:
         pass
     _empresas_en_llamada_fallback.discard(empresa_id)
@@ -766,7 +771,12 @@ async def get_agent_config_by_agent(
 # MOTOR DE CAMPAÑAS — GOTEO CONTROLADO (DRIP)
 # ──────────────────────────────────────────────
 
-async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
+async def _dispatch_single_lead_drip(
+    lead: dict,
+    campaign: dict,
+    *,
+    lock_token: str | None = None,
+) -> None:
     """
     Lanza UNA llamada SIP para un lead y gestiona el drip lock de la empresa.
 
@@ -945,7 +955,7 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
         await asyncio.sleep(cooldown)
 
     finally:
-        await _release_empresa_lock(empresa_id)
+        await _release_empresa_lock(empresa_id, lock_token)
         logger.info(f"🔓 [Drip] Lock liberado para empresa {empresa_id}")
 
 
@@ -1078,13 +1088,12 @@ async def campaign_scheduler_loop():
                 # BLOQUEO DISTRIBUÍDO INMEDIATO:
                 # Evita que la siguiente campaña de esta misma empresa
                 # lance una llamada en este mismo ciclo del bucle.
-                acquired = await _acquire_empresa_lock(empresa_id)
-                if not acquired:
+                lock_token = await _acquire_empresa_lock(empresa_id)
+                if not lock_token:
                     logger.debug(f"[Scheduler] Lock empresa {empresa_id} ya adquirido por otra instancia, skipping.")
                     continue
-                
-                # Lanzar como task independiente: el scheduler no espera, sigue con las demás empresas
-                asyncio.create_task(_dispatch_single_lead_drip(lead, camp))
+
+                asyncio.create_task(_dispatch_single_lead_drip(lead, camp, lock_token=lock_token))
 
         except Exception as e:
             logger.error(f"❌ [Scheduler] Error en loop principal: {e}")

@@ -63,13 +63,13 @@ async def guard_outbound_call(
     empresa_id: int | None,
     phone: str,
     source: str = "unknown",
-) -> str:
+) -> tuple[str, str | None]:
     """
     Valida destino y aplica rate limits antes de crear participante SIP.
-    Devuelve el E.164 normalizado.
+    Devuelve (E.164 normalizado, token de lock in-flight o None).
     """
     if not _guards_enabled():
-        return validate_outbound_destination(phone)
+        return validate_outbound_destination(phone), None
 
     normalized = validate_outbound_destination(phone)
     masked = mask_phone(normalized)
@@ -113,7 +113,8 @@ async def guard_outbound_call(
     lock_key = f"sip:outbound:{empresa_id or 0}:{dest_hash}"
     from services.redis_service import acquire_lock
 
-    if not await acquire_lock(lock_key, ttl_seconds=120):
+    lock_token = await acquire_lock(lock_key, ttl_seconds=120)
+    if not lock_token:
         raise SipOutboundRejected(
             "duplicate_in_flight",
             "Ya hay una llamada en curso hacia este número",
@@ -125,10 +126,14 @@ async def guard_outbound_call(
         masked,
         source,
     )
-    return normalized
+    return normalized, lock_token
 
 
-async def _release_outbound_lock(empresa_id: int | None, phone: str) -> None:
+async def _release_outbound_lock(
+    empresa_id: int | None,
+    phone: str,
+    token: str | None = None,
+) -> None:
     try:
         normalized = validate_outbound_destination(phone)
     except ValueError:
@@ -136,7 +141,7 @@ async def _release_outbound_lock(empresa_id: int | None, phone: str) -> None:
     dest_hash = hashlib.sha256(normalized.encode()).hexdigest()[:16]
     from services.redis_service import release_lock
 
-    await release_lock(f"sip:outbound:{empresa_id or 0}:{dest_hash}")
+    await release_lock(f"sip:outbound:{empresa_id or 0}:{dest_hash}", token)
 
 
 def _extract_phone_from_request(request: Any) -> str | None:
@@ -159,16 +164,15 @@ async def create_sip_participant_with_retry(
     from services.livekit_service import lkapi
 
     dial = phone or _extract_phone_from_request(request)
-    lock_held = False
+    lock_token: str | None = None
 
     if not skip_guard and dial:
         try:
-            normalized = await guard_outbound_call(
+            normalized, lock_token = await guard_outbound_call(
                 empresa_id=empresa_id,
                 phone=dial,
                 source=source,
             )
-            lock_held = True
             if hasattr(request, "sip_call_to"):
                 request.sip_call_to = normalized
         except SipOutboundRejected:
@@ -201,8 +205,8 @@ async def create_sip_participant_with_retry(
         assert last_error is not None
         raise last_error
     finally:
-        if lock_held and dial:
-            await _release_outbound_lock(empresa_id, dial)
+        if lock_token and dial:
+            await _release_outbound_lock(empresa_id, dial, lock_token)
 
 
 async def _merge_encuesta_failure_extra(

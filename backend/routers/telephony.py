@@ -2198,24 +2198,28 @@ async def test_outbound_call(payload: TestOutboundCallRequest):
 _processing_rooms_fallback: set[str] = set()
 
 
-async def _acquire_room_lock(room_name: str) -> bool:
-    """Intenta adquirir lock distribuido para un room. Fallback a set local."""
+async def _acquire_room_lock(room_name: str) -> str | None:
+    """Intenta adquirir lock distribuido para un room. Devuelve token de propiedad."""
     try:
         from services.redis_service import acquire_lock
+
         return await acquire_lock(f"room:{room_name}", ttl_seconds=30)
     except Exception:
-        # Redis no disponible: fallback a set en memoria
         if room_name in _processing_rooms_fallback:
-            return False
+            return None
         _processing_rooms_fallback.add(room_name)
-        return True
+        return f"local-fallback:{room_name}"
 
 
-async def _release_room_lock(room_name: str) -> None:
+async def _release_room_lock(room_name: str, token: str | None = None) -> None:
     """Libera lock distribuido para un room."""
     try:
         from services.redis_service import release_lock
-        await release_lock(f"room:{room_name}")
+
+        if token and not str(token).startswith("local-fallback:"):
+            await release_lock(f"room:{room_name}", token)
+        elif token is None:
+            await release_lock(f"room:{room_name}")
     except Exception:
         pass
     _processing_rooms_fallback.discard(room_name)
@@ -2375,7 +2379,8 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
         sip_trunk_id = await resolve_outbound_trunk_id(int(emp_id) if str(emp_id).isdigit() else None)
 
         # Prevención de doble despacho (lock distribuido vía Redis)
-        if not await _acquire_room_lock(room_name):
+        room_lock_token = await _acquire_room_lock(room_name)
+        if not room_lock_token:
             logger.warning(f"⚠️ Despacho ya en curso para {room_name}. Ignorando.")
             return {"status": "ok", "message": "Call already initiated", "roomName": room_name}
 
@@ -2420,7 +2425,7 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
                         phone=str(phone),
                         room_name=room_name,
                     )
-                await _release_room_lock(room_name)
+                await _release_room_lock(room_name, room_lock_token)
                 return JSONResponse(
                     status_code=503,
                     content={"error": "Agente no disponible — llamada abortada para evitar audio mudo"},
@@ -2442,7 +2447,7 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
                 source="telephony_outbound",
             )
         except SipOutboundRejected as guard_err:
-            await _release_room_lock(room_name)
+            await _release_room_lock(room_name, room_lock_token)
             if supabase and encuesta_id:
                 await mark_call_failed(
                     int(encuesta_id),
@@ -2456,7 +2461,7 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
             status = 429 if guard_err.code.endswith("rate_limit") else 400
             return JSONResponse(status_code=status, content={"error": guard_err.message})
         except Exception as sip_err:
-            await _release_room_lock(room_name)
+            await _release_room_lock(room_name, room_lock_token)
             if supabase and encuesta_id:
                 await mark_call_failed(
                     int(encuesta_id),
@@ -2473,11 +2478,11 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
                 content={"error": f"Error SIP tras reintentos: {sip_err}"},
             )
 
-        async def clear_lock(rname: str) -> None:
+        async def clear_lock(rname: str, token: str | None) -> None:
             await asyncio.sleep(10)
-            await _release_room_lock(rname)
+            await _release_room_lock(rname, token)
 
-        asyncio.create_task(clear_lock(room_name))
+        asyncio.create_task(clear_lock(room_name, room_lock_token))
 
         # Grabación de audio (solo si ENABLE_RECORDING=true y credenciales configuradas)
         asyncio.create_task(_safe_start_recording(room_name, encuesta_id))
@@ -2485,8 +2490,8 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
         return {"status": "ok", "roomName": room_name, "callId": encuesta_id}
 
     except Exception as e:
-        if "room_name" in locals():
-            await _release_room_lock(room_name)
+        if "room_name" in locals() and locals().get("room_lock_token"):
+            await _release_room_lock(room_name, room_lock_token)
         if supabase and encuesta_id:
             try:
                 await mark_call_failed(

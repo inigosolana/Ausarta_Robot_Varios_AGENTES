@@ -79,6 +79,13 @@ async def startup(ctx: dict[str, Any]) -> None:
     logger.info("🚀 [ARQ Worker] Arrancando...")
     redis: ArqRedis = ctx["redis"]
     await redis.set("ausarta:arq:worker_started", "1", ex=300)
+    try:
+        from services.redis_service import get_redis
+
+        await get_redis()
+        logger.info("✅ [ARQ Worker] Redis locks singleton OK.")
+    except Exception as exc:
+        logger.warning("[ARQ Worker] Redis locks no disponibles: %s", exc)
     logger.info("✅ [ARQ Worker] Redis OK. Listo para consumir tareas.")
 
 

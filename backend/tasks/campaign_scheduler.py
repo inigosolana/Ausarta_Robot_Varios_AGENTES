@@ -139,8 +139,8 @@ async def campaign_scheduler_task(ctx: dict[str, Any]) -> None:
 
         lead = leads_res.data[0]
 
-        acquired = await _acquire_empresa_lock(empresa_id)
-        if not acquired:
+        lock_token = await _acquire_empresa_lock(empresa_id)
+        if not lock_token:
             continue
 
         job_id = f"dispatch:{campaign_id}:{lead['id']}"
@@ -148,6 +148,7 @@ async def campaign_scheduler_task(ctx: dict[str, Any]) -> None:
             "dispatch_lead_drip_task",
             lead["id"],
             campaign_id,
+            lock_token,
             _job_id=job_id,
         )
 

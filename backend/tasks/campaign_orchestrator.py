@@ -2,11 +2,10 @@
 campaign_orchestrator.py — Orquestador nativo de campañas (Cron ARQ cada minuto).
 
 Arquitectura fanout:
-  1. El cron `campaign_orchestrator` escanea campañas activas y encola un job
-     `process_campaign_empresa` por cada (campaign_id, empresa_id). Así cada
-     empresa se procesa en paralelo por ARQ sin bloquearse mutuamente.
-  2. `process_campaign_empresa` reclama los leads de esa campaña y lanza las
-     llamadas SIP con concurrencia limitada por `asyncio.Semaphore`.
+  1. El cron `campaign_orchestrator` escanea campañas orchestrated activas y encola
+     un job `process_campaign_empresa` por cada una.
+  2. `process_campaign_empresa` adquiere un lock Redis por campaña (anti-race) y
+     reclama leads de forma atómica antes del dispatch SIP.
 
 Extraído de worker.py para mantener WorkerSettings limpio.
 """
@@ -24,6 +23,15 @@ from services.sip_call_service import create_sip_participant_with_retry, mark_ca
 
 logger = logging.getLogger("arq-worker")
 
+ORCHESTRATOR_QUEUE_TTL = int(os.getenv("ORCHESTRATOR_QUEUE_GUARD_TTL", "120"))
+ORCHESTRATOR_PROCESS_LOCK_TTL = int(os.getenv("ORCHESTRATOR_PROCESS_LOCK_TTL", "900"))
+LEAD_DISPATCH_LOCK_TTL = int(os.getenv("ORCHESTRATOR_LEAD_LOCK_TTL", "600"))
+
+
+def _is_orchestrated_campaign(campaign: dict) -> bool:
+    campaign_type = (campaign.get("type") or "").strip().lower()
+    return campaign_type == "orchestrated" or bool(campaign.get("use_orchestrator"))
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Cron: fanout por empresa/campaña
@@ -31,8 +39,8 @@ logger = logging.getLogger("arq-worker")
 
 async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
     """
-    Cron ARQ cada minuto: lee campañas activas y encola un job
-    `process_campaign_empresa` por cada una, para procesamiento paralelo.
+    Cron ARQ cada minuto: lee campañas orchestrated activas y encola un job
+    `process_campaign_empresa` por cada una, con guard anti-duplicado en Redis.
     """
     from services.supabase_service import supabase, sb_query
 
@@ -45,43 +53,60 @@ async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
             lambda: supabase.table("campaigns")
             .select(
                 "id, empresa_id, name, agent_id, call_start_hour, call_end_hour, "
-                "call_timezone, forbidden_weekdays"
+                "call_timezone, forbidden_weekdays, type, use_orchestrator"
             )
             .eq("status", "active")
             .execute()
         )
-        campaigns = camp_res.data or []
+        campaigns = [
+            camp for camp in (camp_res.data or []) if _is_orchestrated_campaign(camp)
+        ]
     except Exception as e:
         logger.error("[Orchestrator] Error leyendo campañas activas: %s", e)
         return
 
     if not campaigns:
-        logger.info("[Orchestrator] Sin campañas activas. Fin de ciclo.")
+        logger.info("[Orchestrator] Sin campañas orchestrated activas. Fin de ciclo.")
         return
 
-    logger.info("[Orchestrator] %s campaña(s) activa(s) → fanout.", len(campaigns))
+    logger.info("[Orchestrator] %s campaña(s) orchestrated → fanout.", len(campaigns))
 
-    # Encolamos un job independiente por campaña; ARQ los procesa en paralelo.
     redis: Any = ctx.get("redis")
     if redis is None:
         logger.error("[Orchestrator] No hay cliente ARQ Redis en ctx.")
         return
 
+    minute_bucket = datetime.now(timezone.utc).strftime("%Y%m%d%H%M")
     for camp in campaigns:
+        camp_id = camp["id"]
+        queue_guard_key = f"ausarta:orch:queued:{camp_id}"
         try:
+            queued = await redis.set(queue_guard_key, minute_bucket, nx=True, ex=ORCHESTRATOR_QUEUE_TTL)
+            if not queued:
+                logger.info(
+                    "[Orchestrator] Campaña %s ya encolada o en proceso. Skip.",
+                    camp_id,
+                )
+                continue
+
             await redis.enqueue_job(
                 "process_campaign_empresa",
                 camp,
-                _job_id=f"camp_{camp['id']}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}",
+                _job_id=f"camp_{camp_id}_{minute_bucket}",
             )
             logger.info(
                 "[Orchestrator] Job encolado campaña=%s empresa=%s",
-                camp["id"], camp.get("empresa_id"),
+                camp_id,
+                camp.get("empresa_id"),
             )
         except Exception as enq_err:
             logger.error(
-                "[Orchestrator] Error encolando job campaña=%s: %s", camp["id"], enq_err
+                "[Orchestrator] Error encolando job campaña=%s: %s", camp_id, enq_err
             )
+            try:
+                await redis.delete(queue_guard_key)
+            except Exception:
+                pass
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -93,9 +118,11 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
     Job ARQ (encolado por `campaign_orchestrator`): procesa una sola campaña.
     Reclama leads de forma atómica y lanza llamadas SIP con concurrencia limitada.
     """
+    from services.redis_service import acquire_lock, release_lock
     from services.supabase_service import supabase, sb_query
-    from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit, wait_for_agent_ready
+    from services.livekit_service import create_isolated_room, dispatch_agent_explicit, wait_for_agent_ready
     from services.trunk_service import resolve_outbound_trunk_id
+    from routers.campaigns import _get_active_call_count_for_empresa
     from livekit import api as lk_api
 
     if not supabase:
@@ -103,229 +130,277 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
         return
 
     camp_id = campaign["id"]
-    empresa_id = campaign.get("empresa_id") or 0
-    agent_id = campaign.get("agent_id") or "1"
-    camp_name = campaign.get("name", "")
-    batch_size = int(os.getenv("ORCHESTRATOR_BATCH_SIZE", "10"))
-    max_parallel = int(os.getenv("ORCHESTRATOR_MAX_PARALLEL", "5"))
-
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    logger.info("[CampEmpresa] Procesando campaña=%s empresa=%s batch=%s", camp_id, empresa_id, batch_size)
-
-    # ── 1. Extraer leads pendientes ──────────────────────────────────────────
-    try:
-        leads_res = await sb_query(
-            lambda: supabase.table("campaign_leads")
-            .select("id, phone_number, campaign_id, empresa_id")
-            .eq("campaign_id", camp_id)
-            .eq("status", "pending")
-            .or_(f"next_retry_at.is.null,next_retry_at.lte.{now_iso}")
-            .order("next_retry_at", desc=False, nullsfirst=True)
-            .limit(batch_size)
-            .execute()
-        )
-        leads = leads_res.data or []
-    except Exception as e:
-        logger.error("[CampEmpresa] Error leyendo leads campaña %s: %s", camp_id, e)
-        return
-
-    if not leads:
-        logger.info("[CampEmpresa] Sin leads pendientes para campaña=%s.", camp_id)
-        return
-
-    for lead in leads:
-        lead["_campaign_agent_id"] = agent_id
-        lead["_campaign_name"] = camp_name
-
-    # ── 2. Claim atómico por lead ────────────────────────────────────────────
-    tz_name = campaign.get("call_timezone") or "Europe/Madrid"
-    allowed_hours = (
-        int(campaign.get("call_start_hour") or 9),
-        int(campaign.get("call_end_hour") or 21),
+    process_lock_token = await acquire_lock(
+        f"campaign:process:{camp_id}",
+        ttl_seconds=ORCHESTRATOR_PROCESS_LOCK_TTL,
     )
-    forbidden_days = set(campaign.get("forbidden_weekdays") or {6})
-
-    claimed_leads: list[dict] = []
-    now_utc = datetime.now(timezone.utc)
-
-    for lead in leads:
-        lead_id = lead["id"]
-        can_call, reason = is_call_allowed(
-            now=now_utc,
-            timezone_str=tz_name,
-            allowed_hours=allowed_hours,
-            forbidden_weekdays=forbidden_days,
-        )
-        if not can_call:
-            logger.info("[CampEmpresa] Lead %s saltado por horario: %s", lead_id, reason)
-            continue
-
-        try:
-            claim_res = await sb_query(
-                lambda: supabase.table("campaign_leads")
-                .update({"status": "calling", "last_call_at": now_utc.isoformat()})
-                .eq("id", lead_id)
-                .eq("status", "pending")
-                .execute()
-            )
-            if not (claim_res.data or []):
-                logger.info("[CampEmpresa] Lead %s ya reclamado. Skipping.", lead_id)
-                continue
-            claimed_leads.append(lead)
-        except Exception as claim_err:
-            logger.error("[CampEmpresa] Error claim lead %s: %s", lead_id, claim_err)
-
-    if not claimed_leads:
-        logger.info("[CampEmpresa] Sin leads reclamados en campaña=%s.", camp_id)
+    if not process_lock_token:
+        logger.info("[CampEmpresa] Campaña %s ya en proceso por otro worker.", camp_id)
         return
 
-    logger.info("[CampEmpresa] %s lead(s) reclamados en campaña=%s.", len(claimed_leads), camp_id)
+    redis: Any = ctx.get("redis")
+    queue_guard_key = f"ausarta:orch:queued:{camp_id}"
 
-    # ── 3. Dispatch con concurrencia limitada ────────────────────────────────
-    semaphore = asyncio.Semaphore(max_parallel)
+    try:
+        empresa_id = campaign.get("empresa_id") or 0
+        agent_id = campaign.get("agent_id") or "1"
+        camp_name = campaign.get("name", "")
+        batch_size = int(os.getenv("ORCHESTRATOR_BATCH_SIZE", "10"))
+        max_parallel = int(os.getenv("ORCHESTRATOR_MAX_PARALLEL", "5"))
+        max_calls_per_empresa = int(os.getenv("MAX_CALLS_PER_EMPRESA", "5"))
 
-    async def _dispatch_one(lead: dict) -> None:
-        lead_id = lead["id"]
-        phone = lead.get("phone_number", "")
-        _camp_id = lead.get("campaign_id")
-        _empresa_id = lead.get("empresa_id") or 0
-        _agent_id = lead.get("_campaign_agent_id") or "1"
-        _camp_name = lead.get("_campaign_name", "")
-
-        if not phone:
-            logger.warning("[CampEmpresa] Lead %s sin teléfono. Skipping.", lead_id)
+        empresa_active = await _get_active_call_count_for_empresa(int(empresa_id) if empresa_id else 0)
+        if empresa_active >= max_calls_per_empresa:
+            logger.info(
+                "[CampEmpresa] Rate limit empresa %s (%s/%s). Skip campaña %s.",
+                empresa_id,
+                empresa_active,
+                max_calls_per_empresa,
+                camp_id,
+            )
             return
 
-        async with semaphore:
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        logger.info(
+            "[CampEmpresa] Procesando campaña=%s empresa=%s batch=%s",
+            camp_id,
+            empresa_id,
+            batch_size,
+        )
+
+        try:
+            leads_res = await sb_query(
+                lambda: supabase.table("campaign_leads")
+                .select("id, phone_number, campaign_id, empresa_id")
+                .eq("campaign_id", camp_id)
+                .eq("status", "pending")
+                .or_(f"next_retry_at.is.null,next_retry_at.lte.{now_iso}")
+                .order("next_retry_at", desc=False, nullsfirst=True)
+                .limit(batch_size)
+                .execute()
+            )
+            leads = leads_res.data or []
+        except Exception as e:
+            logger.error("[CampEmpresa] Error leyendo leads campaña %s: %s", camp_id, e)
+            return
+
+        if not leads:
+            logger.info("[CampEmpresa] Sin leads pendientes para campaña=%s.", camp_id)
+            return
+
+        for lead in leads:
+            lead["_campaign_agent_id"] = agent_id
+            lead["_campaign_name"] = camp_name
+
+        tz_name = campaign.get("call_timezone") or "Europe/Madrid"
+        allowed_hours = (
+            int(campaign.get("call_start_hour") or 9),
+            int(campaign.get("call_end_hour") or 21),
+        )
+        forbidden_days = set(campaign.get("forbidden_weekdays") or {6})
+
+        claimed_leads: list[dict] = []
+        now_utc = datetime.now(timezone.utc)
+
+        for lead in leads:
+            lead_id = lead["id"]
+            can_call, reason = is_call_allowed(
+                now=now_utc,
+                timezone_str=tz_name,
+                allowed_hours=allowed_hours,
+                forbidden_weekdays=forbidden_days,
+            )
+            if not can_call:
+                logger.info("[CampEmpresa] Lead %s saltado por horario: %s", lead_id, reason)
+                continue
+
             try:
-                resolved = await resolve_outbound_agent(
-                    empresa_id=int(_empresa_id) if _empresa_id else None,
-                    campaign_agent_id=_agent_id,
-                )
-                resolved_agent_id = resolved["agent_id"]
-                resolved_agent_type = resolved["agent_type"]
-
-                enc_res = await sb_query(
-                    lambda: supabase.table("encuestas").insert({
-                        "telefono": phone,
-                        "fecha": datetime.now(timezone.utc).isoformat(),
-                        "status": "initiated",
-                        "completada": 0,
-                        "agent_id": resolved_agent_id,
-                        "agent_type": resolved_agent_type,
-                        "empresa_id": _empresa_id,
-                        "campaign_id": _camp_id,
-                        "campaign_name": _camp_name,
-                    }).execute()
-                )
-                encuesta_id = enc_res.data[0]["id"]
-
-                await sb_query(
+                claim_res = await sb_query(
                     lambda: supabase.table("campaign_leads")
-                    .update({"call_id": encuesta_id})
+                    .update({"status": "calling", "last_call_at": now_utc.isoformat()})
                     .eq("id", lead_id)
+                    .eq("status", "pending")
                     .execute()
                 )
+                if not (claim_res.data or []):
+                    logger.info("[CampEmpresa] Lead %s ya reclamado. Skipping.", lead_id)
+                    continue
+                claimed_leads.append(lead)
+            except Exception as claim_err:
+                logger.error("[CampEmpresa] Error claim lead %s: %s", lead_id, claim_err)
 
-                room_name = (
-                    f"llamada_ausarta_empresa_{_empresa_id}"
-                    f"_campana_{_camp_id}"
-                    f"_contacto_{lead_id}"
-                    f"_encuesta_{encuesta_id}"
-                )
-                room_metadata = build_outbound_room_metadata(
-                    empresa_id=int(_empresa_id),
-                    survey_id=int(encuesta_id),
-                    agent_id=int(resolved_agent_id),
-                    agent_type=resolved_agent_type,
-                    campaign_id=int(_camp_id or 0),
-                    contacto_id=int(lead_id),
-                )
+        if not claimed_leads:
+            logger.info("[CampEmpresa] Sin leads reclamados en campaña=%s.", camp_id)
+            return
 
-                await create_isolated_room(room_name, metadata=room_metadata)
+        logger.info("[CampEmpresa] %s lead(s) reclamados en campaña=%s.", len(claimed_leads), camp_id)
 
-                agent_name = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
-                await dispatch_agent_explicit(
-                    room_name=room_name,
-                    agent_name=agent_name,
-                    metadata=room_metadata,
-                )
-                logger.info(
-                    "[CampEmpresa] Agente despachado lead=%s tipo=%s sala=%s",
-                    lead_id,
-                    resolved_agent_type,
-                    room_name,
-                )
+        semaphore = asyncio.Semaphore(max_parallel)
 
-                agent_ready = await wait_for_agent_ready(room_name)
-                if not agent_ready:
-                    logger.error(
-                        "[CampEmpresa] Agente no listo lead=%s sala=%s. Marcando failed.", lead_id, room_name
-                    )
-                    await mark_call_failed(
-                        int(encuesta_id),
-                        "Agente no disponible antes del SIP",
-                        error_code="agent_not_ready",
-                        source="campaign_orchestrator",
+        async def _dispatch_one(lead: dict) -> None:
+            lead_id = lead["id"]
+            lead_lock_token = await acquire_lock(
+                f"lead:dispatch:{lead_id}",
+                ttl_seconds=LEAD_DISPATCH_LOCK_TTL,
+            )
+            if not lead_lock_token:
+                logger.info("[CampEmpresa] Lead %s ya en dispatch por otro worker.", lead_id)
+                return
+
+            phone = lead.get("phone_number", "")
+            _camp_id = lead.get("campaign_id")
+            _empresa_id = lead.get("empresa_id") or 0
+            _agent_id = lead.get("_campaign_agent_id") or "1"
+            _camp_name = lead.get("_campaign_name", "")
+
+            if not phone:
+                logger.warning("[CampEmpresa] Lead %s sin teléfono. Skipping.", lead_id)
+                await release_lock(f"lead:dispatch:{lead_id}", lead_lock_token)
+                return
+
+            async with semaphore:
+                try:
+                    resolved = await resolve_outbound_agent(
                         empresa_id=int(_empresa_id) if _empresa_id else None,
-                        phone=str(phone),
-                        room_name=room_name,
+                        campaign_agent_id=_agent_id,
                     )
+                    resolved_agent_id = resolved["agent_id"]
+                    resolved_agent_type = resolved["agent_type"]
+
+                    enc_res = await sb_query(
+                        lambda: supabase.table("encuestas").insert({
+                            "telefono": phone,
+                            "fecha": datetime.now(timezone.utc).isoformat(),
+                            "status": "initiated",
+                            "completada": 0,
+                            "agent_id": resolved_agent_id,
+                            "agent_type": resolved_agent_type,
+                            "empresa_id": _empresa_id,
+                            "campaign_id": _camp_id,
+                            "campaign_name": _camp_name,
+                        }).execute()
+                    )
+                    encuesta_id = enc_res.data[0]["id"]
+
                     await sb_query(
                         lambda: supabase.table("campaign_leads")
-                        .update({"status": "pending"})
+                        .update({"call_id": encuesta_id})
                         .eq("id", lead_id)
                         .execute()
                     )
-                    return
 
-                sip_trunk_id = await resolve_outbound_trunk_id(int(_empresa_id) if _empresa_id else None)
-                try:
-                    await create_sip_participant_with_retry(
-                        lk_api.CreateSIPParticipantRequest(
-                            sip_trunk_id=sip_trunk_id,
-                            sip_call_to=phone,
+                    room_name = (
+                        f"llamada_ausarta_empresa_{_empresa_id}"
+                        f"_campana_{_camp_id}"
+                        f"_contacto_{lead_id}"
+                        f"_encuesta_{encuesta_id}"
+                    )
+                    room_metadata = build_outbound_room_metadata(
+                        empresa_id=int(_empresa_id),
+                        survey_id=int(encuesta_id),
+                        agent_id=int(resolved_agent_id),
+                        agent_type=resolved_agent_type,
+                        campaign_id=int(_camp_id or 0),
+                        contacto_id=int(lead_id),
+                    )
+
+                    await create_isolated_room(room_name, metadata=room_metadata)
+
+                    agent_name = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
+                    await dispatch_agent_explicit(
+                        room_name=room_name,
+                        agent_name=agent_name,
+                        metadata=room_metadata,
+                    )
+                    logger.info(
+                        "[CampEmpresa] Agente despachado lead=%s tipo=%s sala=%s",
+                        lead_id,
+                        resolved_agent_type,
+                        room_name,
+                    )
+
+                    agent_ready = await wait_for_agent_ready(room_name)
+                    if not agent_ready:
+                        logger.error(
+                            "[CampEmpresa] Agente no listo lead=%s sala=%s. Marcando failed.",
+                            lead_id,
+                            room_name,
+                        )
+                        await mark_call_failed(
+                            int(encuesta_id),
+                            "Agente no disponible antes del SIP",
+                            error_code="agent_not_ready",
+                            source="campaign_orchestrator",
+                            empresa_id=int(_empresa_id) if _empresa_id else None,
+                            phone=str(phone),
                             room_name=room_name,
-                            participant_identity=f"user_{phone}_{encuesta_id}",
-                            participant_name="Cliente",
-                        ),
-                        empresa_id=int(_empresa_id) if _empresa_id else None,
-                        phone=str(phone),
-                        source="campaign_orchestrator",
-                    )
-                    logger.info("✅ [CampEmpresa] Llamada SIP iniciada lead=%s → %s", lead_id, phone)
-                except Exception as sip_err:
-                    logger.error("❌ [CampEmpresa] Error SIP lead=%s: %s", lead_id, sip_err)
-                    await mark_call_failed(
-                        int(encuesta_id),
-                        str(sip_err),
-                        error_code="sip_dispatch_failed",
-                        source="campaign_orchestrator",
-                        empresa_id=int(_empresa_id) if _empresa_id else None,
-                        phone=str(phone),
-                        room_name=room_name,
-                        sip_attempts=sip_retry_max_attempts(),
-                    )
-                    await sb_query(
-                        lambda: supabase.table("campaign_leads")
-                        .update({"status": "pending"})
-                        .eq("id", lead_id)
-                        .execute()
-                    )
-                    return
+                        )
+                        await sb_query(
+                            lambda: supabase.table("campaign_leads")
+                            .update({"status": "pending"})
+                            .eq("id", lead_id)
+                            .execute()
+                        )
+                        return
 
-            except Exception as e:
-                logger.error("❌ [CampEmpresa] Error despachando lead=%s (%s): %s", lead_id, phone, e)
-                try:
-                    await sb_query(
-                        lambda: supabase.table("campaign_leads")
-                        .update({"status": "pending"})
-                        .eq("id", lead_id)
-                        .execute()
-                    )
-                except Exception as revert_err:
-                    logger.error("[CampEmpresa] Error revirtiendo lead=%s: %s", lead_id, revert_err)
+                    sip_trunk_id = await resolve_outbound_trunk_id(int(_empresa_id) if _empresa_id else None)
+                    try:
+                        await create_sip_participant_with_retry(
+                            lk_api.CreateSIPParticipantRequest(
+                                sip_trunk_id=sip_trunk_id,
+                                sip_call_to=phone,
+                                room_name=room_name,
+                                participant_identity=f"user_{phone}_{encuesta_id}",
+                                participant_name="Cliente",
+                            ),
+                            empresa_id=int(_empresa_id) if _empresa_id else None,
+                            phone=str(phone),
+                            source="campaign_orchestrator",
+                        )
+                        logger.info("✅ [CampEmpresa] Llamada SIP iniciada lead=%s → %s", lead_id, phone)
+                    except Exception as sip_err:
+                        logger.error("❌ [CampEmpresa] Error SIP lead=%s: %s", lead_id, sip_err)
+                        await mark_call_failed(
+                            int(encuesta_id),
+                            str(sip_err),
+                            error_code="sip_dispatch_failed",
+                            source="campaign_orchestrator",
+                            empresa_id=int(_empresa_id) if _empresa_id else None,
+                            phone=str(phone),
+                            room_name=room_name,
+                            sip_attempts=sip_retry_max_attempts(),
+                        )
+                        await sb_query(
+                            lambda: supabase.table("campaign_leads")
+                            .update({"status": "pending"})
+                            .eq("id", lead_id)
+                            .execute()
+                        )
+                        return
 
-    await asyncio.gather(*[_dispatch_one(lead) for lead in claimed_leads])
-    logger.info("[CampEmpresa] ◀ Campaña=%s procesada.", camp_id)
+                except Exception as e:
+                    logger.error(
+                        "❌ [CampEmpresa] Error despachando lead=%s (%s): %s", lead_id, phone, e
+                    )
+                    try:
+                        await sb_query(
+                            lambda: supabase.table("campaign_leads")
+                            .update({"status": "pending"})
+                            .eq("id", lead_id)
+                            .execute()
+                        )
+                    except Exception as revert_err:
+                        logger.error("[CampEmpresa] Error revirtiendo lead=%s: %s", lead_id, revert_err)
+                finally:
+                    await release_lock(f"lead:dispatch:{lead_id}", lead_lock_token)
+
+        await asyncio.gather(*[_dispatch_one(lead) for lead in claimed_leads])
+        logger.info("[CampEmpresa] ◀ Campaña=%s procesada.", camp_id)
+    finally:
+        await release_lock(f"campaign:process:{camp_id}", process_lock_token)
+        if redis is not None:
+            try:
+                await redis.delete(queue_guard_key)
+            except Exception:
+                pass
