@@ -160,11 +160,49 @@ export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'assistant', label: 'Ausarta Copilot' },
   { key: 'admin', label: 'Usuarios' },
   { key: 'crm', label: 'CRM Integration' },
+  { key: 'contacts', label: 'Contactos' },
   { key: 'ai_prompt_generator', label: 'Generador de Agentes AI (Extra)' },
   { key: 'premium_voice', label: 'Voz Ausarta (Acceso Premium)' },
 ];
 
 export type Sentimiento = 'Positivo' | 'Neutral' | 'Negativo';
+
+/** Campos comunes presentes en datos_extra tras el post-procesamiento de llamada. */
+export interface DatosExtraBase {
+  sentimiento_cliente?: Sentimiento | string;
+  idioma?: string;
+  resumen_narrativo?: string;
+  telefono?: string;
+  /** Campos dinámicos del extraction_schema o del analizador LLM. */
+  [key: string]: unknown;
+}
+
+/** Campos específicos del agente SOPORTE_CLIENTE. */
+export interface DatosExtraSoporte extends DatosExtraBase {
+  motivo_llamada?: string;
+  resolucion?: string;
+  puntos_clave?: string[];
+}
+
+/** Campos específicos del agente CUALIFICACION_LEAD. */
+export interface DatosExtraCualificacion extends DatosExtraBase {
+  lead_cualificado?: boolean;
+  interes?: 'alto' | 'medio' | 'bajo' | string;
+  motivo_rechazo?: string | null;
+}
+
+/** Campos específicos del agente AGENDAMIENTO_CITA. */
+export interface DatosExtraAgendamiento extends DatosExtraBase {
+  cita_agendada?: boolean;
+  fecha_cita?: string | null;
+  disponibilidad?: string | null;
+}
+
+export type DatosExtra =
+  | DatosExtraBase
+  | DatosExtraSoporte
+  | DatosExtraCualificacion
+  | DatosExtraAgendamiento;
 
 export interface AgentCallResults {
   schema_version?: number;
@@ -192,7 +230,7 @@ export interface SurveyResult {
   tipo_resultados?: string | null;
   agent_type?: string | null;
   agent_results?: AgentCallResults | null;
-  datos_extra?: Record<string, any> | null;
+  datos_extra?: DatosExtra | null;
   customer_name?: string | null;
   empresa_name?: string | null;
   recording_url?: string | null;

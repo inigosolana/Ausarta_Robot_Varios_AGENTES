@@ -73,6 +73,7 @@ const AppShell: React.FC = () => {
       '/usage': 'usage',
       '/admin': 'admin',
       '/crm': 'crm',
+      '/contacts': 'contacts',
       '/trunks': 'admin',
       '/copilot': 'assistant',
     };
@@ -281,7 +282,9 @@ const AppShell: React.FC = () => {
             {hasPermission('admin') && (
               <SidebarItem icon={<BookOpen size={18} />} label={t('Knowledge Base', 'Base de Conocimiento')} to="/knowledge" collapsed={!isSidebarOpen} />
             )}
-            <SidebarItem icon={<Users size={18} />} label={t('Contacts', 'Contactos')} to="/contacts" collapsed={!isSidebarOpen} />
+            {hasPermission('contacts') && (
+              <SidebarItem icon={<Users size={18} />} label={t('Contacts', 'Contactos')} to="/contacts" collapsed={!isSidebarOpen} />
+            )}
           </nav>
 
           {/* User info + Logout */}

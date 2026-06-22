@@ -36,9 +36,10 @@ x-app-environment: &app-environment
   VOICE_ID_INES: ${VOICE_ID_INES:-}
   VOICE_ID_ALBA: ${VOICE_ID_ALBA:-}
   YEASTAR_HUMAN_TRANSFER_EXTENSION: ${YEASTAR_HUMAN_TRANSFER_EXTENSION:-1000}
+  YEASTAR_WEBHOOK_SECRET: ${YEASTAR_WEBHOOK_SECRET:-}
   AUSARTA_PUBLIC_IP: ${AUSARTA_PUBLIC_IP:-}
   AUSARTA_PUBLIC_WEBHOOK_BASE_URL: ${AUSARTA_PUBLIC_WEBHOOK_BASE_URL:-${FRONTEND_URL:-}}
-  FRONTEND_URL: ${FRONTEND_URL:-http://15.216.15.30}
+  FRONTEND_URL: ${FRONTEND_URL}
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
   TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
 
@@ -54,7 +55,7 @@ services:
     environment:
       <<: *app-environment
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-      IMPERSONATION_SECRET: ${IMPERSONATION_SECRET:-${SUPABASE_SERVICE_ROLE_KEY}}
+      IMPERSONATION_SECRET: ${IMPERSONATION_SECRET}
       BRIDGE_SERVER_URL: ${BRIDGE_SERVER_URL:-http://localhost:8001}
       BRIDGE_SERVER_URL_INTERNAL: http://backend:8001
     extra_hosts:
@@ -106,7 +107,7 @@ services:
       PYTHONUNBUFFERED: "1"
       BRIDGE_SERVER_URL: http://backend:8001
       BRIDGE_SERVER_URL_INTERNAL: http://backend:8001
-      IMPERSONATION_SECRET: ${IMPERSONATION_SECRET:-${SUPABASE_SERVICE_ROLE_KEY}}
+      IMPERSONATION_SECRET: ${IMPERSONATION_SECRET}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -165,7 +166,7 @@ services:
     container_name: ausarta-dozzle
     restart: unless-stopped
     # Visor centralizado de logs Docker. Solo expuesto en localhost del servidor.
-    # Acceso recomendado: ssh -L 9999:127.0.0.1:9999 usuario@15.216.15.30
+    # Acceso recomendado: ssh -L 9999:127.0.0.1:9999 usuario@<servidor>
     ports:
       - "127.0.0.1:9999:8080"
     volumes:
@@ -173,6 +174,9 @@ services:
     environment:
       DOZZLE_NO_ANALYTICS: "true"
       DOZZLE_LEVEL: "info"
+      DOZZLE_USERNAME: ${DOZZLE_USERNAME:-admin}
+      DOZZLE_PASSWORD: ${DOZZLE_PASSWORD:-}
+      DOZZLE_KEY: ${DOZZLE_KEY:-}
     networks:
       - ausarta-network
 

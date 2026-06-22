@@ -1,23 +1,24 @@
+import logging
 import os
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger("crypto-service")
+
 # La ENCRYPTION_KEY debe ser una cadena de 32 bytes codificada en base64.
 # Se puede generar con Fernet.generate_key().decode()
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 
 if not ENCRYPTION_KEY:
-    # En desarrollo, si no existe, lanzamos un warning o usamos una por defecto (no recomendado para prod)
-    print("WARNING: ENCRYPTION_KEY not found in environment variables. Crypto features will fail.")
-    # No asignamos una por defecto para forzar la configuración de seguridad.
+    logger.warning("ENCRYPTION_KEY not found in environment variables. Crypto features will fail.")
     cipher_suite = None
 else:
     try:
         cipher_suite = Fernet(ENCRYPTION_KEY.encode())
     except Exception as e:
-        print(f"ERROR: Invalid ENCRYPTION_KEY: {e}")
+        logger.error("Invalid ENCRYPTION_KEY: %s", e)
         cipher_suite = None
 
 def encrypt_data(data: str) -> str:
@@ -39,5 +40,5 @@ def decrypt_data(encrypted_data: str) -> str:
         decrypted_text = cipher_suite.decrypt(encrypted_data.encode())
         return decrypted_text.decode()
     except Exception as e:
-        print(f"Decryption error: {e}")
+        logger.error("Decryption error: %s", e)
         return "" # O lanzar excepción según política

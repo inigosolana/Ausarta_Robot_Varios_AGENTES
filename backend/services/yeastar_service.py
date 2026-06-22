@@ -714,7 +714,7 @@ class YeastarClient:
 
         new_entry = {
             "url": webhook_url,
-            "secret": "ausarta",
+            "secret": os.getenv("YEASTAR_WEBHOOK_SECRET", ""),
             "request_method": "POST",
             "event_ids": [30011],
         }

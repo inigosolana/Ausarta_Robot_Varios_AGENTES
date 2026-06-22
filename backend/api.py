@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -60,8 +60,11 @@ load_dotenv()
 
 # Inicialización anticipada de clientes singleton (Supabase / LiveKit)
 # Se importan por efecto secundario: el módulo registra su cliente al cargarse.
+from utils.env_validation import validate_startup_config
 import services.supabase_service  # noqa: F401
 import services.livekit_service   # noqa: F401
+from services.auth import require_admin
+from services.health_service import collect_health_dependencies
 
 
 @asynccontextmanager
@@ -77,6 +80,9 @@ async def lifespan(app: FastAPI):
         )
     else:
         logger.info("✅ JWT de sesión: SUPABASE_JWT_SECRET cargada correctamente.")
+
+    for issue in validate_startup_config():
+        logger.critical("🚨 Configuración insegura/incompleta: %s", issue)
 
     try:
         await get_redis()
@@ -168,8 +174,14 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-API-Key",
+        "X-Impersonate-Token",
+        "X-N8N-Secret",
+    ],
 )
 
 # Aislamiento multi-tenant: ContextVar empresa_id por request (OWASP)
@@ -205,70 +217,21 @@ async def root():
 @app.get("/health", tags=["health"])
 async def health_check():
     """
-    Health check por dependencia.
+    Health check público para balanceadores.
 
-    Comprueba de forma independiente: Supabase, Redis, ARQ pool y LiveKit.
-    Devuelve 200 si todo OK, 503 si alguna dependencia crítica está DOWN.
-
-    Diseñado para ser consumido por balanceadores de carga y Portainer.
-    No requiere autenticación.
+    En producción solo expone el estado agregado (sin detalles de infraestructura).
+    Ver /health/detail para diagnóstico completo (requiere admin).
     """
-    import asyncio as _asyncio
-    from services.supabase_service import supabase
-    from services.redis_service import get_redis
-    from services.queue_service import get_arq_pool
-    from services.livekit_service import lkapi
+    overall, deps = await collect_health_dependencies()
+    status_code = 503 if overall == "down" else 200
+    if os.getenv("ENVIRONMENT", "production").lower() in ("development", "dev", "local", "test"):
+        return JSONResponse(content={"status": overall, "dependencies": deps}, status_code=status_code)
+    return JSONResponse(content={"status": overall}, status_code=status_code)
 
-    deps: dict[str, dict] = {}
 
-    # ── Supabase ──────────────────────────────────────────────────────────
-    try:
-        if not supabase:
-            raise RuntimeError("cliente no inicializado")
-        # Query trivial para verificar conectividad real
-        await _asyncio.wait_for(
-            __import__("asyncio").get_event_loop().run_in_executor(
-                None,
-                lambda: supabase.table("empresas").select("id").limit(1).execute(),
-            ),
-            timeout=5,
-        )
-        deps["supabase"] = {"status": "ok"}
-    except Exception as exc:
-        deps["supabase"] = {"status": "down", "detail": str(exc)[:120]}
-
-    # ── Redis ─────────────────────────────────────────────────────────────
-    try:
-        redis = await _asyncio.wait_for(get_redis(), timeout=3)
-        await _asyncio.wait_for(redis.ping(), timeout=3)
-        deps["redis"] = {"status": "ok"}
-    except Exception as exc:
-        deps["redis"] = {"status": "down", "detail": str(exc)[:120]}
-
-    # ── ARQ pool ──────────────────────────────────────────────────────────
-    try:
-        pool = await _asyncio.wait_for(get_arq_pool(), timeout=3)
-        await _asyncio.wait_for(pool.ping(), timeout=3)
-        deps["arq"] = {"status": "ok"}
-    except Exception as exc:
-        deps["arq"] = {"status": "degraded", "detail": str(exc)[:120]}
-
-    # ── LiveKit (solo verifica credenciales configuradas, no hace llamada) ─
-    lk_url = os.getenv("LIVEKIT_URL", "")
-    lk_key = os.getenv("LIVEKIT_API_KEY", "")
-    if lk_url and lk_key and lkapi:
-        deps["livekit"] = {"status": "ok", "note": "credenciales configuradas"}
-    else:
-        deps["livekit"] = {"status": "degraded", "note": "credenciales no configuradas o cliente no disponible"}
-
-    # ── Resultado global ──────────────────────────────────────────────────
-    critical_down = any(
-        deps[k]["status"] == "down" for k in ("supabase", "redis")
-    )
-    overall = "down" if critical_down else (
-        "degraded" if any(v["status"] == "degraded" for v in deps.values()) else "ok"
-    )
-
-    payload = {"status": overall, "dependencies": deps}
-    status_code = 503 if critical_down else 200
-    return JSONResponse(content=payload, status_code=status_code)
+@app.get("/health/detail", tags=["health"])
+async def health_check_detail(_admin=Depends(require_admin)):
+    """Health check detallado para monitoring interno (requiere JWT admin)."""
+    overall, deps = await collect_health_dependencies()
+    status_code = 503 if overall == "down" else 200
+    return JSONResponse(content={"status": overall, "dependencies": deps}, status_code=status_code)

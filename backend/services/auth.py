@@ -18,6 +18,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+from utils.env_validation import get_impersonation_secret
+
 import jwt as pyjwt
 from jwt import PyJWKClient
 from fastapi import Security, HTTPException, status, Depends, Header
@@ -139,6 +141,8 @@ def _get_user_from_supabase_jwt(token: str) -> dict:
     - ES256/RS256: claves públicas JWKS del proyecto (Supabase JWT Signing Keys)
     """
     jwt_secret = get_supabase_jwt_secret()
+    audience = os.getenv("SUPABASE_JWT_AUDIENCE", "authenticated")
+    decode_kwargs = {"algorithms": [], "audience": audience}
 
     try:
         header = pyjwt.get_unverified_header(token)
@@ -147,19 +151,15 @@ def _get_user_from_supabase_jwt(token: str) -> dict:
         if alg == "HS256":
             if not jwt_secret:
                 raise HTTPException(status_code=500, detail="SUPABASE_JWT_SECRET no configurada")
-            payload = pyjwt.decode(
-                token,
-                jwt_secret,
-                algorithms=["HS256"],
-                options={"verify_aud": False},
-            )
+            decode_kwargs["algorithms"] = ["HS256"]
+            payload = pyjwt.decode(token, jwt_secret, **decode_kwargs)
         elif alg in ("ES256", "RS256"):
             signing_key = _jwks().get_signing_key_from_jwt(token)
+            decode_kwargs["algorithms"] = [alg]
             payload = pyjwt.decode(
                 token,
                 signing_key.key,
-                algorithms=[alg],
-                options={"verify_aud": False},
+                **decode_kwargs,
             )
         else:
             raise HTTPException(status_code=401, detail=f"Algoritmo JWT no soportado: {alg}")
@@ -194,7 +194,10 @@ def _verify_impersonation_token(token: str) -> dict:
     Formato esperado: base64url(json_payload).base64url(signature)
     Debe coincidir exactamente con la firma generada en admin.py.
     """
-    secret = os.getenv("IMPERSONATION_SECRET") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
+    try:
+        secret = get_impersonation_secret()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     if not secret:
         raise HTTPException(status_code=500, detail="IMPERSONATION_SECRET no configurado")
 
@@ -225,6 +228,7 @@ def _verify_impersonation_token(token: str) -> dict:
 
 
 _USER_PROFILE_CACHE_TTL = max(5, int(os.getenv("USER_PROFILE_CACHE_TTL_SECONDS", "60")))
+_MEM_PROFILE_CACHE_MAX = max(100, int(os.getenv("USER_PROFILE_CACHE_MAX_ENTRIES", "1000")))
 _MEM_PROFILE_CACHE: dict[str, tuple[float, dict]] = {}
 _MEM_PROFILE_LOCK = asyncio.Lock()
 
@@ -299,6 +303,17 @@ async def get_user_profile_cached(user_id: str) -> dict:
             expires_at, row = hit
             if now < expires_at:
                 return row
+        if len(_MEM_PROFILE_CACHE) >= _MEM_PROFILE_CACHE_MAX:
+            expired_keys = [
+                cache_key
+                for cache_key, (exp, _) in _MEM_PROFILE_CACHE.items()
+                if now >= exp
+            ]
+            for cache_key in expired_keys:
+                del _MEM_PROFILE_CACHE[cache_key]
+            if len(_MEM_PROFILE_CACHE) >= _MEM_PROFILE_CACHE_MAX:
+                oldest_key = min(_MEM_PROFILE_CACHE, key=lambda k: _MEM_PROFILE_CACHE[k][0])
+                del _MEM_PROFILE_CACHE[oldest_key]
 
     row = await asyncio.to_thread(_fetch_user_profile_row, user_id)
 
