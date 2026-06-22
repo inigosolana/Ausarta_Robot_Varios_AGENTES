@@ -307,34 +307,29 @@ class AgentToolsMixin:
             logger.warning(f"⚠️ [{self.room_name}] Error en consultar_cliente: {e}")
             return ""
 
-    @function_tool(name="transferir_a_agente_humano")
-    async def _http_tool_transferir_humano(
+    async def _execute_human_transfer(
         self,
-        context: RunContext,
+        *,
         motivo: str = "El cliente solicita hablar con una persona",
         extension_number: str = "",
-    ) -> str | None:
+        source: str = "tool",
+    ) -> str:
         """
-        Transfiere la llamada a un agente humano via backend multi-tenant (Yeastar).
-        Usa esta herramienta SOLO cuando el cliente pida EXPLICITAMENTE hablar con una persona.
+        Encola transferencia a humano (Yeastar) y reproduce aviso TTS.
+        Usado por la tool del LLM y por el router semántico.
         """
         survey_id_raw = self.survey_id
         survey_id: int | None = int(survey_id_raw) if str(survey_id_raw).isdigit() else None
 
         logger.info(
             f"[{self.room_name}] Transferencia solicitada "
-            f"(survey={survey_id_raw}, motivo: {motivo}, ext: {extension_number or 'auto'})"
+            f"(source={source}, survey={survey_id_raw}, motivo: {motivo}, ext: {extension_number or 'auto'})"
         )
 
         busy_message = "Lo siento, nuestros agentes estan ocupados, puedo tomar nota?"
 
-        empresa_id_raw = (
-            getattr(self, "empresa_id", None)
-            or self.agent_config.get("empresa_id")
-            or "0"
-        )
         try:
-            empresa_id_int = int(empresa_id_raw)
+            empresa_id_int = int(str(getattr(self, "empresa_id", "0") or "0"))
         except (TypeError, ValueError):
             empresa_id_int = 0
 
@@ -371,7 +366,9 @@ class AgentToolsMixin:
                         "room_name": self.room_name,
                     }
                 )
-                logger.info(f"[{self.room_name}] Briefing de transferencia encolado para encuesta {survey_id}")
+                logger.info(
+                    f"[{self.room_name}] Briefing de transferencia encolado para encuesta {survey_id}"
+                )
             except Exception as briefing_err:
                 logger.warning(f"[{self.room_name}] Error encolando briefing: {briefing_err}")
 
@@ -400,7 +397,7 @@ class AgentToolsMixin:
             job_id = await enqueue_transfer_to_human(queue_payload)
             logger.info(
                 f"[{self.room_name}] Transferencia encolada "
-                f"(job={job_id}, survey={survey_id_raw}, ext={resolved_extension})"
+                f"(job={job_id}, survey={survey_id_raw}, ext={resolved_extension}, source={source})"
             )
             if current_session:
                 try:
@@ -421,6 +418,23 @@ class AgentToolsMixin:
                 except Exception:
                     pass
             return busy_message
+
+    @function_tool(name="transferir_a_agente_humano")
+    async def _http_tool_transferir_humano(
+        self,
+        context: RunContext,
+        motivo: str = "El cliente solicita hablar con una persona",
+        extension_number: str = "",
+    ) -> str | None:
+        """
+        Transfiere la llamada a un agente humano via backend multi-tenant (Yeastar).
+        Usa esta herramienta SOLO cuando el cliente pida EXPLICITAMENTE hablar con una persona.
+        """
+        return await self._execute_human_transfer(
+            motivo=motivo,
+            extension_number=extension_number,
+            source="llm_tool",
+        )
 
     @function_tool(name="finalizar_llamada")
     async def _http_tool_finalizar_llamada(

@@ -33,6 +33,22 @@ class Settings(BaseSettings):
     agent_call_timeout_seconds: int = 600
     agent_config_cache_ttl: int = 300
 
+    # Enrutamiento semántico (transferencia humana ultrarrápida)
+    semantic_routing_enabled: bool = Field(default=True, validation_alias="SEMANTIC_ROUTING_ENABLED")
+    semantic_router_model: str = Field(
+        default="llama-3.1-8b-instant",
+        validation_alias="SEMANTIC_ROUTER_MODEL",
+    )
+    semantic_router_timeout_ms: int = Field(default=250, validation_alias="SEMANTIC_ROUTER_TIMEOUT_MS")
+    semantic_router_min_confidence: float = Field(
+        default=0.85,
+        validation_alias="SEMANTIC_ROUTER_MIN_CONFIDENCE",
+    )
+    semantic_router_tier0_only: bool = Field(
+        default=False,
+        validation_alias="SEMANTIC_ROUTER_TIER0_ONLY",
+    )
+
     # Drip campaign
     drip_cooldown_min: int = Field(default=120, validation_alias="DRIP_COOLDOWN_MIN_SECONDS")
     drip_cooldown_max: int = Field(default=180, validation_alias="DRIP_COOLDOWN_MAX_SECONDS")

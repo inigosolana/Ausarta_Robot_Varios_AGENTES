@@ -26,8 +26,10 @@ from livekit.agents import (
     RunContext,
     cli,
     function_tool,
-    AutoSubscribe
+    AutoSubscribe,
+    llm,
 )
+from livekit.agents.llm.tool_context import StopResponse
 from livekit.plugins import (
     silero,
     openai,
@@ -60,7 +62,9 @@ from agents.agent_common import (
     _normalize_message_text,
     _parse_inbound_caller_from_room,
     _room_name_allowed,
+    anonymize_text,
 )
+from agents.semantic_routes import resolve_semantic_routing_config
 from agents.agent_lifecycle import CallSessionLifecycleMixin, DynamicAgentLifecycleMixin
 from agents.agent_tools import AgentToolsMixin
 from agents.config_fetcher import (
@@ -155,6 +159,7 @@ from services.queue_service import (
     enqueue_transfer_briefing,
     enqueue_transfer_to_human,
 )
+from services.semantic_router_service import SemanticRouterService
 
 class DynamicAgent(Agent, AgentToolsMixin, DynamicAgentLifecycleMixin):
     """Agente dinámico que carga sus instrucciones desde Supabase."""
@@ -175,6 +180,12 @@ class DynamicAgent(Agent, AgentToolsMixin, DynamicAgentLifecycleMixin):
         self.speaking_speed = agent_config.get("speaking_speed", 1.0)
         self.hangup_started = False
         self._transfer_completed = asyncio.Event()
+        self._transfer_in_progress = False
+
+        routing_enabled, custom_phrases = resolve_semantic_routing_config(agent_config)
+        self._semantic_router: SemanticRouterService | None = (
+            SemanticRouterService(custom_phrases=custom_phrases) if routing_enabled else None
+        )
         
         try:
             # Soportamos formatos:
@@ -307,6 +318,75 @@ class DynamicAgent(Agent, AgentToolsMixin, DynamicAgentLifecycleMixin):
 
         super().__init__(instructions=full_instructions, tools=guardar_tools)  # type: ignore
         logger.info(f"Agente '{agent_name}' creado (Survey: {self.survey_id})")
+
+    async def on_user_turn_completed(
+        self,
+        _turn_ctx: llm.ChatContext,
+        new_message: llm.ChatMessage,
+    ) -> None:
+        """Clasificación semántica antes del LLM principal (transferencia humana rápida)."""
+        if self._semantic_router is None:
+            return
+        if self._transfer_in_progress or self._transfer_completed.is_set():
+            return
+
+        user_text = _normalize_message_text(getattr(new_message, "text_content", ""))
+        if not user_text:
+            return
+
+        try:
+            route = await self._semantic_router.classify(user_text)
+        except Exception as route_err:
+            logger.warning(
+                "[%s] Semantic router error (continuando flujo normal): %s",
+                self.room_name,
+                route_err,
+            )
+            return
+
+        if not self._semantic_router.is_actionable(route):
+            return
+
+        logger.info(
+            "[%s] Semantic route transfer_human tier=%s confidence=%.2f latency=%.0fms text='%s'",
+            self.room_name,
+            route.tier,
+            route.confidence,
+            route.latency_ms,
+            anonymize_text(user_text),
+        )
+
+        current_session = getattr(self, "session", None)
+        if current_session is not None:
+            try:
+                await current_session.interrupt()
+            except Exception as interrupt_err:
+                logger.debug(
+                    "[%s] session.interrupt() no aplicado: %s",
+                    self.room_name,
+                    interrupt_err,
+                )
+
+        self._transfer_in_progress = True
+        try:
+            outcome = await self._execute_human_transfer(
+                motivo=f"Transferencia semántica ({route.tier})",
+                source="semantic_router",
+            )
+        except Exception as transfer_err:
+            self._transfer_in_progress = False
+            logger.error(
+                "[%s] Semantic transfer failed (continuando flujo normal): %s",
+                self.room_name,
+                transfer_err,
+            )
+            return
+
+        if outcome != "Transferencia iniciada":
+            self._transfer_in_progress = False
+            return
+
+        raise StopResponse()
 
 
 
