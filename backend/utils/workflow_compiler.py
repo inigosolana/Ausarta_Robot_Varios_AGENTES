@@ -25,6 +25,7 @@ NODE_TYPES = frozenset({
     "question",   # El agente pregunta, espera respuesta, guarda variable
     "condition",  # Routing puro: no habla, evalúa variables
     "llm_free",   # Nodo libre: el LLM improvisa con su sub-prompt (modo mixed)
+    "schedule",   # Programa llamada de seguimiento en N días
     "transfer",   # Llama a transferir_a_agente_humano
     "end",        # Llama a guardar_encuesta + finalizar_llamada
 })
@@ -159,6 +160,18 @@ def _format_prompt_block(
             "Luego llama a la herramienta transferir_a_agente_humano."
         )
 
+    elif ntype == "schedule":
+        delay_days = int(node.get("delay_days") or 1)
+        campaign_ref = (node.get("campaign_id_ref") or "{{campaign_id}}").strip()
+        lines.append(
+            f"PASO {step_num} [{label}]: Programa una llamada de seguimiento en {delay_days} día(s) "
+            f"(campaña ref: {campaign_ref})."
+        )
+        lines.append(
+            "  → El sistema registrará el seguimiento automáticamente; no cuelgues por este motivo."
+        )
+        _append_transitions(lines, node, adj, step_nums, default_label="  → Continúa al siguiente paso")
+
     elif ntype == "end":
         lines.append(
             f"PASO {step_num} [{label}]: Fin del guion. "
@@ -242,6 +255,8 @@ def _normalize_steps(
             "prompt": (node.get("prompt") or None),
             "variable": (node.get("variable") or None),
             "options": node.get("options") or [],
+            "delay_days": node.get("delay_days"),
+            "campaign_id_ref": node.get("campaign_id_ref"),
             "next_default": next_default,
             "conditions": conditions,
         })

@@ -364,6 +364,7 @@ async def entrypoint(ctx: JobContext):
                 speaking_speed=float(speaking_speed or 1.0),
                 tts_model=tts_model,
                 call_start_time=call_start_time,
+                call_metadata=meta_data,
             )
             cs.setup_events()
             await session.start(room=ctx.room, agent=agent_instance)

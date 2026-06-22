@@ -37,6 +37,7 @@ const NODE_COLORS: Record<WorkflowNodeType, { bg: string; border: string; badge:
   question:  { bg: 'bg-purple-50', border: 'border-purple-300', badge: 'bg-purple-500', text: 'text-purple-800' },
   condition: { bg: 'bg-amber-50',  border: 'border-amber-300',  badge: 'bg-amber-500',  text: 'text-amber-800' },
   llm_free:  { bg: 'bg-emerald-50',border: 'border-emerald-300',badge: 'bg-emerald-500',text: 'text-emerald-800' },
+  schedule:  { bg: 'bg-teal-50',  border: 'border-teal-300',   badge: 'bg-teal-500',   text: 'text-teal-800' },
   transfer:  { bg: 'bg-orange-50', border: 'border-orange-300', badge: 'bg-orange-500', text: 'text-orange-800' },
   end:       { bg: 'bg-gray-100',  border: 'border-gray-400',   badge: 'bg-gray-500',   text: 'text-gray-700' },
 };
@@ -46,6 +47,7 @@ const NODE_LABELS: Record<WorkflowNodeType, string> = {
   question:  'Pregunta',
   condition: 'Condición',
   llm_free:  'LLM libre',
+  schedule:  'Programar',
   transfer:  'Transferir',
   end:       'Fin',
 };
@@ -55,6 +57,7 @@ const NODE_ICONS: Record<WorkflowNodeType, string> = {
   question:  '❓',
   condition: '🔀',
   llm_free:  '🤖',
+  schedule:  '📅',
   transfer:  '📞',
   end:       '🏁',
 };
@@ -66,6 +69,7 @@ interface WorkflowNodeData {
   content?: string;
   prompt?: string;
   variable?: string;
+  delay_days?: number;
   isStart?: boolean;
   hasError?: boolean;
   onSelect: (id: string) => void;
@@ -123,6 +127,11 @@ function WorkflowNodeComponent({ data, selected }: { data: WorkflowNodeData; sel
         {data.variable && (
           <span className="inline-block mt-1 text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-mono">
             → {data.variable}
+          </span>
+        )}
+        {data.type === 'schedule' && data.delay_days != null && (
+          <span className="inline-block mt-1 text-[9px] bg-teal-100 text-teal-700 px-1.5 py-0.5 rounded">
+            +{data.delay_days}d
           </span>
         )}
       </div>
@@ -239,7 +248,6 @@ function NodePanel({
           </div>
         )}
 
-        {/* Sub-prompt (llm_free en modo mixed) */}
         {node.type === 'llm_free' && mode === 'mixed' && (
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -253,6 +261,43 @@ function NodePanel({
               className="w-full px-3 py-2 border border-emerald-200 bg-emerald-50/30 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500/20 outline-none resize-none"
             />
           </div>
+        )}
+
+        {node.type === 'schedule' && (
+          <>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Días hasta el seguimiento</label>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={node.delay_days ?? 3}
+                onChange={e => onUpdate({ ...node, delay_days: Math.max(1, Number(e.target.value) || 1) })}
+                className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-teal-500/20 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Referencia de campaña</label>
+              <input
+                type="text"
+                value={node.campaign_id_ref ?? '{{campaign_id}}'}
+                onChange={e => onUpdate({ ...node, campaign_id_ref: e.target.value })}
+                placeholder="{{campaign_id}}"
+                className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-teal-500/20 outline-none"
+              />
+              <p className="text-[10px] text-gray-400 mt-0.5">Usa {'{{campaign_id}}'} o el ID numérico</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Mensaje opcional al cliente</label>
+              <textarea
+                rows={2}
+                value={node.content || ''}
+                onChange={e => onUpdate({ ...node, content: e.target.value })}
+                placeholder="Le llamaremos en unos días para hacer seguimiento."
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-teal-500/20 outline-none resize-none"
+              />
+            </div>
+          </>
         )}
 
         {/* Edges / transitions */}
@@ -334,6 +379,7 @@ function wfNodesToRFNodes(
       content: n.content,
       prompt: n.prompt,
       variable: n.variable,
+      delay_days: n.delay_days,
       isStart: n.id === startNode,
       hasError: errorIds.has(n.id),
       onSelect,
@@ -462,6 +508,9 @@ export default function WorkflowEditor({ value, onChange, mode }: WorkflowEditor
       type,
       label: NODE_LABELS[type],
       position: { x: 200 + Math.random() * 100, y: 100 + wf.nodes.length * 120 },
+      ...(type === 'schedule'
+        ? { delay_days: 3, campaign_id_ref: '{{campaign_id}}' }
+        : {}),
     };
     const updatedNodes = [...wf.nodes, newNode];
     onChange({
@@ -502,6 +551,7 @@ export default function WorkflowEditor({ value, onChange, mode }: WorkflowEditor
     { type: 'question',  label: '❓ Pregunta' },
     { type: 'condition', label: '🔀 Condición' },
     { type: 'llm_free',  label: '🤖 LLM libre', hidden: mode !== 'mixed' },
+    { type: 'schedule',  label: '📅 Programar seguimiento' },
     { type: 'transfer',  label: '📞 Transferir' },
     { type: 'end',       label: '🏁 Fin' },
   ];

@@ -75,12 +75,14 @@ class CallSession(CallSessionLifecycleMixin):
         speaking_speed: float,
         tts_model: str,
         call_start_time: float,
+        call_metadata: dict | None = None,
     ) -> None:
         self.ctx = ctx
         self.job_id = job_id
         self.room_name = room_name
         self.survey_id = survey_id
         self.agent_config = agent_config
+        self.call_metadata = call_metadata or {}
         self.session = session
         self.agent_instance = agent_instance
         self.language = language
@@ -295,6 +297,54 @@ class CallSession(CallSessionLifecycleMixin):
                         logger.info(
                             f"[{self.job_id}] Nodo condition '{next_step.get('id')}' — avanzando sin hablar"
                         )
+                        loop_user_response = ""
+                        continue
+
+                    if ntype == "schedule":
+                        from services.workflow_schedule_service import schedule_workflow_follow_up
+
+                        survey_id_int = int(self.survey_id) if str(self.survey_id).isdigit() else 0
+                        empresa_id = int(
+                            self.agent_config.get("empresa_id")
+                            or self.call_metadata.get("empresa_id")
+                            or 0
+                        )
+                        lead_raw = (
+                            self.call_metadata.get("contacto_id")
+                            or self.call_metadata.get("lead_id")
+                            or self.call_metadata.get("client_id")
+                        )
+                        lead_id = int(lead_raw) if lead_raw else None
+                        campaign_ctx = {
+                            "campaign_id": self.call_metadata.get("campaign_id")
+                            or self.call_metadata.get("campana_id"),
+                            "empresa_id": empresa_id,
+                            "survey_id": survey_id_int,
+                        }
+                        result = await schedule_workflow_follow_up(
+                            survey_id=survey_id_int,
+                            empresa_id=empresa_id,
+                            campaign_id_ref=next_step.get("campaign_id_ref") or "{{campaign_id}}",
+                            lead_id=lead_id,
+                            delay_days=int(next_step.get("delay_days") or 1),
+                            workflow_variables=wf_sm.get_variables(),
+                            call_context=campaign_ctx,
+                        )
+                        if result.get("ok"):
+                            logger.info(
+                                f"[{self.job_id}] Workflow schedule: lead {result.get('lead_id')} "
+                                f"→ {result.get('retry_at')}"
+                            )
+                        else:
+                            logger.warning(
+                                f"[{self.job_id}] Workflow schedule falló: {result.get('error')}"
+                            )
+                        optional_msg = (next_step.get("content") or "").strip()
+                        if optional_msg:
+                            try:
+                                await self.session.say(optional_msg, allow_interruptions=True)
+                            except Exception as say_err:
+                                logger.warning(f"[{self.job_id}] Workflow schedule say() error: {say_err}")
                         loop_user_response = ""
                         continue
 

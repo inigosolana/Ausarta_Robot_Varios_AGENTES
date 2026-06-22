@@ -51,6 +51,7 @@ export type WorkflowNodeType =
   | 'question'
   | 'condition'
   | 'llm_free'
+  | 'schedule'
   | 'transfer'
   | 'end';
 
@@ -67,6 +68,8 @@ export interface WorkflowNode {
   prompt?: string;       // sub-prompt para nodo llm_free en modo mixed
   variable?: string;     // nombre de variable donde guardar respuesta
   options?: string[];    // opciones de respuesta (tipo question)
+  delay_days?: number;   // días hasta seguimiento (tipo schedule)
+  campaign_id_ref?: string; // ref campaña, ej. {{campaign_id}}
   position?: WorkflowNodePosition;
 }
 
