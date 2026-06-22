@@ -14,6 +14,7 @@ import {
 import { toast } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
+import { canManageApiKeys } from '../lib/platformAccess';
 import {
   createApiKey,
   fetchApiKeys,
@@ -236,10 +237,10 @@ const RevokeModal: React.FC<{
 };
 
 export const ApiKeysView: React.FC = () => {
-  const { profile, realProfile, isRole } = useAuth();
+  const { realProfile } = useAuth();
   const { t } = useTranslation();
-  const isSuperadmin = isRole('superadmin');
-  const effectiveProfile = realProfile || profile;
+  const isSuperadmin = realProfile?.role === 'superadmin';
+  const canAccess = canManageApiKeys(realProfile);
 
   const [keys, setKeys] = useState<ApiKeyListItem[]>([]);
   const [empresas, setEmpresas] = useState<EmpresaOption[]>([]);
@@ -259,8 +260,7 @@ export const ApiKeysView: React.FC = () => {
   const loadKeys = useCallback(async () => {
     setLoading(true);
     try {
-      const empresaFilter =
-        isSuperadmin && filterEmpresaId !== '' ? Number(filterEmpresaId) : undefined;
+      const empresaFilter = filterEmpresaId !== '' ? Number(filterEmpresaId) : undefined;
       const data = await fetchApiKeys(empresaFilter);
       setKeys(data.filter(k => k.is_active));
     } catch (err: unknown) {
@@ -269,15 +269,15 @@ export const ApiKeysView: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [filterEmpresaId, isSuperadmin]);
+  }, [filterEmpresaId]);
 
   useEffect(() => {
-    if (!isRole('superadmin', 'admin')) return;
+    if (!canAccess) return;
     void loadKeys();
-  }, [isRole, loadKeys]);
+  }, [canAccess, loadKeys]);
 
   useEffect(() => {
-    if (!isSuperadmin) return;
+    if (!canAccess) return;
     void (async () => {
       try {
         const res = await apiFetch('/api/admin/empresas');
@@ -289,13 +289,7 @@ export const ApiKeysView: React.FC = () => {
         /* ignore */
       }
     })();
-  }, [isSuperadmin]);
-
-  useEffect(() => {
-    if (!isSuperadmin && effectiveProfile?.empresa_id) {
-      setTargetEmpresaId(effectiveProfile.empresa_id);
-    }
-  }, [effectiveProfile?.empresa_id, isSuperadmin]);
+  }, [canAccess]);
 
   const empresaName = useMemo(() => {
     const map = new Map(empresas.map(e => [e.id, e.nombre]));
@@ -315,9 +309,7 @@ export const ApiKeysView: React.FC = () => {
       return;
     }
 
-    const empresaId = isSuperadmin
-      ? (targetEmpresaId !== '' ? Number(targetEmpresaId) : effectiveProfile?.empresa_id)
-      : effectiveProfile?.empresa_id;
+    const empresaId = targetEmpresaId !== '' ? Number(targetEmpresaId) : undefined;
 
     if (!empresaId) {
       toast.error('Selecciona una empresa');
@@ -328,7 +320,7 @@ export const ApiKeysView: React.FC = () => {
     try {
       const result = await createApiKey({
         description: description.trim(),
-        empresa_id: isSuperadmin ? Number(empresaId) : undefined,
+        empresa_id: empresaId,
         scopes,
         expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       });
@@ -344,10 +336,10 @@ export const ApiKeysView: React.FC = () => {
     }
   };
 
-  if (!isRole('superadmin', 'admin')) {
+  if (!canAccess) {
     return (
       <div className="flex items-center justify-center min-h-[50vh] text-gray-500">
-        <p>{t('Restricted Access', 'Acceso restringido')}</p>
+        <p>{t('Restricted Access', 'Acceso restringido — solo plataforma Ausarta')}</p>
       </div>
     );
   }
@@ -381,7 +373,7 @@ export const ApiKeysView: React.FC = () => {
             Claves por empresa para n8n e integraciones. Nunca se almacenan en el navegador.
           </p>
         </div>
-        {isSuperadmin && empresas.length > 0 && (
+        {empresas.length > 0 && (
           <select
             value={filterEmpresaId}
             onChange={e => setFilterEmpresaId(e.target.value === '' ? '' : Number(e.target.value))}
@@ -431,22 +423,20 @@ export const ApiKeysView: React.FC = () => {
             />
           </div>
 
-          {isSuperadmin && (
-            <div>
-              <label className="text-xs font-medium text-gray-500">Empresa</label>
-              <select
-                value={targetEmpresaId}
-                onChange={e => setTargetEmpresaId(e.target.value === '' ? '' : Number(e.target.value))}
-                className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
-                required
-              >
-                <option value="">Seleccionar…</option>
-                {empresas.map(e => (
-                  <option key={e.id} value={e.id}>{e.nombre}</option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div>
+            <label className="text-xs font-medium text-gray-500">Empresa</label>
+            <select
+              value={targetEmpresaId}
+              onChange={e => setTargetEmpresaId(e.target.value === '' ? '' : Number(e.target.value))}
+              className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
+              required
+            >
+              <option value="">Seleccionar…</option>
+              {empresas.map(e => (
+                <option key={e.id} value={e.id}>{e.nombre}</option>
+              ))}
+            </select>
+          </div>
 
           <div>
             <label className="text-xs font-medium text-gray-500">Caducidad (opcional)</label>
@@ -514,7 +504,7 @@ export const ApiKeysView: React.FC = () => {
                 <tr className="text-left text-xs uppercase text-gray-500 border-b border-gray-100 dark:border-gray-800">
                   <th className="px-5 py-3">Prefijo</th>
                   <th className="px-5 py-3">Descripción</th>
-                  {isSuperadmin && <th className="px-5 py-3">Empresa</th>}
+                  <th className="px-5 py-3">Empresa</th>
                   <th className="px-5 py-3">Scopes</th>
                   <th className="px-5 py-3">Último uso</th>
                   <th className="px-5 py-3">Caduca</th>
@@ -526,9 +516,7 @@ export const ApiKeysView: React.FC = () => {
                   <tr key={k.id} className="border-b border-gray-50 dark:border-gray-800/80 hover:bg-gray-50/50 dark:hover:bg-slate-800/30">
                     <td className="px-5 py-3 font-mono text-xs">{k.key_prefix}…</td>
                     <td className="px-5 py-3">{k.description || '—'}</td>
-                    {isSuperadmin && (
-                      <td className="px-5 py-3">{empresaName(k.empresa_id)}</td>
-                    )}
+                    <td className="px-5 py-3">{empresaName(k.empresa_id)}</td>
                     <td className="px-5 py-3">
                       <div className="flex flex-wrap gap-1">
                         {k.scopes.map(s => (

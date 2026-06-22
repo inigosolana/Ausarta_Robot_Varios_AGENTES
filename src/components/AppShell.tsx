@@ -28,7 +28,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Toaster, toast } from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { canUseSimulationMode } from '../lib/platformAccess';
+import { canUseSimulationMode, canManageApiKeys } from '../lib/platformAccess';
 import SidebarItem from './SidebarItem';
 import AssistantPanel from './AssistantPanel';
 
@@ -56,6 +56,7 @@ const AppShell: React.FC = () => {
   const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin;
 
   const canSimulation = canUseSimulationMode(realProfile);
+  const canApiKeys = canManageApiKeys(realProfile);
 
   // Redirect to "/" if role change makes current path inaccessible
   useEffect(() => {
@@ -68,17 +69,20 @@ const AppShell: React.FC = () => {
       '/results': 'results',
       '/usage': 'usage',
       '/admin': 'admin',
-      '/api-keys': 'admin',
       '/crm': 'crm',
       '/contacts': 'contacts',
       '/trunks': 'admin',
       '/copilot': 'assistant',
     };
     const perm = pathToPermission[location.pathname];
+    if (location.pathname === '/api-keys' && !canApiKeys) {
+      navigate('/');
+      return;
+    }
     if (perm && !hasPermission(perm)) {
       navigate('/', { replace: true });
     }
-  }, [profile?.role, location.pathname, profile?.empresa_id]);
+  }, [profile?.role, location.pathname, profile?.empresa_id, canApiKeys, hasPermission, navigate]);
 
   useEffect(() => {
     setIsDarkMode(document.documentElement.classList.contains('dark'));
@@ -267,7 +271,7 @@ const AppShell: React.FC = () => {
             {hasPermission('admin') && (
               <SidebarItem icon={<Settings size={18} />} label={t('Admin', 'Administración')} to="/admin" collapsed={!isSidebarOpen} />
             )}
-            {hasPermission('admin') && (
+            {canApiKeys && (
               <SidebarItem icon={<Key size={18} />} label={t('API Keys', 'API Keys')} to="/api-keys" collapsed={!isSidebarOpen} />
             )}
             {hasPermission('crm') && (

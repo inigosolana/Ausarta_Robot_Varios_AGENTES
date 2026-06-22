@@ -451,6 +451,18 @@ async def require_admin(current_user: CurrentUser = Depends(get_current_user)) -
     return current_user
 
 
+async def require_platform_admin(current_user: CurrentUser = Depends(require_admin)) -> CurrentUser:
+    """Solo superadmin o admin de la empresa Ausarta."""
+    from services.platform_access import has_global_access
+
+    if not has_global_access(current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo superadmin o administrador de Ausarta puede acceder",
+        )
+    return current_user
+
+
 async def require_outbound_auth(
     creds: HTTPAuthorizationCredentials | None = Security(_BEARER),
     api_key: str | None = Security(_API_KEY_HEADER),
