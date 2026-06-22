@@ -206,3 +206,24 @@ def build_encuesta_results_update(
     }
     update.update(legacy_columns_from_agent_results(merged))
     return update
+
+
+def prepare_transcription_for_storage(transcription: str | None) -> str | None:
+    """
+    Sanitiza PII en transcripciones antes de persistir en Supabase (GDPR).
+    Punto único de entrada para columnas transcription / previews.
+    """
+    if transcription is None:
+        return None
+    from utils.pii_sanitizer import sanitize_transcription_pii
+
+    return sanitize_transcription_pii(transcription).text
+
+
+def prepare_narrative_text_for_storage(text: str | None) -> str | None:
+    """Sanitiza resúmenes/comentarios que puedan contener PII hablada en la llamada."""
+    if text is None:
+        return None
+    from utils.pii_sanitizer import sanitize_free_text_pii
+
+    return sanitize_free_text_pii(text)

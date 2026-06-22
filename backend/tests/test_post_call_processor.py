@@ -177,3 +177,30 @@ async def test_finalize_inbound_applies_inbound_datos_extra(monkeypatch):
     payload = enqueue_mock.await_args.args[0]
     assert payload["datos_extra"]["telefono"] == "+34999999999"
     assert payload["comentarios"] == "Comentario inbound"
+
+
+@pytest.mark.asyncio
+async def test_finalize_with_transcript_sanitizes_pii_before_persist(monkeypatch):
+    cs = _make_call_session(
+        transcript="Cliente: mi email es cliente@empresa.com y DNI 12345678Z",
+        data_saved=True,
+    )
+    enqueue_mock = AsyncMock(return_value="job-pii")
+    analyze_mock = AsyncMock(
+        return_value=("completada", {"sentimiento_cliente": "Positivo", "idioma": "es"}),
+    )
+    monkeypatch.setattr("agents.post_call_processor.enqueue_guardar_encuesta", enqueue_mock)
+    monkeypatch.setattr("agents.post_call_processor.analyze_call_disposition", analyze_mock)
+    monkeypatch.setattr(
+        "agents.post_call_processor._extract_transcript_from_session",
+        lambda _session: ([], cs._build_transcript_from_event_buffer()[1]),
+    )
+
+    await finalize_call_session(cs)
+
+    payload = enqueue_mock.await_args.args[0]
+    assert "cliente@empresa.com" not in payload["transcription"]
+    assert "12345678Z" not in payload["transcription"]
+    assert "[REDACTED_EMAIL]" in payload["transcription"]
+    analyze_mock.assert_awaited_once()
+    assert "cliente@empresa.com" in analyze_mock.await_args.args[0]

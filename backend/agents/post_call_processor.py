@@ -14,6 +14,7 @@ from agents.agent_common import (
     _is_inbound_agent_config,
 )
 from services.queue_service import enqueue_guardar_encuesta
+from services.call_results_service import prepare_transcription_for_storage
 from utils.call_analyzer import analyze_call_disposition
 
 if TYPE_CHECKING:
@@ -125,6 +126,7 @@ async def finalize_call_session(call_session: "CallSession") -> None:
             inbound_fb_comentarios = build_inbound_fallback_comentarios
 
         enc_id = int(call_session.survey_id) if str(call_session.survey_id).isdigit() else 0
+        storage_transcript = prepare_transcription_for_storage(transcript) if transcript else transcript
 
         if data_saved:
             logger.info(
@@ -134,7 +136,7 @@ async def finalize_call_session(call_session: "CallSession") -> None:
             try:
                 _enc_job = await enqueue_guardar_encuesta({
                     "id_encuesta": enc_id,
-                    "transcription": transcript,
+                    "transcription": storage_transcript,
                     "datos_extra": datos_extra,
                     "seconds_used": seconds_used,
                 })
@@ -161,7 +163,7 @@ async def finalize_call_session(call_session: "CallSession") -> None:
                     )
                 _enc_job = await enqueue_guardar_encuesta({
                     "id_encuesta": enc_id,
-                    "transcription": transcript,
+                    "transcription": storage_transcript,
                     "status": call_disposition,
                     "comentarios": comentarios_fb,
                     "datos_extra": datos_extra,

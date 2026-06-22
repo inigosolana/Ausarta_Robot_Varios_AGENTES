@@ -49,7 +49,11 @@ from services.yeastar_webhook_service import (
 from services.webhook_auth import require_yeastar_webhook_auth
 from services.trunk_service import resolve_outbound_trunk_id
 from services.agent_router import build_outbound_room_metadata, resolve_outbound_agent
-from services.call_results_service import build_encuesta_results_update
+from services.call_results_service import (
+    build_encuesta_results_update,
+    prepare_narrative_text_for_storage,
+    prepare_transcription_for_storage,
+)
 from services.sip_call_service import (
     SipOutboundRejected,
     create_sip_participant_with_retry,
@@ -1850,7 +1854,7 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
     from typing import Any
     update_data: dict[str, Any] = {}
     if datos.transcription is not None:
-        update_data["transcription"] = datos.transcription
+        update_data["transcription"] = prepare_transcription_for_storage(datos.transcription)
     if datos.seconds_used is not None:
         update_data["seconds_used"] = datos.seconds_used
     if datos.llm_model is not None:
@@ -1862,7 +1866,9 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
     if isinstance(datos.datos_extra, dict):
         resumen = datos.datos_extra.get("resumen_narrativo")
         if resumen and isinstance(resumen, str) and resumen.strip():
-            update_data["resumen_llamada"] = resumen.strip()[:2000]
+            update_data["resumen_llamada"] = (
+                prepare_narrative_text_for_storage(resumen.strip()[:2000]) or ""
+            )
 
     curr = await sb_query(
         lambda: supabase.table("encuestas")
@@ -1929,8 +1935,8 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
             "nota_comercial": datos.nota_comercial,
             "nota_instalador": datos.nota_instalador,
             "nota_rapidez": datos.nota_rapidez,
-            "comentarios": datos.comentarios,
-            "transcription": datos.transcription,
+            "comentarios": prepare_narrative_text_for_storage(datos.comentarios),
+            "transcription": update_data.get("transcription", datos.transcription),
             "seconds_used": datos.seconds_used,
             "llm_model": datos.llm_model,
             "datos_extra": datos.datos_extra,

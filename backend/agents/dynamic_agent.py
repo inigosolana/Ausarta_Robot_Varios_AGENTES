@@ -159,6 +159,7 @@ from services.queue_service import (
     enqueue_transfer_briefing,
     enqueue_transfer_to_human,
 )
+from services.call_results_service import prepare_transcription_for_storage
 from services.semantic_router_service import SemanticRouterService
 
 class DynamicAgent(Agent, AgentToolsMixin, DynamicAgentLifecycleMixin):
@@ -545,7 +546,7 @@ class CallSession(CallSessionLifecycleMixin):
                 self.transcript_snapshot["raw"] = raw
                 snap_job = await enqueue_guardar_encuesta({
                     "id_encuesta": int(self.survey_id) if str(self.survey_id).isdigit() else 0,
-                    "transcription": t,
+                    "transcription": prepare_transcription_for_storage(t),
                 })
                 logger.info(
                     f"📬 [{self.job_id}] Transcripción snapshot encolada ({reason}, job={snap_job})"

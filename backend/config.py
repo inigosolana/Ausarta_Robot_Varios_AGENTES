@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     bridge_server_url_internal: str
 
+    # PII / GDPR en transcripciones
+    pii_sanitization_enabled: bool = Field(default=True, validation_alias="PII_SANITIZATION_ENABLED")
+
 
 @lru_cache()
 def get_settings() -> Settings:
