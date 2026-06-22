@@ -2,7 +2,7 @@
 
 **Versión:** 1.0  
 **Última actualización:** 2026-06  
-**Commits de referencia:** `3d5a99d` (circuit breaker) · `518cc06` (KEDA) · *(Kamailio multi-región — este documento)*
+**Commits de referencia:** `3d5a99d` (circuit breaker) · `518cc06` (KEDA) · `7895d67` (Kamailio multi-región)
 
 ---
 
@@ -242,3 +242,130 @@ docker compose -f deploy/kamailio/docker-compose.kamailio.yml up -d --force-recr
 | `503` sin failover | Todos los nodos INACTIVE; revisar conectividad SIP :5060 |
 | Siempre `region=eu` | Carrier Latam sin entrada en `region_peers.list` |
 | dispatcher.list vacío | `render_dispatcher.sh` sin permisos o sin env/plantilla |
+
+---
+
+## 4. Checklist integrado de staging (Kamailio + KEDA + Circuit Breaker)
+
+Despliegue ordenado para validar el paquete HA completo en **staging** antes de producción.
+
+### Verificación automatizada
+
+```bash
+# Local / CI — manifiestos + Kamailio + pytest circuit breaker
+cd backend && PYTHONPATH=. .venv/bin/python scripts/verify_ha_staging.py
+
+# Con Redis del stack staging (arq:queue + health worker)
+cd backend && PYTHONPATH=. .venv/bin/python scripts/verify_ha_staging.py --redis
+
+# Tras aplicar KEDA en el cluster
+cd backend && PYTHONPATH=. .venv/bin/python scripts/verify_ha_staging.py --redis --kubectl
+```
+
+---
+
+### Fase 0 — Prerrequisitos compartidos
+
+| # | Tarea | Comando / criterio | ✓ |
+|---|-------|-------------------|---|
+| 0.1 | Rama `main` con commits HA (`3d5a99d`, `518cc06`, `7895d67`) | `git log -3 --oneline` | |
+| 0.2 | **Redis único** accesible desde: backend, livekit-agent, arq-worker (Compose) y pods K8s | Misma `REDIS_URL` / password en todos los servicios | |
+| 0.3 | Migraciones billing aplicadas (si campañas activas) | `20260626_tenant_usage_billing.sql`, `20260627_empresa_monthly_spend_limit.sql` | |
+| 0.4 | Variables circuit breaker en backend **y** livekit-agent | Ver sección 1 | |
+| 0.5 | `verify_ha_staging.py` sin FAIL | Ver arriba | |
+
+---
+
+### Fase 1 — Stack base (Docker Compose)
+
+| # | Tarea | Comando / criterio | ✓ |
+|---|-------|-------------------|---|
+| 1.1 | Levantar backend + redis + livekit-agent + arq-worker | `docker compose up -d backend redis livekit-agent arq-worker` | |
+| 1.2 | Backend healthy | `curl -sf http://localhost:8003/` | |
+| 1.3 | ARQ worker consume jobs | Logs sin error Redis; `arq worker.WorkerSettings --check` OK en contenedor | |
+| 1.4 | Circuit breaker tests | `cd backend && pytest tests/test_circuit_breaker.py -q` | |
+| 1.5 | Simular fallo Cartesia (opcional) | 3 timeouts → logs `circuit open` + fallback TTS en llamada de prueba | |
+
+---
+
+### Fase 2 — KEDA (Kubernetes)
+
+| # | Tarea | Comando / criterio | ✓ |
+|---|-------|-------------------|---|
+| 2.1 | KEDA instalado | `kubectl get crd scaledobjects.keda.sh` | |
+| 2.2 | Secret `ausarta-backend-secrets` en `ausarta-voice` | `REDIS_URL` apunta al **mismo** Redis que Compose | |
+| 2.3 | Aplicar manifiestos | `kubectl apply -k deploy/k8s/` | |
+| 2.4 | ScaledObject Ready | `kubectl -n ausarta-voice describe scaledobject arq-worker-scaler` | |
+| 2.5 | HPA creado por KEDA | `kubectl -n ausarta-voice get hpa` | |
+| 2.6 | Mínimo 1 pod worker | `kubectl -n ausarta-voice get pods -l app.kubernetes.io/name=arq-worker` | |
+| 2.7 | **Escalado:** encolar >50 jobs | `ZCARD arq:queue` > 50 → réplicas suben en ~30 s | |
+| 2.8 | **Descenso:** cola vacía | Tras consumir jobs + cooldown 60 s → vuelve a 1 pod | |
+
+**Nota:** En staging puedes mantener el `arq-worker` de Compose **o** el de K8s, no ambos consumiendo la misma cola sin coordinar réplicas. Recomendación: escalar Compose a 0 workers cuando KEDA esté activo.
+
+```bash
+docker compose stop arq-worker   # evitar doble consumo con K8s
+```
+
+---
+
+### Fase 3 — Kamailio multi-región (Edge SIP)
+
+| # | Tarea | Comando / criterio | ✓ |
+|---|-------|-------------------|---|
+| 3.1 | Certificados TLS | `deploy/kamailio/certs/cert.pem` + `key.pem` | |
+| 3.2 | IPs carrier en `trusted_peers.list` | Yeastar / CITELIA staging | |
+| 3.3 | CIDRs Latam en `region_peers.list` o `SIP_LATAM_CIDRS` | | |
+| 3.4 | Env nodos LiveKit | `LIVEKIT_EDGE_MADRID_HOST`, `LIVEKIT_EDGE_LATAM_HOST` | |
+| 3.5 | Arrancar Kamailio | `docker compose -f deploy/kamailio/docker-compose.kamailio.yml up -d` | |
+| 3.6 | Dispatcher activo | `docker exec kamailio-sip-edge kamcmd dispatcher.list` → `Active` | |
+| 3.7 | INVITE EU → `region=eu` | Logs Kamailio: `Dispatch INVITE → … region=eu` | |
+| 3.8 | INVITE Latam → `region=latam` | Simular desde IP en `carrier_latam` | |
+| 3.9 | Failover nodo caído | Bloquear :5060 en nodo primary → log `failover` + llamada OK | |
+
+---
+
+### Fase 4 — Prueba de integración end-to-end
+
+| # | Escenario | Resultado esperado | ✓ |
+|---|-----------|-------------------|---|
+| 4.1 | Llamada saliente campaña (1 lead) | SIP OK, agente responde, job ARQ post-llamada procesado | |
+| 4.2 | Pico campaña (50+ leads) | KEDA escala workers; cola no crece sin límite | |
+| 4.3 | Fallo proveedor voz (Cartesia) | Circuit breaker → fallback; llamada no en silencio | |
+| 4.4 | Llamada entrante vía Kamailio → LiveKit | Audio bidireccional; room creada | |
+| 4.5 | Failover SIP edge | Primary down → backup recibe INVITE | |
+
+---
+
+### Fase 5 — Sign-off staging
+
+| Responsable | Fecha | Notas |
+|-------------|-------|-------|
+| SRE / Infra | | KEDA + Redis + Kamailio |
+| Backend | | ARQ + circuit breaker |
+| Voz / LiveKit | | Agent + fallbacks TTS/STT |
+| Telefonía | | INVITE EU/Latam + failover |
+
+**Criterio de paso a prod:** Fases 0–4 completas sin FAIL en `verify_ha_staging.py --redis --kubectl` y prueba 4.1 + 4.4 exitosas.
+
+---
+
+### Rollback rápido
+
+| Componente | Acción |
+|------------|--------|
+| KEDA | `kubectl delete -k deploy/k8s/` · `docker compose start arq-worker` |
+| Kamailio | `docker compose -f deploy/kamailio/docker-compose.kamailio.yml down` · carrier apunta directo a LiveKit |
+| Circuit breaker | `CIRCUIT_BREAKER_USE_REDIS=false` (solo memoria) o revert commit `3d5a99d` |
+
+---
+
+### Troubleshooting cruzado
+
+| Síntoma | Revisar |
+|---------|---------|
+| Cola ARQ crece, KEDA no escala | `REDIS_HOST` en ConfigMap vs Redis real; ScaledObject Ready |
+| Doble procesamiento de jobs | Compose arq-worker + K8s workers activos a la vez |
+| Kamailio 503, LiveKit OK | Dispatcher INACTIVE; probing OPTIONS falla |
+| Fallback voz no activa | `CIRCUIT_BREAKER_USE_REDIS` + mismo Redis en livekit-agent |
+| Workers K8s unhealthy | Secret `REDIS_URL` incorrecto; `arq --check` en pod |

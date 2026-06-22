@@ -23,6 +23,7 @@
 - Unit Economics / Billing: `docs/unit-economics-billing-ops.md`
 - Paquete IA Avanzada (semántico, PII, RAG, A/B): `docs/advanced-ai-package-ops.md`
 - Verificación staging IA: `backend/scripts/verify_advanced_ai_staging.py`
+- Verificación staging HA: `backend/scripts/verify_ha_staging.py`
 
 ## Reglas obligatorias al tocar agent.py
 - NUNCA aceptar SQL libre — solo queries predefinidos en `empresa_external_db.queries`
