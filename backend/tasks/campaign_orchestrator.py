@@ -18,7 +18,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from utils.call_schedule import is_call_allowed
-from services.agent_router import build_outbound_room_metadata, resolve_outbound_agent
+from services.agent_router import build_outbound_room_metadata
+from services.campaign_dispatch_service import resolve_campaign_dispatch_agent
 from services.sip_call_service import create_sip_participant_with_retry, mark_call_failed, sip_retry_max_attempts
 
 logger = logging.getLogger("arq-worker")
@@ -52,8 +53,10 @@ async def campaign_orchestrator(ctx: dict[str, Any]) -> None:
         camp_res = await sb_query(
             lambda: supabase.table("campaigns")
             .select(
-                "id, empresa_id, name, agent_id, call_start_hour, call_end_hour, "
-                "call_timezone, forbidden_weekdays, type, use_orchestrator"
+                "id, empresa_id, name, agent_id, agent_id_b, ab_test_enabled, ab_split_ratio, "
+                "call_start_hour, call_end_hour, "
+                "call_timezone, forbidden_weekdays, type, use_orchestrator, "
+                "agent_type, call_purpose"
             )
             .eq("status", "active")
             .execute()
@@ -261,12 +264,10 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
 
             async with semaphore:
                 try:
-                    resolved = await resolve_outbound_agent(
-                        empresa_id=int(_empresa_id) if _empresa_id else None,
-                        campaign_agent_id=_agent_id,
-                    )
+                    resolved = await resolve_campaign_dispatch_agent(campaign, int(lead_id))
                     resolved_agent_id = resolved["agent_id"]
                     resolved_agent_type = resolved["agent_type"]
+                    ab_variant = resolved.get("ab_variant")
 
                     enc_res = await sb_query(
                         lambda: supabase.table("encuestas").insert({
@@ -279,13 +280,14 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
                             "empresa_id": _empresa_id,
                             "campaign_id": _camp_id,
                             "campaign_name": _camp_name,
+                            "ab_variant": ab_variant,
                         }).execute()
                     )
                     encuesta_id = enc_res.data[0]["id"]
 
                     await sb_query(
                         lambda: supabase.table("campaign_leads")
-                        .update({"call_id": encuesta_id})
+                        .update({"call_id": encuesta_id, "ab_variant": ab_variant})
                         .eq("id", lead_id)
                         .execute()
                     )
@@ -303,6 +305,7 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
                         agent_type=resolved_agent_type,
                         campaign_id=int(_camp_id or 0),
                         contacto_id=int(lead_id),
+                        extra={"ab_variant": ab_variant} if ab_variant else None,
                     )
 
                     await create_isolated_room(room_name, metadata=room_metadata)

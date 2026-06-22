@@ -19,7 +19,8 @@ from services.audit import log_audit_event
 from services.auth import CurrentUser, get_current_user, require_admin
 from services.livekit_service import lkapi, create_isolated_room, dispatch_agent_explicit
 from services.trunk_service import resolve_outbound_trunk_id
-from services.agent_router import build_outbound_room_metadata, resolve_outbound_agent
+from services.agent_router import build_outbound_room_metadata
+from services.campaign_dispatch_service import resolve_campaign_dispatch_agent
 from services.sip_call_service import create_sip_participant_with_retry, mark_call_failed, sip_retry_max_attempts
 from services.webhook_auth import require_campaign_webhook_auth
 from livekit import api as lk_api
@@ -254,6 +255,9 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
             "retry_unit": campaign.retry_unit,
             "interval_minutes": campaign.interval_minutes,
             "extraction_schema": [s.model_dump() for s in campaign.extraction_schema] if campaign.extraction_schema else [],
+            "ab_test_enabled": campaign.ab_test_enabled,
+            "agent_id_b": campaign.agent_id_b,
+            "ab_split_ratio": campaign.ab_split_ratio,
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         res_camp = supabase.table("campaigns").insert(camp_data).execute()
@@ -286,6 +290,12 @@ async def create_campaign(campaign: CampaignModel, leads: List[CampaignLeadModel
 async def update_campaign(campaign_id: int, payload: dict, current_user: CurrentUser = Depends(require_admin)):
     if not supabase: return {"error": "No DB"}
     try:
+        from services.campaign_ab_service import validate_ab_campaign_payload
+
+        ab_error = validate_ab_campaign_payload(payload)
+        if ab_error:
+            return JSONResponse(status_code=400, content={"error": ab_error})
+
         if "retry_interval" in payload and "retry_unit" in payload:
             raw = payload["retry_interval"]
             unit = payload["retry_unit"]
@@ -334,6 +344,73 @@ async def list_campaigns(
     except Exception as e:
         logger.error(f"Error listing campaigns: {e}")
         return []
+
+
+@router.get("/campaigns/{campaign_id}/ab-stats")
+async def get_campaign_ab_stats(
+    campaign_id: int,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Métricas de conversión por variante A/B de una campaña."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+
+    camp_res = supabase.table("campaigns").select(
+        "id, empresa_id, name, agent_id, agent_id_b, ab_test_enabled, ab_split_ratio"
+    ).eq("id", campaign_id).limit(1).execute()
+    if not camp_res.data:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+
+    campaign = camp_res.data[0]
+    empresa_id = campaign.get("empresa_id")
+    if current_user.role != "superadmin" and empresa_id != current_user.empresa_id:
+        raise HTTPException(status_code=403, detail="Sin permiso para esta campaña")
+
+    enc_res = supabase.table("encuestas").select(
+        "id, ab_variant, status, agent_id, puntuacion_comercial, agent_results"
+    ).eq("campaign_id", campaign_id).execute()
+    rows = enc_res.data or []
+
+    completed_statuses = {"completed", "transferred"}
+    stats: dict[str, dict] = {
+        "A": {"calls": 0, "completed": 0, "completion_rate": 0.0, "avg_score": None, "agent_id": campaign.get("agent_id")},
+        "B": {"calls": 0, "completed": 0, "completion_rate": 0.0, "avg_score": None, "agent_id": campaign.get("agent_id_b")},
+    }
+
+    score_sums: dict[str, float] = {"A": 0.0, "B": 0.0}
+    score_counts: dict[str, int] = {"A": 0, "B": 0}
+
+    for row in rows:
+        variant = (row.get("ab_variant") or "A").upper()
+        if variant not in stats:
+            variant = "A"
+        stats[variant]["calls"] += 1
+        status = (row.get("status") or "").lower()
+        if status in completed_statuses:
+            stats[variant]["completed"] += 1
+
+        score = row.get("puntuacion_comercial")
+        if score is None and isinstance(row.get("agent_results"), dict):
+            scores = row["agent_results"].get("scores") or {}
+            score = scores.get("comercial")
+        if isinstance(score, (int, float)):
+            score_sums[variant] += float(score)
+            score_counts[variant] += 1
+
+    for variant, data in stats.items():
+        calls = data["calls"]
+        if calls:
+            data["completion_rate"] = round(data["completed"] / calls, 4)
+        if score_counts[variant]:
+            data["avg_score"] = round(score_sums[variant] / score_counts[variant], 2)
+
+    return {
+        "campaign_id": campaign_id,
+        "ab_test_enabled": bool(campaign.get("ab_test_enabled")),
+        "ab_split_ratio": campaign.get("ab_split_ratio"),
+        "variants": stats,
+        "total_calls": len(rows),
+    }
 
 @router.get("/campaigns/{campaign_id}")
 async def get_campaign_details(
@@ -802,19 +879,16 @@ async def _dispatch_single_lead_drip(
     try:
         logger.info(f"☎️  [Drip] Iniciando lead {lead_id} ({phone}) → empresa={empresa_id} camp={campaign_id}")
 
-        resolved = await resolve_outbound_agent(
-            empresa_id=int(empresa_id) if empresa_id else None,
-            campaign_agent_id=campaign.get("agent_id"),
-            agent_type=campaign.get("agent_type"),
-            call_purpose=campaign.get("call_purpose"),
-        )
+        resolved = await resolve_campaign_dispatch_agent(campaign, int(lead_id))
         resolved_agent_id = resolved["agent_id"]
         resolved_agent_type = resolved["agent_type"]
+        ab_variant = resolved.get("ab_variant")
         logger.info(
-            "🤖 [Drip] Agente resuelto id=%s tipo=%s camp=%s",
+            "🤖 [Drip] Agente resuelto id=%s tipo=%s camp=%s variante=%s",
             resolved_agent_id,
             resolved_agent_type,
             campaign_id,
+            ab_variant,
         )
 
         # 1. Crear encuesta en BD y vincular al lead
@@ -831,6 +905,7 @@ async def _dispatch_single_lead_drip(
                     "empresa_id": empresa_id,
                     "campaign_id": campaign_id,
                     "campaign_name": campaign.get("name"),
+                    "ab_variant": ab_variant,
                 }).execute
             )
             encuesta_id = enc_res.data[0]["id"]
@@ -839,6 +914,7 @@ async def _dispatch_single_lead_drip(
                     "call_id": encuesta_id,
                     "status": "calling",
                     "last_call_at": datetime.now(timezone.utc).isoformat(),
+                    "ab_variant": ab_variant,
                 }).eq("id", lead_id).execute
             )
         except Exception as e:
@@ -859,6 +935,7 @@ async def _dispatch_single_lead_drip(
             agent_type=resolved_agent_type,
             campaign_id=int(campaign_id),
             contacto_id=int(lead_id),
+            extra={"ab_variant": ab_variant} if ab_variant else None,
         )
 
         try:

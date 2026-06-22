@@ -33,6 +33,18 @@ class CampaignCreate(BaseModel):
     retry_interval: int = 60 # Minutos - Default 1 hora
     interval_minutes: int = 2 # Espera entre leads (Campañas por Goteo)
     extraction_schema: Optional[List[ExtractionSchemaProperty]] = None
+    ab_test_enabled: bool = False
+    agent_id_b: Optional[int] = None
+    ab_split_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_ab_config(self) -> "CampaignCreate":
+        if self.ab_test_enabled:
+            if self.agent_id_b is None:
+                raise ValueError("agent_id_b es obligatorio cuando ab_test_enabled=true")
+            if int(self.agent_id_b) == int(self.agent_id):
+                raise ValueError("agent_id_b debe ser distinto de agent_id")
+        return self
 
 class CampaignLeadModel(BaseModel):
     phone_number: str
@@ -74,6 +86,18 @@ class CampaignModel(BaseModel):
     retry_unit: str = "minutes"
     interval_minutes: int = 2
     extraction_schema: Optional[List[ExtractionSchemaProperty]] = None
+    ab_test_enabled: bool = False
+    agent_id_b: Optional[int] = None
+    ab_split_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_ab_config(self) -> "CampaignModel":
+        if self.ab_test_enabled:
+            if self.agent_id_b is None:
+                raise ValueError("agent_id_b es obligatorio cuando ab_test_enabled=true")
+            if int(self.agent_id_b) == int(self.agent_id):
+                raise ValueError("agent_id_b debe ser distinto de agent_id")
+        return self
 
 class LlmConfig(BaseModel):
     llm_provider: str
