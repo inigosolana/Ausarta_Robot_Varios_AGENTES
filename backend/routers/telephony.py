@@ -46,6 +46,7 @@ from services.yeastar_webhook_service import (
     normalize_yeastar_webhook_payload,
     process_yeastar_webhook_payload,
 )
+from services.webhook_auth import require_yeastar_webhook_auth
 from services.trunk_service import resolve_outbound_trunk_id
 from services.agent_router import build_outbound_room_metadata, resolve_outbound_agent
 from services.call_results_service import build_encuesta_results_update
@@ -64,6 +65,7 @@ from livekit import api
 from livekit.api import WebhookReceiver
 import aiohttp
 import asyncio
+import json
 import os
 from datetime import datetime, timedelta, timezone
 import random
@@ -1590,13 +1592,15 @@ async def validate_yeastar_ip(request: Request):
 async def yeastar_webhook(
     request: Request,
     _=Depends(validate_yeastar_ip),  # Bloquea IPs no autorizadas si YEASTAR_IP_WHITELIST está configurado
+    _auth: str = Depends(require_yeastar_webhook_auth),
 ):
     """
     Recibe eventos de la centralita Yeastar (CallAnswered, CallHangup, etc.).
     Optimización: Procesa en segundo plano para evitar timeouts de la PBX.
     """
     try:
-        payload = await request.json()
+        raw = getattr(request.state, "verified_webhook_body", b"") or b"{}"
+        payload = json.loads(raw)
 
         arq_pool = await get_arq_pool()
         job = await arq_pool.enqueue_job("process_yeastar_webhook", payload)

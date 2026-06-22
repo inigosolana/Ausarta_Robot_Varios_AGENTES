@@ -1081,6 +1081,7 @@ async def create_tenant_api_key(
 @router.delete("/api-keys/{key_id}")
 @limiter.limit("20/minute")
 async def revoke_tenant_api_key(
+    request: Request,
     key_id: str,
     current_user: CurrentUser = Depends(require_platform_admin),
 ):

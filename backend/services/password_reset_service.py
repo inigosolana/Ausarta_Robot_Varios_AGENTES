@@ -191,11 +191,14 @@ def _recovery_webhook_url() -> str:
 async def _n8n_password_reset(email: str, redirect_to: str) -> None:
     url = _recovery_webhook_url()
     payload = {"email": email, "redirect_to": redirect_to}
+    from services.webhook_signature import serialize_webhook_json
+
+    body_bytes = serialize_webhook_json(payload)
     async with aiohttp.ClientSession() as session:
         async with session.post(
             url,
-            json=payload,
-            headers=n8n_outbound_headers(),
+            data=body_bytes,
+            headers=n8n_outbound_headers(body=body_bytes),
             timeout=aiohttp.ClientTimeout(total=30),
         ) as resp:
             text = await resp.text()

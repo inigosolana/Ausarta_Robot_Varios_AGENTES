@@ -11,7 +11,7 @@ Arquitectura:
 - El estado de las llamadas se actualiza vía webhook de LiveKit (/api/livekit/webhook).
 - Salas con naming aislado: empresa_{id}_camp_{camp_id}_call_{enc_id}.
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from typing import Optional, List
 from services.supabase_service import supabase
@@ -21,6 +21,7 @@ from services.livekit_service import lkapi, create_isolated_room, dispatch_agent
 from services.trunk_service import resolve_outbound_trunk_id
 from services.agent_router import build_outbound_room_metadata, resolve_outbound_agent
 from services.sip_call_service import create_sip_participant_with_retry, mark_call_failed, sip_retry_max_attempts
+from services.webhook_auth import require_campaign_webhook_auth
 from livekit import api as lk_api
 from pydantic import BaseModel
 from models.schemas import CampaignModel, CampaignLeadModel
@@ -1139,9 +1140,16 @@ class CallResultWebhook(BaseModel):
     transcription: Optional[str] = ""
 
 @router.post("/campaigns/webhook/call-result")
-async def receive_call_result(result: CallResultWebhook):
+async def receive_call_result(
+    request: Request,
+    auth_method: str = Depends(require_campaign_webhook_auth),
+):
     """Recibe resultados de n8n para actualizar el lead (compatibilidad legacy)."""
-    logger.info(f"📥 [Webhook-legacy] Resultado para lead {result.lead_id}: {result.status}")
+    raw = getattr(request.state, "verified_webhook_body", b"") or b"{}"
+    result = CallResultWebhook.model_validate_json(raw)
+    logger.info(
+        f"📥 [Webhook-legacy] Resultado para lead {result.lead_id}: {result.status} ({auth_method})"
+    )
     try:
         lead_update = {
             "status": result.status,

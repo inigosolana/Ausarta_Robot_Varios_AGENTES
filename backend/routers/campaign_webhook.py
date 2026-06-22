@@ -21,13 +21,13 @@ router = APIRouter(prefix="/api", tags=["webhooks"])
 @limiter.limit("30/minute")
 async def campaign_webhook(
     request: Request,
-    body: CampaignWebhookRequest,
     auth_method: str = Depends(require_integration_webhook_auth),
 ):
     """
     Crea campañas o añade leads desde automatizaciones externas (n8n).
 
-    Autenticación: `X-N8N-Secret`, `X-API-Key` o JWT admin.
+    Autenticación: `X-Signature` (HMAC-SHA256 del body crudo), `X-N8N-Secret` legacy,
+    `X-API-Key` o JWT admin.
 
     Acciones:
     - `create` — crea campaña + leads (status pending por defecto)
@@ -35,6 +35,9 @@ async def campaign_webhook(
     - `add_leads` — añade leads a campaña existente (`campaign_id`)
     - `start` — activa campaña existente
     """
+    raw = getattr(request.state, "verified_webhook_body", b"") or b"{}"
+    body = CampaignWebhookRequest.model_validate_json(raw)
+
     try:
         result = await process_campaign_webhook(body)
         await log_audit_event(
