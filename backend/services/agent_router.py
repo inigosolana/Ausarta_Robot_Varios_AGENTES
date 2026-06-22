@@ -67,13 +67,17 @@ def _resolve_agent_type(agent_row: dict) -> str:
 def _fetch_agent_by_id(agent_id: int | str, empresa_id: int | None) -> dict | None:
     if not supabase:
         return None
-    res = (
-        supabase.table("agent_config")
-        .select("id,empresa_id,name,agent_type,tipo_resultados,voice_id")
-        .eq("id", agent_id)
-        .limit(1)
-        .execute()
-    )
+    try:
+        res = (
+            supabase.table("agent_config")
+            .select("id,empresa_id,name,agent_type,tipo_resultados,voice_id")
+            .eq("id", agent_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        logger.debug("🤖 [agent_router] fetch agent %s falló: %s", agent_id, exc)
+        return None
     if not res.data:
         return None
     row = res.data[0]
@@ -91,15 +95,24 @@ def _fetch_agent_by_type(empresa_id: int, agent_type: str) -> dict | None:
     if not supabase:
         return None
     for col in ("agent_type", "tipo_resultados"):
-        res = (
-            supabase.table("agent_config")
-            .select("id,empresa_id,name,agent_type,tipo_resultados,voice_id")
-            .eq("empresa_id", empresa_id)
-            .eq(col, agent_type)
-            .order("updated_at", desc=True)
-            .limit(1)
-            .execute()
-        )
+        try:
+            res = (
+                supabase.table("agent_config")
+                .select("id,empresa_id,name,agent_type,tipo_resultados,voice_id")
+                .eq("empresa_id", empresa_id)
+                .eq(col, agent_type)
+                .order("updated_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+        except Exception as exc:
+            logger.debug(
+                "🤖 [agent_router] fetch agent tipo %s empresa %s falló: %s",
+                agent_type,
+                empresa_id,
+                exc,
+            )
+            return None
         if res.data:
             return res.data[0]
     return None
@@ -108,14 +121,22 @@ def _fetch_agent_by_type(empresa_id: int, agent_type: str) -> dict | None:
 def _fetch_default_agent(empresa_id: int) -> dict | None:
     if not supabase:
         return None
-    res = (
-        supabase.table("agent_config")
-        .select("id,empresa_id,name,agent_type,tipo_resultados,voice_id")
-        .eq("empresa_id", empresa_id)
-        .order("updated_at", desc=True)
-        .limit(1)
-        .execute()
-    )
+    try:
+        res = (
+            supabase.table("agent_config")
+            .select("id,empresa_id,name,agent_type,tipo_resultados,voice_id")
+            .eq("empresa_id", empresa_id)
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        logger.debug(
+            "🤖 [agent_router] fetch default agent empresa %s falló: %s",
+            empresa_id,
+            exc,
+        )
+        return None
     return res.data[0] if res.data else None
 
 

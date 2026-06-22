@@ -19,7 +19,7 @@ from httpx import AsyncClient, ASGITransport
 _PROTECTED_ENDPOINTS = [
     ("GET", "/api/agents"),
     ("GET", "/api/knowledge/"),
-    ("GET", "/api/admin/credits"),
+    ("GET", "/api/admin/api-credits"),
     ("GET", "/api/campaigns"),
     ("GET", "/api/contacts"),
 ]

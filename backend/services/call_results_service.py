@@ -21,7 +21,6 @@ _SUPPORT_NOTE_KEYS = (
     "motivo_llamada",
     "resolucion",
     "puntos_clave",
-    "motivo_contratacion",
     "detalle_problema",
 )
 

@@ -212,7 +212,7 @@ async def test_manually_paused_campaign_not_in_resume_query():
     with (
         patch("services.yeastar_health_service.supabase", mock_sb),
         patch("services.yeastar_health_service.sb_query", side_effect=lambda fn: mock_res),
-        patch("services.yeastar_health_service.get_redis", AsyncMock()),
+        patch("services.redis_service.get_redis", AsyncMock()),
     ):
         from services.yeastar_health_service import _resume_campaigns_after_recovery
         # La función intentará actualizar la campaña con flag
