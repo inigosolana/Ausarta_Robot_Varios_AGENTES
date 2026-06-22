@@ -296,3 +296,9 @@ Reiniciar contenedores `backend` y `agent` tras cambiar `.env`.
 | A/B | `[AB] campaña=` |
 
 Para incidencias, adjuntar `job_id` de la sala LiveKit y `encuesta_id` de Supabase.
+
+---
+
+## Documentación relacionada
+
+- **Unit Economics / Billing:** `docs/unit-economics-billing-ops.md`

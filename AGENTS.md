@@ -8,6 +8,9 @@
 - Multi-tenant por `empresa_id`
 
 ## Servicios clave
+- `backend/services/billing_service.py` → consumo por tenant (Redis + Supabase)
+- `backend/services/billing_pricing.py` → tarifas EUR y desglose de costes
+- `backend/services/billing_limits_service.py` → cortafuego HTTP 402 por tope mensual
 - `backend/services/embedding_service.py` → `search_knowledge(empresa_id, query, limit, threshold)` (RAG híbrido + rerank)
 - `backend/services/semantic_router_service.py` → transferencia humana ultrarrápida (Tier0 regex + Groq)
 - `backend/utils/pii_sanitizer.py` → redacción PII antes de persistir transcripciones
@@ -17,8 +20,9 @@
 - `backend/services/redis_service.py` → `get_redis()`
 
 ## Documentación operativa
+- Unit Economics / Billing: `docs/unit-economics-billing-ops.md`
 - Paquete IA Avanzada (semántico, PII, RAG, A/B): `docs/advanced-ai-package-ops.md`
-- Verificación staging: `backend/scripts/verify_advanced_ai_staging.py`
+- Verificación staging IA: `backend/scripts/verify_advanced_ai_staging.py`
 
 ## Reglas obligatorias al tocar agent.py
 - NUNCA aceptar SQL libre — solo queries predefinidos en `empresa_external_db.queries`
