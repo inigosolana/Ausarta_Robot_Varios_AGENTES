@@ -1060,6 +1060,14 @@ async def create_tenant_api_key(
     else:
         raise HTTPException(status_code=400, detail="empresa_id requerido")
 
+    if current_user.role != "superadmin":
+        forbidden = [s for s in payload.scopes if s in ("admin", "*")]
+        if forbidden:
+            raise HTTPException(
+                status_code=403,
+                detail="Solo superadmin puede crear keys con scope admin",
+            )
+
     try:
         created = await create_api_key(
             empresa_id=target_empresa,
@@ -1084,6 +1092,7 @@ async def create_tenant_api_key(
 
 
 @router.delete("/api-keys/{key_id}")
+@limiter.limit("20/minute")
 async def revoke_tenant_api_key(
     key_id: str,
     current_user: CurrentUser = Depends(require_admin),

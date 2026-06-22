@@ -21,6 +21,7 @@ import {
   Route,
   BookOpen,
   Users,
+  Key,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
@@ -67,6 +68,7 @@ const AppShell: React.FC = () => {
       '/results': 'results',
       '/usage': 'usage',
       '/admin': 'admin',
+      '/api-keys': 'admin',
       '/crm': 'crm',
       '/contacts': 'contacts',
       '/trunks': 'admin',
@@ -179,7 +181,7 @@ const AppShell: React.FC = () => {
 
                 <div className="flex gap-1">
                   {(['superadmin', 'admin', 'user'] as const)
-                    .filter(r => realProfile?.role === 'superadmin' || isRootUser || r !== 'superadmin')
+                    .filter(r => realProfile?.role === 'superadmin' || canUseSimulationMode(realProfile) || r !== 'superadmin')
                     .map(r => (
                       <button
                         key={r}
@@ -264,6 +266,9 @@ const AppShell: React.FC = () => {
             )}
             {hasPermission('admin') && (
               <SidebarItem icon={<Settings size={18} />} label={t('Admin', 'Administración')} to="/admin" collapsed={!isSidebarOpen} />
+            )}
+            {hasPermission('admin') && (
+              <SidebarItem icon={<Key size={18} />} label={t('API Keys', 'API Keys')} to="/api-keys" collapsed={!isSidebarOpen} />
             )}
             {hasPermission('crm') && (
               <SidebarItem icon={<Share2 size={18} />} label={t('CRM Integration', 'Integración CRM')} to="/crm" collapsed={!isSidebarOpen} />

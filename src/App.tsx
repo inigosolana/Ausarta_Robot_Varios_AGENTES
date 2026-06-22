@@ -20,6 +20,7 @@ const AssistantView      = lazy(() => import('./views/AssistantView'));
 const ProfileView        = lazy(() => import('./views/ProfileView'));
 const KnowledgeBaseView  = lazy(() => import('./views/KnowledgeBaseView').then(m => ({ default: m.KnowledgeBaseView })));
 const ContactsView       = lazy(() => import('./views/ContactsView').then(m => ({ default: m.ContactsView })));
+const ApiKeysView        = lazy(() => import('./views/ApiKeysView'));
 const CallsView          = lazy(() => import('./views/CallsView'));
 
 const LoadingFallback = () => (
@@ -50,6 +51,7 @@ const App: React.FC = () => (
         <Route path="copilot"   element={<PermissionGate view="assistant"><AssistantView /></PermissionGate>} />
         <Route path="usage"     element={<PermissionGate view="usage"><UsageView /></PermissionGate>} />
         <Route path="admin"     element={<PermissionGate view="admin"><UserManagementView /></PermissionGate>} />
+        <Route path="api-keys"  element={<PermissionGate view="admin"><ApiKeysView /></PermissionGate>} />
         <Route path="crm"       element={<PermissionGate view="crm"><CrmIntegrationView /></PermissionGate>} />
         <Route path="telephony" element={<PermissionGate view="admin"><TelephonyView /></PermissionGate>} />
         <Route path="trunks"    element={<PermissionGate view="admin"><TrunksView /></PermissionGate>} />

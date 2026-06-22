@@ -212,7 +212,7 @@ async def create_api_key(
     }
 
 
-async def list_api_keys(*, empresa_id: int | None = None) -> list[dict[str, Any]]:
+async def list_api_keys(*, empresa_id: int | None = None, active_only: bool = True) -> list[dict[str, Any]]:
     if not supabase:
         return []
 
@@ -227,6 +227,8 @@ async def list_api_keys(*, empresa_id: int | None = None) -> list[dict[str, Any]
         )
         if empresa_id is not None:
             qb = qb.eq("empresa_id", empresa_id)
+        if active_only:
+            qb = qb.eq("is_active", True)
         return qb.execute()
 
     res = await sb_query(_query)
