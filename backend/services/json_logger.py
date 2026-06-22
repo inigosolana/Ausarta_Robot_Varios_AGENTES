@@ -56,10 +56,26 @@ class JsonFormatter(logging.Formatter):
             pass
 
         # Campos extra opcionales
-        for field in ("request_id", "path", "method", "status_code", "duration_ms"):
+        for field in ("request_id", "path", "method", "status_code", "duration_ms", "trace_id", "call_job_id", "call_room"):
             val = getattr(record, field, None)
             if val is not None:
                 payload[field] = val
+
+        if "trace_id" not in payload:
+            try:
+                from utils.tracing import current_trace_id, current_call_id, current_room_name
+
+                trace_id = current_trace_id()
+                if trace_id:
+                    payload["trace_id"] = trace_id
+                call_job = current_call_id.get()
+                if call_job:
+                    payload["call_job_id"] = call_job
+                call_room = current_room_name.get()
+                if call_room:
+                    payload["call_room"] = call_room
+            except Exception:
+                pass
 
         # Excepción
         if record.exc_info:

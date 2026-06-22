@@ -140,6 +140,7 @@ class SemanticRouterService:
 
     async def _classify_with_groq(self, text: str) -> SemanticRouteResult | None:
         from services.provider_circuit_service import groq_llm_breaker
+        from utils.tracing import traced_span
 
         breaker = await groq_llm_breaker()
         if await breaker.is_open():
@@ -162,18 +163,23 @@ class SemanticRouterService:
         }
         try:
             timeout = aiohttp.ClientTimeout(total=self._timeout_s)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(_GROQ_CHAT_URL, headers=headers, json=payload) as resp:
-                    if resp.status != 200:
-                        body = await resp.text()
-                        logger.warning(
-                            "Groq classifier HTTP %s: %s",
-                            resp.status,
-                            body[:200],
-                        )
-                        await breaker.record_failure(RuntimeError(f"HTTP {resp.status}"))
-                        return None
-                    data = await resp.json()
+            async with traced_span(
+                "llm.groq.classify",
+                {"llm.model": self._model, "llm.provider": "groq"},
+                kind="client",
+            ):
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(_GROQ_CHAT_URL, headers=headers, json=payload) as resp:
+                        if resp.status != 200:
+                            body = await resp.text()
+                            logger.warning(
+                                "Groq classifier HTTP %s: %s",
+                                resp.status,
+                                body[:200],
+                            )
+                            await breaker.record_failure(RuntimeError(f"HTTP {resp.status}"))
+                            return None
+                        data = await resp.json()
         except asyncio.TimeoutError as exc:
             logger.debug("Groq classifier timeout (%.0f ms)", self._timeout_s * 1000)
             await breaker.record_failure(exc, extreme=True)

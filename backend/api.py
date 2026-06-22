@@ -103,7 +103,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ ARQ no disponible al arrancar: {e}.")
 
+    from utils.tracing import init_tracing, instrument_aiohttp_client, shutdown_tracing
+
+    init_tracing(service_name=os.getenv("OTEL_SERVICE_NAME", "ausarta-voice-api"))
+    instrument_aiohttp_client()
+
     yield
+
+    shutdown_tracing()
 
     logger.info("🌙 Apagando API Ausarta v2...")
     try:
@@ -121,6 +128,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Ausarta Voice Agent API", version="2.0.0", lifespan=lifespan)
+
+from utils.tracing import instrument_fastapi
+
+instrument_fastapi(app)
 
 # Rate Limiting — límite global de 120 req/min por IP (instancia en services/rate_limiter.py)
 app.state.limiter = limiter
@@ -191,6 +202,8 @@ app.add_middleware(
         "X-API-Key",
         "X-Impersonate-Token",
         "X-N8N-Secret",
+        "traceparent",
+        "tracestate",
     ],
 )
 

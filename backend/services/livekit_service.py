@@ -70,7 +70,9 @@ async def create_isolated_room(room_name: str, metadata: dict | None = None):
     - max_participants=2 (SIP + 1 agente)
     - metadata JSON serializada para trazabilidad de campaña/contacto
     """
-    meta_str = json.dumps(metadata or {}, ensure_ascii=True)
+    from utils.tracing import enrich_metadata_with_trace
+
+    meta_str = json.dumps(enrich_metadata_with_trace(metadata), ensure_ascii=True)
     req = api.CreateRoomRequest(
         name=room_name,
         max_participants=2,
@@ -83,7 +85,9 @@ async def dispatch_agent_explicit(room_name: str, metadata: dict | None = None, 
     """
     Dispatch explícito del agente. Evita colisiones con workers no deseados.
     """
-    meta_str = json.dumps(metadata or {}, ensure_ascii=True)
+    from utils.tracing import enrich_metadata_with_trace
+
+    meta_str = json.dumps(enrich_metadata_with_trace(metadata), ensure_ascii=True)
     req = api.CreateAgentDispatchRequest(
         room=room_name,
         agent_name=agent_name or DEFAULT_AGENT_NAME,

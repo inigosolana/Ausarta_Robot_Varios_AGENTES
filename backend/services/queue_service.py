@@ -65,8 +65,10 @@ async def close_arq_pool() -> None:
 async def _enqueue(job_name: str, *args: Any, **kwargs: Any) -> str | None:
     """Encola un job ARQ sin bloquear en HTTP al backend."""
     try:
+        from utils.tracing import inject_carrier_into_kwargs
+
         pool = await get_arq_pool()
-        job = await pool.enqueue_job(job_name, *args, **kwargs)
+        job = await pool.enqueue_job(job_name, *args, **inject_carrier_into_kwargs(kwargs))
         return getattr(job, "job_id", None)
     except Exception as exc:
         import logging

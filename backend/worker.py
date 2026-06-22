@@ -40,6 +40,7 @@ from tasks.notifications import (
     process_yeastar_webhook,
 )
 from tasks.yeastar_health import check_yeastar_health_task
+from utils.tracing import init_tracing, instrument_aiohttp_client, wrap_arq_task
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -77,6 +78,8 @@ def _build_redis_settings() -> RedisSettings:
 async def startup(ctx: dict[str, Any]) -> None:
     """Inicialización del worker: conexiones compartidas entre tareas."""
     logger.info("🚀 [ARQ Worker] Arrancando...")
+    init_tracing(service_name=os.getenv("OTEL_SERVICE_NAME", "ausarta-arq-worker"))
+    instrument_aiohttp_client()
     redis: ArqRedis = ctx["redis"]
     await redis.set("ausarta:arq:worker_started", "1", ex=300)
     try:
@@ -116,23 +119,23 @@ class WorkerSettings:
 
     functions = [
         # Campañas
-        campaign_scheduler_task,
-        dispatch_lead_drip_task,
-        campaign_orchestrator,
-        process_campaign_empresa,
+        wrap_arq_task(campaign_scheduler_task),
+        wrap_arq_task(dispatch_lead_drip_task),
+        wrap_arq_task(campaign_orchestrator),
+        wrap_arq_task(process_campaign_empresa),
         # Llamadas
-        agent_post_guardar_encuesta,
-        agent_post_colgar,
-        agent_post_transfer,
+        wrap_arq_task(agent_post_guardar_encuesta),
+        wrap_arq_task(agent_post_colgar),
+        wrap_arq_task(agent_post_transfer),
         # IA
-        process_transcription_ai,
-        generate_transfer_briefing_task,
+        wrap_arq_task(process_transcription_ai),
+        wrap_arq_task(generate_transfer_briefing_task),
         # Notificaciones / webhooks
-        process_n8n_webhook,
-        process_system_alert,
-        send_telegram_alert_task,
-        process_yeastar_webhook,
-        check_yeastar_health_task,
+        wrap_arq_task(process_n8n_webhook),
+        wrap_arq_task(process_system_alert),
+        wrap_arq_task(send_telegram_alert_task),
+        wrap_arq_task(process_yeastar_webhook),
+        wrap_arq_task(check_yeastar_health_task),
     ]
 
     _health_interval = int(os.getenv("YEASTAR_HEALTH_CHECK_INTERVAL_SECONDS", "120"))
