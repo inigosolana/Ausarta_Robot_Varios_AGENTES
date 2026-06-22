@@ -118,10 +118,11 @@ async def finalize_call_session(call_session: "CallSession") -> None:
         data_saved = getattr(call_session.agent_instance, "data_saved", False)
         datos_extra: dict[str, Any] | None = None
         call_disposition: str | None = None
+        anger_result = None
 
         if transcript:
             logger.info(
-                f"🧠 Clasificando disposición de llamada y extrayendo datos "
+                f"🧠 Analizando ira del cliente y disposición "
                 f"para encuesta {call_session.survey_id} (Tipo: {agent_type})"
             )
             call_direction = (
@@ -129,13 +130,23 @@ async def finalize_call_session(call_session: "CallSession") -> None:
                 if _is_inbound_agent_config(call_session.agent_config)
                 else "outbound"
             )
-            call_disposition, datos_extra = await analyze_call_disposition(
-                transcript,
-                agent_type,
-                data_saved,
-                call_session.lang_state.get("active_lang", call_session.language),
-                call_direction=call_direction,
+            from services.customer_anger_service import (
+                analyze_customer_anger,
+                maybe_enqueue_urgent_anger_alert,
+                merge_anger_into_datos_extra,
             )
+
+            anger_result, (call_disposition, datos_extra) = await asyncio.gather(
+                analyze_customer_anger(transcript),
+                analyze_call_disposition(
+                    transcript,
+                    agent_type,
+                    data_saved,
+                    call_session.lang_state.get("active_lang", call_session.language),
+                    call_direction=call_direction,
+                ),
+            )
+            datos_extra = merge_anger_into_datos_extra(datos_extra, anger_result)
             if _is_inbound_agent_config(call_session.agent_config):
                 datos_extra = _build_inbound_datos_extra(
                     call_session.agent_config,
@@ -150,6 +161,8 @@ async def finalize_call_session(call_session: "CallSession") -> None:
             datos_extra = {
                 "sentimiento_cliente": "Neutral",
                 "idioma": call_session.lang_state.get("active_lang", call_session.language),
+                "customer_anger_score": 1,
+                "requires_urgent_human_attention": False,
             }
             logger.info(
                 f"📵 Sin transcripción para encuesta {call_session.survey_id} → "
@@ -181,6 +194,30 @@ async def finalize_call_session(call_session: "CallSession") -> None:
 
         enc_id = int(call_session.survey_id) if str(call_session.survey_id).isdigit() else 0
         storage_transcript = prepare_transcription_for_storage(transcript) if transcript else transcript
+
+        if anger_result and anger_result.requires_urgent_human_attention and enc_id > 0:
+            try:
+                from services.customer_anger_service import maybe_enqueue_urgent_anger_alert
+
+                _telefono_alert = (
+                    (datos_extra or {}).get("telefono")
+                    or call_session.agent_config.get("contacto_phone")
+                    or ""
+                )
+                _empresa_alert = int(call_session.agent_config.get("empresa_id") or 0)
+                if _empresa_alert > 0:
+                    await maybe_enqueue_urgent_anger_alert(
+                        empresa_id=_empresa_alert,
+                        encuesta_id=enc_id,
+                        anger=anger_result,
+                        telefono=str(_telefono_alert),
+                    )
+            except Exception as alert_err:
+                logger.warning(
+                    "[%s] Alerta ira cliente no enviada: %s",
+                    call_session.job_id,
+                    alert_err,
+                )
 
         if data_saved:
             logger.info(

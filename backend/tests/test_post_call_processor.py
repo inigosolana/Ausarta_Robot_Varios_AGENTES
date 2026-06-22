@@ -22,6 +22,20 @@ def _suppress_background_tasks(monkeypatch):
     monkeypatch.setattr("agents.post_call_processor.asyncio.create_task", _fake_create_task)
 
 
+@pytest.fixture(autouse=True)
+def _mock_customer_anger(monkeypatch):
+    """Evita llamadas Groq en tests de post_call_processor."""
+    from services.customer_anger_service import CustomerAngerResult
+
+    async def _neutral(_transcript: str):
+        return CustomerAngerResult(
+            customer_anger_score=1,
+            requires_urgent_human_attention=False,
+        )
+
+    monkeypatch.setattr("services.customer_anger_service.analyze_customer_anger", _neutral)
+
+
 def _make_call_session(
     *,
     transcript: str = "",
@@ -82,6 +96,8 @@ async def test_finalize_no_transcript_enqueues_fallback(monkeypatch):
     assert payload["status"] == "no_contesta"
     assert payload["datos_extra"]["sentimiento_cliente"] == "Neutral"
     assert payload["datos_extra"]["idioma"] == "es"
+    assert payload["datos_extra"]["customer_anger_score"] == 1
+    assert payload["datos_extra"]["requires_urgent_human_attention"] is False
 
 
 @pytest.mark.asyncio
@@ -243,3 +259,42 @@ async def test_finalize_records_billing_usage(monkeypatch):
     assert metrics.tts_characters == 250
     assert metrics.telephony_seconds >= 29
     assert billing_mock.await_args.kwargs["encuesta_id"] == 123
+
+
+@pytest.mark.asyncio
+async def test_finalize_merges_anger_into_datos_extra(monkeypatch):
+    from services.customer_anger_service import CustomerAngerResult
+
+    cs = _make_call_session(transcript="Cliente: Esto es intolerable", data_saved=True)
+    enqueue_mock = AsyncMock(return_value="job-anger")
+    analyze_mock = AsyncMock(
+        return_value=("completada", {"sentimiento_cliente": "Negativo", "idioma": "es"}),
+    )
+
+    async def _angry(_transcript: str):
+        return CustomerAngerResult(
+            customer_anger_score=9,
+            requires_urgent_human_attention=True,
+            anger_signals=("amenaza de baja",),
+        )
+
+    monkeypatch.setattr("agents.post_call_processor.enqueue_guardar_encuesta", enqueue_mock)
+    monkeypatch.setattr("agents.post_call_processor.analyze_call_disposition", analyze_mock)
+    monkeypatch.setattr("services.customer_anger_service.analyze_customer_anger", _angry)
+    monkeypatch.setattr(
+        "agents.post_call_processor._extract_transcript_from_session",
+        lambda _session: ([], "Cliente: Esto es intolerable"),
+    )
+    telegram_mock = AsyncMock()
+    monkeypatch.setattr(
+        "services.customer_anger_service.maybe_enqueue_urgent_anger_alert",
+        telegram_mock,
+    )
+
+    await finalize_call_session(cs)
+
+    payload = enqueue_mock.await_args.args[0]
+    assert payload["datos_extra"]["customer_anger_score"] == 9
+    assert payload["datos_extra"]["requires_urgent_human_attention"] is True
+    assert payload["datos_extra"]["anger_signals"] == ["amenaza de baja"]
+    telegram_mock.assert_awaited_once()

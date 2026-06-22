@@ -248,6 +248,22 @@ export function getIdioma(r: SurveyResult): string | null {
   return r.datos_extra?.idioma ?? null;
 }
 
+/** Puntuación de ira del cliente (1–10) desde agent_results o datos_extra. */
+export function getCustomerAngerScore(r: SurveyResult): number | null {
+  const fromAnalysis = r.agent_results?.analysis?.customer_anger_score;
+  if (typeof fromAnalysis === 'number' && !Number.isNaN(fromAnalysis)) return fromAnalysis;
+  const fromExtra = r.datos_extra?.customer_anger_score;
+  if (typeof fromExtra === 'number' && !Number.isNaN(fromExtra)) return fromExtra;
+  return null;
+}
+
+/** Alerta roja B2B: cliente requiere atención humana urgente. */
+export function requiresUrgentHumanAttention(r: SurveyResult): boolean {
+  const fromAnalysis = r.agent_results?.analysis?.requires_urgent_human_attention;
+  if (typeof fromAnalysis === 'boolean') return fromAnalysis;
+  return Boolean(r.datos_extra?.requires_urgent_human_attention);
+}
+
 // Mapeo canónico de disposición para gráficos (usa los nombres del backend)
 export type CallDisposition = 'completed' | 'incomplete' | 'rejected_opt_out' | 'failed' | 'unreached' | 'pending';
 

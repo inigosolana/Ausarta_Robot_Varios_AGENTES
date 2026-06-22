@@ -62,6 +62,12 @@ export function extractCallResultItems(row: SurveyResult): CallResultItem[] {
     });
     if (analysis.sentimiento) add('Sentimiento', analysis.sentimiento, 'choice');
     if (analysis.idioma) add('Idioma', analysis.idioma, 'text');
+    if (analysis.customer_anger_score != null) {
+      add('Ira cliente (1-10)', analysis.customer_anger_score, 'number');
+    }
+    if (analysis.requires_urgent_human_attention === true) {
+      add('Atención urgente', 'Sí', 'choice');
+    }
 
     if (items.length > 0) return items;
   }

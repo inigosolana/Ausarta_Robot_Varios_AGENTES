@@ -36,6 +36,9 @@ _DATOS_EXTRA_SKIP = frozenset(
         "resumen_narrativo",
         "sentimiento_cliente",
         "idioma",
+        "customer_anger_score",
+        "requires_urgent_human_attention",
+        "anger_signals",
     }
 )
 
@@ -144,6 +147,22 @@ def build_agent_results(
     if extra.get("resumen_narrativo"):
         base.setdefault("analysis", {})
         base["analysis"]["resumen"] = extra["resumen_narrativo"]
+
+    if extra.get("customer_anger_score") is not None:
+        base.setdefault("analysis", {})
+        try:
+            base["analysis"]["customer_anger_score"] = int(extra["customer_anger_score"])
+        except (TypeError, ValueError):
+            pass
+    if "requires_urgent_human_attention" in extra:
+        base.setdefault("analysis", {})
+        base["analysis"]["requires_urgent_human_attention"] = bool(
+            extra.get("requires_urgent_human_attention")
+        )
+    signals = extra.get("anger_signals")
+    if isinstance(signals, list) and signals:
+        base.setdefault("analysis", {})
+        base["analysis"]["anger_signals"] = [str(s) for s in signals[:5]]
 
     base["agent_type"] = at
     base["schema_version"] = SCHEMA_VERSION

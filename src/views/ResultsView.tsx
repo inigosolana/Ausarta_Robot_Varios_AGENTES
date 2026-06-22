@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Download, Search, RefreshCw, FileText, Target, ThumbsDown, Clock, Calendar, Database, Sparkles } from 'lucide-react';
+import { Download, Search, RefreshCw, FileText, Target, ThumbsDown, Clock, Calendar, Database, Sparkles, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -8,7 +8,15 @@ import { supabase } from '../lib/supabase';
 import { AnalyticsDashboard } from '../components/AnalyticsDashboard';
 import { DateRangePicker, getDatesFromRange, DateRange } from '../components/DateRangePicker';
 import { CallResultModal } from '../components/CallResultModal';
-import { SurveyResult, ExtractionSchemaProperty, getSentimiento, getIdioma, Sentimiento } from '../types';
+import {
+    SurveyResult,
+    ExtractionSchemaProperty,
+    getSentimiento,
+    getIdioma,
+    getCustomerAngerScore,
+    requiresUrgentHumanAttention,
+    Sentimiento,
+} from '../types';
 import { fetchSurveyResults } from '../lib/resultsSupabase';
 import { extractCallResultItems } from '../lib/callResults';
 
@@ -429,13 +437,28 @@ const ResultsView: React.FC<Props> = ({ empresaId, agentId, campaignId, title, h
                                     <td className="px-2 py-4 text-center">
                                         {(() => {
                                             const sent = getSentimiento(row);
+                                            const angerScore = getCustomerAngerScore(row);
+                                            const urgent = requiresUrgentHumanAttention(row);
                                             const cfg: Record<Sentimiento, { icon: string; cls: string }> = {
                                                 Positivo: { icon: '😊', cls: 'text-green-600' },
                                                 Neutral:  { icon: '😐', cls: 'text-gray-400' },
                                                 Negativo: { icon: '😠', cls: 'text-red-600' },
                                             };
                                             const s = cfg[sent];
-                                            return <span className={`text-lg ${s.cls}`} title={sent}>{s.icon}</span>;
+                                            return (
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <span className={`text-lg ${s.cls}`} title={sent}>{s.icon}</span>
+                                                    {urgent && (
+                                                        <span
+                                                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-red-600 text-white shadow-sm"
+                                                            title={`Ira cliente ${angerScore ?? '?'}/10 — requiere atención humana`}
+                                                        >
+                                                            <AlertTriangle size={10} />
+                                                            {angerScore ?? '!'}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            );
                                         })()}
                                     </td>
                                     <td className="px-2 py-4 text-center">

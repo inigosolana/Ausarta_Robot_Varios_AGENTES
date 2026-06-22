@@ -69,3 +69,17 @@ def test_normalize_agent_type_default():
 
 def test_legacy_columns_from_agent_results_empty():
     assert legacy_columns_from_agent_results(None) == {}
+
+
+def test_build_agent_results_includes_customer_anger():
+    result = build_agent_results(
+        "SOPORTE_CLIENTE",
+        datos_extra={
+            "customer_anger_score": 8,
+            "requires_urgent_human_attention": True,
+            "anger_signals": ["insultos"],
+        },
+    )
+    assert result["analysis"]["customer_anger_score"] == 8
+    assert result["analysis"]["requires_urgent_human_attention"] is True
+    assert result["analysis"]["anger_signals"] == ["insultos"]

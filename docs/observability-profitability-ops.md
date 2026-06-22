@@ -11,7 +11,7 @@
 |---|---------|--------|
 | 1 | OpenTelemetry (trazas distribuidas) | ✅ `d473391` |
 | 2 | Rentabilidad Redis + hard limits EUR | ✅ este documento |
-| 3 | Sentimiento / alertas cabreo | ⏳ pendiente |
+| 3 | Customer Anger Score + alertas urgentes | ✅ este documento |
 
 ---
 
@@ -112,6 +112,56 @@ cd backend && PYTHONPATH=. .venv/bin/python -m pytest \
 
 ---
 
-## 3. Sentimiento y alertas (pendiente)
+## 3. Customer Anger Score (ira del cliente)
 
-Punto 3 del paquete — no iniciado.
+### Flujo
+
+```
+finalize_call_session()
+        │
+        ├─ Transcripción cruda (sin PII)
+        │
+        ├─ asyncio.gather:
+        │     analyze_customer_anger()     ← Groq 8B (~400 ms)
+        │     analyze_call_disposition()   ← Groq 70B (disposición + datos_extra)
+        │
+        ├─ merge_anger_into_datos_extra()
+        ├─ prepare_transcription_for_storage()  ← PII después del análisis
+        └─ enqueue_guardar_encuesta → agent_results.analysis
+```
+
+### Campos persistidos
+
+En `datos_extra` y `agent_results.analysis`:
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `customer_anger_score` | int 1–10 | Nivel de enfado del cliente |
+| `requires_urgent_human_attention` | bool | Alerta roja B2B |
+| `anger_signals` | string[] | Señales detectadas (máx. 5) |
+
+No requiere migración SQL: se guarda en JSONB `encuestas.agent_results`.
+
+### Alertas
+
+- **Frontend:** badge rojo en `ResultsView` si `requires_urgent_human_attention`
+- **Telegram:** `maybe_enqueue_urgent_anger_alert()` vía ARQ (`CUSTOMER_ANGER_TELEGRAM_ALERTS=true`)
+
+### Variables
+
+```bash
+CUSTOMER_ANGER_ANALYSIS_ENABLED=true
+CUSTOMER_ANGER_MODEL=llama-3.1-8b-instant
+CUSTOMER_ANGER_TIMEOUT_MS=400
+CUSTOMER_ANGER_URGENT_THRESHOLD=8
+CUSTOMER_ANGER_TELEGRAM_ALERTS=true
+```
+
+### Tests
+
+```bash
+cd backend && PYTHONPATH=. .venv/bin/python -m pytest \
+  tests/test_customer_anger_service.py \
+  tests/test_post_call_processor.py \
+  tests/test_call_results_service.py -q
+```
