@@ -1,0 +1,9 @@
+# Carriers / peers de América Latam — grupo ipops "carrier_latam"
+# Kamailio prioriza el nodo edge-latam para INVITEs desde estas redes.
+# Una entrada por línea: IPv4, IPv4/mask o IPv6 (máscara opcional, default /32).
+#
+# Sustituir por rangos reales de Yeastar/CITELIA Latam en producción.
+
+# Ejemplos documentación RFC5737 (NO usar en prod)
+# 198.51.100.0/24
+# 203.0.113.0/24

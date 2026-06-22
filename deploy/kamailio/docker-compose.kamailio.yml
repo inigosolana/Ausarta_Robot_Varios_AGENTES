@@ -1,10 +1,14 @@
 # Kamailio SIP Edge Proxy — Easypanel (Docker Compose desde la raíz del repo)
-# Puertos: 5060 UDP/TCP, 5061 TLS → balanceo a LiveKit (dispatcher.list)
+# Puertos: 5060 UDP/TCP, 5061 TLS → balanceo multi-región LiveKit (dispatcher)
 #
 # Easypanel: usar este compose con working directory = raíz del proyecto.
 # Variables en la UI de entorno (o .env en la raíz):
-#   SIP_DOMAIN       — dominio SIP (ej. sip.tudominio.com)
-#   EXTERNAL_SIP_IP  — IP pública del nodo (opcional, SDP/RTP)
+#   SIP_DOMAIN                  — dominio SIP (ej. sip.tudominio.com)
+#   EXTERNAL_SIP_IP             — IP pública del nodo (opcional, SDP/RTP)
+#   LIVEKIT_EDGE_MADRID_HOST    — hostname/IP nodo LiveKit Edge EU
+#   LIVEKIT_EDGE_LATAM_HOST     — hostname/IP nodo LiveKit Edge Latam
+#   LIVEKIT_EDGE_MADRID_BACKUP_HOST — backup EU (opcional)
+#   SIP_LATAM_CIDRS             — CIDRs carriers Latam (coma-separado)
 
 services:
   kamailio-edge:
@@ -20,9 +24,11 @@ services:
 
     volumes:
       - ./deploy/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
-      - ./deploy/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list:ro
+      - ./deploy/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.example:ro
       - ./deploy/kamailio/trusted_peers.list:/etc/kamailio/trusted_peers.list:ro
+      - ./deploy/kamailio/region_peers.list:/etc/kamailio/region_peers.list:ro
       - ./deploy/kamailio/entrypoint.sh:/etc/kamailio/entrypoint.sh:ro
+      - ./deploy/kamailio/render_dispatcher.sh:/etc/kamailio/render_dispatcher.sh:ro
       - ./deploy/kamailio/certs:/etc/kamailio/tls:ro
 
     env_file:
@@ -32,6 +38,16 @@ services:
       SIP_DOMAIN: ${SIP_DOMAIN}
       EXTERNAL_SIP_IP: ${EXTERNAL_SIP_IP}
       SIP_TRUSTED_CIDRS: ${SIP_TRUSTED_CIDRS:-}
+      SIP_LATAM_CIDRS: ${SIP_LATAM_CIDRS:-}
+      LIVEKIT_EDGE_MADRID_HOST: ${LIVEKIT_EDGE_MADRID_HOST:-}
+      LIVEKIT_EDGE_LATAM_HOST: ${LIVEKIT_EDGE_LATAM_HOST:-}
+      LIVEKIT_EDGE_MADRID_BACKUP_HOST: ${LIVEKIT_EDGE_MADRID_BACKUP_HOST:-}
+      LIVEKIT_EDGE_MADRID_PORT: ${LIVEKIT_EDGE_MADRID_PORT:-5060}
+      LIVEKIT_EDGE_LATAM_PORT: ${LIVEKIT_EDGE_LATAM_PORT:-5060}
+      LIVEKIT_EDGE_MADRID_BACKUP_PORT: ${LIVEKIT_EDGE_MADRID_BACKUP_PORT:-5060}
+      LIVEKIT_EDGE_MADRID_WEIGHT: ${LIVEKIT_EDGE_MADRID_WEIGHT:-80}
+      LIVEKIT_EDGE_LATAM_WEIGHT: ${LIVEKIT_EDGE_LATAM_WEIGHT:-70}
+      LIVEKIT_EDGE_MADRID_BACKUP_WEIGHT: ${LIVEKIT_EDGE_MADRID_BACKUP_WEIGHT:-40}
 
     entrypoint: ["/bin/sh", "/etc/kamailio/entrypoint.sh"]
 

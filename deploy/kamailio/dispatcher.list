@@ -1,9 +1,12 @@
-# Dispatcher set 1 — nodos SIP LiveKit (backend)
-# Formato: setid flags priority attrs destination
-# Sustituye las IPs/hostnames por tus nodos reales (Easypanel / variables de entorno en despliegue).
+# Dispatcher set 1 — nodos SIP LiveKit multi-región
+# Formato Kamailio: setid destination flags priority attrs
 #
-# flags: 0=activo, 1=inactive, 2=probing, 4=disabled
-# attrs: opcional (ej. duid para sticky sessions)
+# flags:  0=activo (dispatcher marca INACTIVE tras fallos de probing)
+# priority: peso para balanceo (modparam dispatcher flags=2); mayor = más tráfico
+# attrs:  region=eu|latam  site=edge-madrid|edge-latam  role=primary|backup
+#
+# Sustituir hostnames por tus nodos reales o usar variables LIVEKIT_EDGE_* en entrypoint.
 
-1 0 0 sip:livekit-node-1:5060
-1 0 0 sip:livekit-node-2:5060
+1 sip:edge-madrid.sip.ausarta.net:5060 0 80 region=eu;site=edge-madrid;role=primary
+1 sip:edge-latam.sip.ausarta.net:5060 0 70 region=latam;site=edge-latam;role=primary
+1 sip:edge-madrid-backup.sip.ausarta.net:5060 0 40 region=eu;site=edge-madrid;role=backup
