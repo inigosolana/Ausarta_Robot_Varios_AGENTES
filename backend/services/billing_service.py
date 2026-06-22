@@ -343,6 +343,99 @@ class BillingService:
             tts_by_provider=tts_by_provider,
         )
 
+    async def load_monthly_usage_from_db(
+        self,
+        tenant_id: int,
+        *,
+        period: str,
+    ) -> TenantUsageSnapshot:
+        """Agregados mensuales persistidos en Supabase (meses cerrados o fallback)."""
+        tid = _validate_tenant_id(tenant_id)
+        if not supabase:
+            return TenantUsageSnapshot(tenant_id=tid, period=period)
+
+        try:
+            result = await sb_query(
+                lambda: supabase.table("tenant_usage_monthly")
+                .select("category, sub_key, quantity")
+                .eq("empresa_id", tid)
+                .eq("period", period)
+                .execute()
+            )
+            rows = result.data or []
+        except Exception:
+            logger.exception("[billing] Error leyendo tenant_usage_monthly tenant=%s", tid)
+            return TenantUsageSnapshot(tenant_id=tid, period=period)
+
+        prompt_total = 0
+        completion_total = 0
+        tts_total = 0
+        telephony_total = 0
+        llm_by_model: dict[str, dict[str, int]] = {}
+        tts_by_provider: dict[str, int] = {}
+
+        for row in rows:
+            category = str(row.get("category") or "")
+            sub_key = str(row.get("sub_key") or "")
+            qty = int(float(row.get("quantity") or 0))
+
+            if category == "llm_prompt_tokens":
+                prompt_total += qty
+                if sub_key:
+                    bucket = llm_by_model.setdefault(sub_key, {"prompt_tokens": 0, "completion_tokens": 0})
+                    bucket["prompt_tokens"] += qty
+            elif category == "llm_completion_tokens":
+                completion_total += qty
+                if sub_key:
+                    bucket = llm_by_model.setdefault(sub_key, {"prompt_tokens": 0, "completion_tokens": 0})
+                    bucket["completion_tokens"] += qty
+            elif category == "tts_characters":
+                tts_total += qty
+                if sub_key:
+                    tts_by_provider[sub_key] = tts_by_provider.get(sub_key, 0) + qty
+            elif category == "telephony_seconds":
+                telephony_total += qty
+
+        return TenantUsageSnapshot(
+            tenant_id=tid,
+            period=period,
+            llm_prompt_tokens=prompt_total,
+            llm_completion_tokens=completion_total,
+            tts_characters=tts_total,
+            telephony_seconds=telephony_total,
+            llm_by_model=llm_by_model,
+            tts_by_provider=tts_by_provider,
+        )
+
+    async def get_tenant_usage_summary(
+        self,
+        tenant_id: int,
+        *,
+        period: str | None = None,
+    ) -> TenantUsageSnapshot:
+        """
+        Resumen de consumo del tenant para un periodo YYYY-MM.
+
+        Mes actual: Redis (tiempo real) con fallback a Supabase.
+        Meses anteriores: Supabase.
+        """
+        current_period = period or _utc_period()
+        tid = _validate_tenant_id(tenant_id)
+
+        if current_period == _utc_period():
+            try:
+                redis_snap = await self.get_current_usage(tid, period=current_period)
+                if (
+                    redis_snap.llm_total_tokens > 0
+                    or redis_snap.tts_characters > 0
+                    or redis_snap.telephony_seconds > 0
+                ):
+                    return redis_snap
+            except Exception:
+                logger.warning("[billing] Redis no disponible; fallback a Supabase tenant=%s", tid)
+
+        return await self.load_monthly_usage_from_db(tid, period=current_period)
+
     async def _incr_redis(self, key: str, deltas: dict[str, int]) -> None:
         filtered = {field: int(delta) for field, delta in deltas.items() if int(delta) != 0}
         if not filtered:

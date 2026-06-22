@@ -12,6 +12,7 @@ from services.billing_service import (
     FIELD_TELEPHONY_SECONDS,
     FIELD_TTS_CHARACTERS,
     BillingService,
+    TenantUsageSnapshot,
     _redis_llm_model_key,
     _redis_summary_key,
     _sanitize_sub_key,
@@ -180,6 +181,50 @@ async def test_persist_usage_writes_event_and_monthly_rpc(billing: BillingServic
             "p_quantity": 100.0,
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_get_tenant_usage_summary_prefers_redis_for_current_month(
+    billing: BillingService,
+    mock_redis: AsyncMock,
+):
+    await billing.log_llm_tokens(11, 40, 20, "groq-model", period="2026-06")
+
+    with (
+        patch.object(
+            billing,
+            "load_monthly_usage_from_db",
+            new=AsyncMock(return_value=TenantUsageSnapshot(tenant_id=11, period="2026-06")),
+        ),
+        patch("services.billing_service._utc_period", return_value="2026-06"),
+    ):
+        snap = await billing.get_tenant_usage_summary(11, period="2026-06")
+
+    assert snap.llm_total_tokens == 60
+
+
+@pytest.mark.asyncio
+async def test_load_monthly_usage_from_db_aggregates_rows():
+    billing = BillingService()
+    mock_client = AsyncMock()
+    mock_result = type("R", (), {"data": [
+        {"category": "llm_prompt_tokens", "sub_key": "llama", "quantity": 100},
+        {"category": "llm_completion_tokens", "sub_key": "llama", "quantity": 50},
+        {"category": "tts_characters", "sub_key": "cartesia", "quantity": 300},
+        {"category": "telephony_seconds", "sub_key": "", "quantity": 90},
+    ]})()
+
+    with (
+        patch("services.billing_service.supabase", mock_client),
+        patch("services.billing_service.sb_query", new=AsyncMock(return_value=mock_result)),
+    ):
+        snap = await billing.load_monthly_usage_from_db(4, period="2026-05")
+
+    assert snap.llm_prompt_tokens == 100
+    assert snap.llm_completion_tokens == 50
+    assert snap.tts_characters == 300
+    assert snap.telephony_seconds == 90
+    assert snap.llm_by_model["llama"]["prompt_tokens"] == 100
 
 
 @pytest.mark.asyncio
