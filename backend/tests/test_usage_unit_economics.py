@@ -17,6 +17,7 @@ def test_calculate_usage_cost_breakdown():
         llm_prompt_tokens=1_000_000,
         llm_completion_tokens=500_000,
         tts_characters=10_000,
+        stt_audio_seconds=1200,
         telephony_seconds=1200,
         llm_by_model={
             "llama-3.3-70b": {"prompt_tokens": 1_000_000, "completion_tokens": 500_000},

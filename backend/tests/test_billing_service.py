@@ -7,8 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from services.billing_service import (
+    FIELD_COST_EUR_MICRO,
     FIELD_LLM_COMPLETION,
     FIELD_LLM_PROMPT,
+    FIELD_STT_AUDIO_SECONDS,
     FIELD_TELEPHONY_SECONDS,
     FIELD_TTS_CHARACTERS,
     BillingService,
@@ -82,7 +84,7 @@ async def test_log_llm_tokens_increments_redis_summary_and_model_hash(
     assert mock_redis._store[summary_key][FIELD_LLM_PROMPT] == 120
     assert mock_redis._store[summary_key][FIELD_LLM_COMPLETION] == 80
     assert mock_redis._store[model_key][FIELD_LLM_PROMPT] == 120
-    assert mock_redis.eval.await_count == 2
+    assert mock_redis.eval.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -96,6 +98,20 @@ async def test_log_tts_characters_increments_redis(billing: BillingService, mock
 
     summary_key = _redis_summary_key(3, "2026-06")
     assert mock_redis._store[summary_key][FIELD_TTS_CHARACTERS] == 450
+
+
+@pytest.mark.asyncio
+async def test_log_stt_audio_seconds_increments_redis(billing: BillingService, mock_redis: AsyncMock):
+    await billing.log_stt_audio_seconds(
+        tenant_id=4,
+        seconds=120,
+        provider="deepgram",
+        period="2026-06",
+    )
+
+    summary_key = _redis_summary_key(4, "2026-06")
+    assert mock_redis._store[summary_key][FIELD_STT_AUDIO_SECONDS] == 120
+    assert mock_redis._store[summary_key][FIELD_COST_EUR_MICRO] > 0
 
 
 @pytest.mark.asyncio

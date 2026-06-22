@@ -52,6 +52,7 @@ async def _record_session_billing_usage(
     if (
         metrics.llm_total_tokens == 0
         and metrics.tts_characters == 0
+        and metrics.stt_audio_seconds <= 0
         and metrics.telephony_seconds == 0
     ):
         return
@@ -64,12 +65,13 @@ async def _record_session_billing_usage(
     if recorded:
         logger.info(
             "[%s] Billing registrado empresa=%s encuesta=%s "
-            "llm_tokens=%s tts_chars=%s telephony_s=%s model=%s",
+            "llm_tokens=%s tts_chars=%s stt_s=%.0f telephony_s=%s model=%s",
             call_session.job_id,
             empresa_id,
             encuesta_id,
             metrics.llm_total_tokens,
             metrics.tts_characters,
+            metrics.stt_audio_seconds,
             metrics.telephony_seconds,
             metrics.llm_model,
         )

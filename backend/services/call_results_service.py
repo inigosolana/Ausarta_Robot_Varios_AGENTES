@@ -241,6 +241,7 @@ class CallUsageMetrics:
     tts_provider: str
     telephony_seconds: int
     stt_audio_seconds: float = 0.0
+    stt_provider: str = "deepgram"
 
     @property
     def llm_total_tokens(self) -> int:
@@ -258,6 +259,7 @@ def extract_call_usage_metrics(
     """
     llm_model = (agent_config.get("llm_model") or "llama-3.3-70b-versatile").strip()
     tts_provider = (agent_config.get("tts_provider") or "cartesia").strip().lower()
+    stt_provider = (agent_config.get("stt_provider") or "deepgram").strip().lower()
 
     prompt_tokens = int(getattr(usage_summary, "llm_prompt_tokens", 0) or 0)
     completion_tokens = int(getattr(usage_summary, "llm_completion_tokens", 0) or 0)
@@ -272,6 +274,7 @@ def extract_call_usage_metrics(
         tts_provider=tts_provider or "cartesia",
         telephony_seconds=max(0, int(telephony_seconds or 0)),
         stt_audio_seconds=max(0.0, stt_audio_seconds),
+        stt_provider=stt_provider or "deepgram",
     )
 
 
@@ -311,6 +314,14 @@ async def record_call_usage_billing(
             tenant_id,
             metrics.tts_characters,
             metrics.tts_provider,
+        )
+
+    stt_secs = int(metrics.stt_audio_seconds)
+    if stt_secs > 0:
+        await billing.log_stt_audio_seconds(
+            tenant_id,
+            stt_secs,
+            metrics.stt_provider,
         )
 
     if metrics.telephony_seconds > 0:

@@ -102,8 +102,12 @@ async def evaluate_tenant_spending(
     limit_eur = await _load_monthly_spend_limit(empresa_id)
     billing = get_billing_service()
     usage = await billing.get_tenant_usage_summary(empresa_id, period=current_period)
-    costs = calculate_usage_cost_breakdown(usage)
-    spent_eur = float(costs["total_eur"])
+
+    if usage.spent_eur_micro > 0:
+        spent_eur = usage.spent_eur
+    else:
+        costs = calculate_usage_cost_breakdown(usage)
+        spent_eur = float(costs["total_eur"])
 
     if limit_eur is None:
         return TenantSpendStatus(

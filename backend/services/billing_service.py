@@ -27,11 +27,12 @@ from services.supabase_service import sb_query, supabase
 
 logger = logging.getLogger("billing")
 
-UsageEventType = Literal["llm_tokens", "tts_characters", "telephony_seconds"]
+UsageEventType = Literal["llm_tokens", "tts_characters", "stt_audio_seconds", "telephony_seconds"]
 MonthlyCategory = Literal[
     "llm_prompt_tokens",
     "llm_completion_tokens",
     "tts_characters",
+    "stt_audio_seconds",
     "telephony_seconds",
 ]
 
@@ -41,7 +42,9 @@ BILLING_TTL_SECONDS: Final[int] = 100 * 24 * 3600  # ~100 días
 FIELD_LLM_PROMPT: Final[str] = "llm:prompt_tokens"
 FIELD_LLM_COMPLETION: Final[str] = "llm:completion_tokens"
 FIELD_TTS_CHARACTERS: Final[str] = "tts:characters"
+FIELD_STT_AUDIO_SECONDS: Final[str] = "stt:audio_seconds"
 FIELD_TELEPHONY_SECONDS: Final[str] = "telephony:seconds"
+FIELD_COST_EUR_MICRO: Final[str] = "cost:eur_micro"
 
 _INCR_HASH_SCRIPT: Final[str] = """
 local key = KEYS[1]
@@ -78,6 +81,15 @@ def _redis_summary_key(tenant_id: int, period: str) -> str:
 def _redis_llm_model_key(tenant_id: int, period: str, model_name: str) -> str:
     model = _sanitize_sub_key(model_name)
     return f"{BILLING_PREFIX}:tenant:{tenant_id}:{period}:llm:{model}"
+
+
+def _redis_stt_provider_key(tenant_id: int, period: str, provider: str) -> str:
+    prov = _sanitize_sub_key(provider)
+    return f"{BILLING_PREFIX}:tenant:{tenant_id}:{period}:stt:{prov}"
+
+
+def _eur_to_micro(eur: float) -> int:
+    return max(0, int(round(float(eur) * 1_000_000)))
 
 
 def _redis_tts_provider_key(tenant_id: int, period: str, provider: str) -> str:
@@ -122,13 +134,20 @@ class TenantUsageSnapshot:
     llm_prompt_tokens: int = 0
     llm_completion_tokens: int = 0
     tts_characters: int = 0
+    stt_audio_seconds: int = 0
     telephony_seconds: int = 0
+    spent_eur_micro: int = 0
     llm_by_model: dict[str, dict[str, int]] = field(default_factory=dict)
     tts_by_provider: dict[str, int] = field(default_factory=dict)
+    stt_by_provider: dict[str, int] = field(default_factory=dict)
 
     @property
     def llm_total_tokens(self) -> int:
         return self.llm_prompt_tokens + self.llm_completion_tokens
+
+    @property
+    def spent_eur(self) -> float:
+        return self.spent_eur_micro / 1_000_000
 
 
 class BillingService:
@@ -137,6 +156,20 @@ class BillingService:
     def __init__(self, *, defer_persistence: bool = True) -> None:
         self._defer_persistence = defer_persistence
         self._pending_tasks: set[asyncio.Task[None]] = set()
+        self._rates = None
+
+    def _get_rates(self):
+        if self._rates is None:
+            from services.billing_pricing import BillingRates
+
+            self._rates = BillingRates.from_env()
+        return self._rates
+
+    async def _incr_cost_delta(self, summary_key: str, delta_eur: float) -> None:
+        micro = _eur_to_micro(delta_eur)
+        if micro <= 0:
+            return
+        await self._incr_redis(summary_key, {FIELD_COST_EUR_MICRO: micro})
 
     async def log_llm_tokens(
         self,
@@ -179,6 +212,13 @@ class BillingService:
                 FIELD_LLM_PROMPT: prompt,
                 FIELD_LLM_COMPLETION: completion,
             },
+        )
+
+        from services.billing_pricing import calculate_llm_cost_eur
+
+        await self._incr_cost_delta(
+            summary_key,
+            calculate_llm_cost_eur(prompt, completion, rates=self._get_rates()),
         )
 
         metadata = {
@@ -237,6 +277,10 @@ class BillingService:
         await self._incr_redis(summary_key, {FIELD_TTS_CHARACTERS: chars})
         await self._incr_redis(provider_key, {FIELD_TTS_CHARACTERS: chars})
 
+        from services.billing_pricing import calculate_tts_cost_eur
+
+        await self._incr_cost_delta(summary_key, calculate_tts_cost_eur(chars, rates=self._get_rates()))
+
         metadata = {"provider": prov, "chars_count": chars}
         await self._schedule_persistence(
             tenant_id=tid,
@@ -253,6 +297,59 @@ class BillingService:
             period=current_period,
             event_type="tts_characters",
             quantity=chars,
+            redis_key=summary_key,
+            metadata=metadata,
+        )
+
+    async def log_stt_audio_seconds(
+        self,
+        tenant_id: int,
+        seconds: int,
+        provider: str,
+        *,
+        period: str | None = None,
+    ) -> UsageLogResult:
+        tid = _validate_tenant_id(tenant_id)
+        secs = _validate_non_negative_int("seconds", seconds)
+        prov = (provider or "deepgram").strip() or "deepgram"
+        current_period = period or _utc_period()
+
+        if secs == 0:
+            return UsageLogResult(
+                tenant_id=tid,
+                period=current_period,
+                event_type="stt_audio_seconds",
+                quantity=0,
+                redis_key=_redis_summary_key(tid, current_period),
+                metadata={"provider": prov, "seconds": 0},
+            )
+
+        summary_key = _redis_summary_key(tid, current_period)
+        provider_key = _redis_stt_provider_key(tid, current_period, prov)
+
+        await self._incr_redis(summary_key, {FIELD_STT_AUDIO_SECONDS: secs})
+        await self._incr_redis(provider_key, {FIELD_STT_AUDIO_SECONDS: secs})
+
+        from services.billing_pricing import calculate_stt_cost_eur
+
+        await self._incr_cost_delta(summary_key, calculate_stt_cost_eur(secs, rates=self._get_rates()))
+
+        metadata = {"provider": prov, "seconds": secs}
+        await self._schedule_persistence(
+            tenant_id=tid,
+            period=current_period,
+            event_type="stt_audio_seconds",
+            quantity=secs,
+            unit="seconds",
+            metadata=metadata,
+            monthly_updates=[("stt_audio_seconds", prov, secs)],
+        )
+
+        return UsageLogResult(
+            tenant_id=tid,
+            period=current_period,
+            event_type="stt_audio_seconds",
+            quantity=secs,
             redis_key=summary_key,
             metadata=metadata,
         )
@@ -280,6 +377,13 @@ class BillingService:
 
         summary_key = _redis_summary_key(tid, current_period)
         await self._incr_redis(summary_key, {FIELD_TELEPHONY_SECONDS: secs})
+
+        from services.billing_pricing import calculate_telephony_cost_eur
+
+        await self._incr_cost_delta(
+            summary_key,
+            calculate_telephony_cost_eur(secs, rates=self._get_rates()),
+        )
 
         metadata = {"seconds": secs}
         await self._schedule_persistence(
@@ -332,15 +436,25 @@ class BillingService:
             prov_raw = await redis.hgetall(key)
             tts_by_provider[prov] = int(prov_raw.get(FIELD_TTS_CHARACTERS, 0) or 0)
 
+        stt_by_provider: dict[str, int] = {}
+        stt_pattern = f"{BILLING_PREFIX}:tenant:{tid}:{current_period}:stt:*"
+        async for key in redis.scan_iter(match=stt_pattern):
+            prov = key.rsplit(":", 1)[-1]
+            prov_raw = await redis.hgetall(key)
+            stt_by_provider[prov] = int(prov_raw.get(FIELD_STT_AUDIO_SECONDS, 0) or 0)
+
         return TenantUsageSnapshot(
             tenant_id=tid,
             period=current_period,
             llm_prompt_tokens=int(summary_raw.get(FIELD_LLM_PROMPT, 0) or 0),
             llm_completion_tokens=int(summary_raw.get(FIELD_LLM_COMPLETION, 0) or 0),
             tts_characters=int(summary_raw.get(FIELD_TTS_CHARACTERS, 0) or 0),
+            stt_audio_seconds=int(summary_raw.get(FIELD_STT_AUDIO_SECONDS, 0) or 0),
             telephony_seconds=int(summary_raw.get(FIELD_TELEPHONY_SECONDS, 0) or 0),
+            spent_eur_micro=int(summary_raw.get(FIELD_COST_EUR_MICRO, 0) or 0),
             llm_by_model=llm_by_model,
             tts_by_provider=tts_by_provider,
+            stt_by_provider=stt_by_provider,
         )
 
     async def load_monthly_usage_from_db(
@@ -370,9 +484,11 @@ class BillingService:
         prompt_total = 0
         completion_total = 0
         tts_total = 0
+        stt_total = 0
         telephony_total = 0
         llm_by_model: dict[str, dict[str, int]] = {}
         tts_by_provider: dict[str, int] = {}
+        stt_by_provider: dict[str, int] = {}
 
         for row in rows:
             category = str(row.get("category") or "")
@@ -393,6 +509,10 @@ class BillingService:
                 tts_total += qty
                 if sub_key:
                     tts_by_provider[sub_key] = tts_by_provider.get(sub_key, 0) + qty
+            elif category == "stt_audio_seconds":
+                stt_total += qty
+                if sub_key:
+                    stt_by_provider[sub_key] = stt_by_provider.get(sub_key, 0) + qty
             elif category == "telephony_seconds":
                 telephony_total += qty
 
@@ -402,9 +522,11 @@ class BillingService:
             llm_prompt_tokens=prompt_total,
             llm_completion_tokens=completion_total,
             tts_characters=tts_total,
+            stt_audio_seconds=stt_total,
             telephony_seconds=telephony_total,
             llm_by_model=llm_by_model,
             tts_by_provider=tts_by_provider,
+            stt_by_provider=stt_by_provider,
         )
 
     async def get_tenant_usage_summary(
@@ -428,7 +550,9 @@ class BillingService:
                 if (
                     redis_snap.llm_total_tokens > 0
                     or redis_snap.tts_characters > 0
+                    or redis_snap.stt_audio_seconds > 0
                     or redis_snap.telephony_seconds > 0
+                    or redis_snap.spent_eur_micro > 0
                 ):
                     return redis_snap
             except Exception:

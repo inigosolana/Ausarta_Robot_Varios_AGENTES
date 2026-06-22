@@ -76,7 +76,7 @@ def calculate_usage_cost_breakdown(
         rates=r,
     )
     tts_cost = calculate_tts_cost_eur(usage.tts_characters, rates=r)
-    stt_cost = calculate_stt_cost_eur(usage.telephony_seconds, rates=r)
+    stt_cost = calculate_stt_cost_eur(usage.stt_audio_seconds, rates=r)
     voice_cost = _round_eur(tts_cost + stt_cost)
     telephony_cost = calculate_telephony_cost_eur(usage.telephony_seconds, rates=r)
     total_cost = _round_eur(llm_cost + voice_cost + telephony_cost)

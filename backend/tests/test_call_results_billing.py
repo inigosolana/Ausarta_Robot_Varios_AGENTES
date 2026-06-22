@@ -48,10 +48,13 @@ async def test_record_call_usage_billing_invokes_billing_service():
         tts_characters=200,
         tts_provider="cartesia",
         telephony_seconds=90,
+        stt_audio_seconds=45.0,
+        stt_provider="deepgram",
     )
     billing = MagicMock()
     billing.log_llm_tokens = AsyncMock()
     billing.log_tts_characters = AsyncMock()
+    billing.log_stt_audio_seconds = AsyncMock()
     billing.log_telephony_seconds = AsyncMock()
 
     with (
@@ -63,6 +66,7 @@ async def test_record_call_usage_billing_invokes_billing_service():
     assert ok is True
     billing.log_llm_tokens.assert_awaited_once_with(7, 100, 50, "llama-3.3-70b-versatile")
     billing.log_tts_characters.assert_awaited_once_with(7, 200, "cartesia")
+    billing.log_stt_audio_seconds.assert_awaited_once_with(7, 45, "deepgram")
     billing.log_telephony_seconds.assert_awaited_once_with(7, 90)
 
 
