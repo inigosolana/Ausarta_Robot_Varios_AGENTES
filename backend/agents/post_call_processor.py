@@ -14,13 +14,65 @@ from agents.agent_common import (
     _is_inbound_agent_config,
 )
 from services.queue_service import enqueue_guardar_encuesta
-from services.call_results_service import prepare_transcription_for_storage
+from services.call_results_service import (
+    extract_call_usage_metrics,
+    prepare_transcription_for_storage,
+    record_call_usage_billing,
+)
 from utils.call_analyzer import analyze_call_disposition
 
 if TYPE_CHECKING:
     from agents.dynamic_agent import CallSession
 
 logger = logging.getLogger("agent-dynamic")
+
+
+async def _record_session_billing_usage(
+    call_session: "CallSession",
+    seconds_used: int,
+    encuesta_id: int,
+) -> None:
+    """Extrae métricas LiveKit y las persiste vía billing_service."""
+    empresa_id = int(call_session.agent_config.get("empresa_id") or 0)
+    if empresa_id <= 0:
+        return
+
+    usage_collector = getattr(call_session, "usage_collector", None)
+    if usage_collector is None:
+        logger.debug("[%s] Sin usage_collector; billing omitido", call_session.job_id)
+        return
+
+    usage_summary = usage_collector.get_summary()
+    metrics = extract_call_usage_metrics(
+        usage_summary,
+        agent_config=call_session.agent_config,
+        telephony_seconds=seconds_used,
+    )
+
+    if (
+        metrics.llm_total_tokens == 0
+        and metrics.tts_characters == 0
+        and metrics.telephony_seconds == 0
+    ):
+        return
+
+    recorded = await record_call_usage_billing(
+        empresa_id,
+        metrics,
+        encuesta_id=encuesta_id or None,
+    )
+    if recorded:
+        logger.info(
+            "[%s] Billing registrado empresa=%s encuesta=%s "
+            "llm_tokens=%s tts_chars=%s telephony_s=%s model=%s",
+            call_session.job_id,
+            empresa_id,
+            encuesta_id,
+            metrics.llm_total_tokens,
+            metrics.tts_characters,
+            metrics.telephony_seconds,
+            metrics.llm_model,
+        )
 
 
 async def finalize_call_session(call_session: "CallSession") -> None:
@@ -210,6 +262,16 @@ async def finalize_call_session(call_session: "CallSession") -> None:
                 "[%s] Error actualizando ficha de contacto: %s",
                 call_session.job_id,
                 contact_err,
+            )
+
+        # Unit economics — registrar consumo LLM/TTS/telefonía (no bloqueante)
+        try:
+            await _record_session_billing_usage(call_session, seconds_used, enc_id)
+        except Exception as billing_err:
+            logger.warning(
+                "[%s] Error registrando billing de llamada: %s",
+                call_session.job_id,
+                billing_err,
             )
 
     except Exception as fatal_post:

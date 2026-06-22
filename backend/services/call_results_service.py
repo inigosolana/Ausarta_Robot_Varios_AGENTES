@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 from typing import Any
 
 SCHEMA_VERSION = 1
@@ -227,3 +228,106 @@ def prepare_narrative_text_for_storage(text: str | None) -> str | None:
     from utils.pii_sanitizer import sanitize_free_text_pii
 
     return sanitize_free_text_pii(text)
+
+
+@dataclass(frozen=True)
+class CallUsageMetrics:
+    """Métricas de consumo de una llamada para unit economics."""
+
+    llm_prompt_tokens: int
+    llm_completion_tokens: int
+    llm_model: str
+    tts_characters: int
+    tts_provider: str
+    telephony_seconds: int
+    stt_audio_seconds: float = 0.0
+
+    @property
+    def llm_total_tokens(self) -> int:
+        return self.llm_prompt_tokens + self.llm_completion_tokens
+
+
+def extract_call_usage_metrics(
+    usage_summary: Any,
+    *,
+    agent_config: dict[str, Any],
+    telephony_seconds: int,
+) -> CallUsageMetrics:
+    """
+    Normaliza métricas de LiveKit UsageCollector/UsageSummary + config del agente.
+    """
+    llm_model = (agent_config.get("llm_model") or "llama-3.3-70b-versatile").strip()
+    tts_provider = (agent_config.get("tts_provider") or "cartesia").strip().lower()
+
+    prompt_tokens = int(getattr(usage_summary, "llm_prompt_tokens", 0) or 0)
+    completion_tokens = int(getattr(usage_summary, "llm_completion_tokens", 0) or 0)
+    tts_characters = int(getattr(usage_summary, "tts_characters_count", 0) or 0)
+    stt_audio_seconds = float(getattr(usage_summary, "stt_audio_duration", 0.0) or 0.0)
+
+    return CallUsageMetrics(
+        llm_prompt_tokens=max(0, prompt_tokens),
+        llm_completion_tokens=max(0, completion_tokens),
+        llm_model=llm_model,
+        tts_characters=max(0, tts_characters),
+        tts_provider=tts_provider or "cartesia",
+        telephony_seconds=max(0, int(telephony_seconds or 0)),
+        stt_audio_seconds=max(0.0, stt_audio_seconds),
+    )
+
+
+async def record_call_usage_billing(
+    tenant_id: int,
+    metrics: CallUsageMetrics,
+    *,
+    encuesta_id: int | None = None,
+) -> bool:
+    """
+    Registra consumo de una llamada en billing_service (Redis + Supabase).
+
+    Idempotente por encuesta_id para evitar doble conteo si finalize se reintenta.
+    Devuelve False si ya estaba registrado o tenant_id inválido.
+    """
+    if tenant_id <= 0:
+        return False
+
+    if encuesta_id and encuesta_id > 0:
+        if not await _claim_billing_slot(encuesta_id):
+            return False
+
+    from services.billing_service import get_billing_service
+
+    billing = get_billing_service()
+
+    if metrics.llm_total_tokens > 0:
+        await billing.log_llm_tokens(
+            tenant_id,
+            metrics.llm_prompt_tokens,
+            metrics.llm_completion_tokens,
+            metrics.llm_model,
+        )
+
+    if metrics.tts_characters > 0:
+        await billing.log_tts_characters(
+            tenant_id,
+            metrics.tts_characters,
+            metrics.tts_provider,
+        )
+
+    if metrics.telephony_seconds > 0:
+        await billing.log_telephony_seconds(tenant_id, metrics.telephony_seconds)
+
+    return True
+
+
+async def _claim_billing_slot(encuesta_id: int) -> bool:
+    """Marca encuesta como facturada en Redis (SET NX)."""
+    try:
+        from services.redis_service import get_redis
+
+        redis = await get_redis()
+        key = f"ausarta:billing:recorded:encuesta:{encuesta_id}"
+        claimed = await redis.set(key, "1", nx=True, ex=90 * 24 * 3600)
+        return bool(claimed)
+    except Exception:
+        # Si Redis falla, preferimos registrar consumo antes que perderlo.
+        return True

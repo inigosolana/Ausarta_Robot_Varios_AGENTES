@@ -49,6 +49,14 @@ def _make_call_session(
         agent_instance=SimpleNamespace(data_saved=data_saved, _detected_customer_name=""),
         lang_state={"active_lang": "es"},
         transcript_snapshot={"transcript": "", "raw": []},
+        usage_collector=SimpleNamespace(
+            get_summary=lambda: SimpleNamespace(
+                llm_prompt_tokens=0,
+                llm_completion_tokens=0,
+                tts_characters_count=0,
+                stt_audio_duration=0.0,
+            )
+        ),
         _build_transcript_from_event_buffer=lambda: ([], transcript),
     )
 
@@ -204,3 +212,34 @@ async def test_finalize_with_transcript_sanitizes_pii_before_persist(monkeypatch
     assert "[REDACTED_EMAIL]" in payload["transcription"]
     analyze_mock.assert_awaited_once()
     assert "cliente@empresa.com" in analyze_mock.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_finalize_records_billing_usage(monkeypatch):
+    summary = SimpleNamespace(
+        llm_prompt_tokens=80,
+        llm_completion_tokens=40,
+        tts_characters_count=250,
+        stt_audio_duration=12.0,
+    )
+    cs = _make_call_session(transcript="", data_saved=False)
+    cs.usage_collector = SimpleNamespace(get_summary=lambda: summary)
+
+    enqueue_mock = AsyncMock(return_value="job-bill")
+    billing_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr("agents.post_call_processor.enqueue_guardar_encuesta", enqueue_mock)
+    monkeypatch.setattr("agents.post_call_processor.record_call_usage_billing", billing_mock)
+    monkeypatch.setattr(
+        "agents.post_call_processor._extract_transcript_from_session",
+        lambda _session: ([], ""),
+    )
+
+    await finalize_call_session(cs)
+
+    billing_mock.assert_awaited_once()
+    tenant_id, metrics = billing_mock.await_args.args
+    assert tenant_id == 1
+    assert metrics.llm_total_tokens == 120
+    assert metrics.tts_characters == 250
+    assert metrics.telephony_seconds >= 29
+    assert billing_mock.await_args.kwargs["encuesta_id"] == 123

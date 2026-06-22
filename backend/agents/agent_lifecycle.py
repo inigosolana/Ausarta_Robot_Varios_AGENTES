@@ -332,6 +332,15 @@ class CallSessionLifecycleMixin:
     def setup_events(self) -> None:
         """Registra todos los handlers de session y ctx.room."""
 
+        @self.session.on("metrics_collected")
+        def _on_metrics_collected(ev):
+            try:
+                metrics = getattr(ev, "metrics", None)
+                if metrics is not None:
+                    self.usage_collector.collect(metrics)
+            except Exception as metrics_err:
+                logger.debug(f"[{self.job_id}] Error metrics_collected: {metrics_err}")
+
         @self.session.on("user_input_transcribed")
         def _on_user_input_transcribed(ev):
             async def _process_user_input_transcribed() -> None:

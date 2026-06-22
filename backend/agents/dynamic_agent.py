@@ -507,6 +507,10 @@ class CallSession(CallSessionLifecycleMixin):
         self._filler_task: asyncio.Task | None = None
         self._llm_responding = False
 
+        from livekit.agents.metrics import UsageCollector
+
+        self.usage_collector = UsageCollector()
+
     # ── Helpers de transcripción ───────────────────────────────────────────────
 
     def _append_transcript_event(self, role: str, content: str) -> None:
