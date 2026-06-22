@@ -7,9 +7,6 @@ import random
 import re
 from typing import TYPE_CHECKING
 
-from livekit import rtc
-from livekit.agents import AudioConfig, BackgroundAudioPlayer, BuiltinAudioClip
-
 from agents.agent_common import (
     _count_words,
     _detect_language,
@@ -23,6 +20,7 @@ from agents.agent_common import (
 from agents.stt_tts_builder import _build_tts_plugin
 from config import settings
 from prompts import _LANG_OVERRIDE_MSGS
+from agents.livekit_client import remove_room_participant
 from services.queue_service import (
     enqueue_colgar_sala,
     enqueue_guardar_encuesta,
@@ -30,8 +28,12 @@ from services.queue_service import (
 )
 
 if TYPE_CHECKING:
-    from livekit.agents import AgentSession
+    from livekit import rtc
+    from livekit.agents import AgentSession, AudioConfig, BackgroundAudioPlayer, BuiltinAudioClip
     from utils.workflow_state import WorkflowStateMachine
+else:
+    from livekit import rtc
+    from livekit.agents import AudioConfig, BackgroundAudioPlayer, BuiltinAudioClip
 
 logger = logging.getLogger("agent-dynamic")
 
@@ -209,12 +211,7 @@ class CallSessionLifecycleMixin:
                         f"prefijos permitidos: {allowed_prefixes})"
                     )
                     try:
-                        from livekit import api as _lk_api
-                        _lk = _lk_api.LiveKitAPI()
-                        await _lk.room.remove_participant(
-                            _lk_api.RoomParticipantIdentity(room=self.room_name, identity=identity)
-                        )
-                        await _lk.aclose()
+                        await remove_room_participant(self.room_name, identity)
                         first_seen.pop(identity, None)
                         logger.info(
                             f"✅ [{self.job_id}] Participante '{identity}' expulsado de {self.room_name}"
@@ -351,7 +348,7 @@ class CallSessionLifecycleMixin:
                     word_count = _count_words(content)
                     self.runtime_state["last_user_text"] = content
                     if not self.lang_state["detected"] and word_count >= 1:
-                        asyncio.create_task(self._try_switch_language(content))
+                        self._spawn_ephemeral(self._try_switch_language(content))
                     if (
                         self.runtime_state["agent_state"] in ("speaking", "thinking")
                         and word_count < self.max_short_interrupt_words
@@ -380,7 +377,7 @@ class CallSessionLifecycleMixin:
                                         f"[{self.job_id}] Ack de interrupción no enviado: {ack_err}"
                                     )
 
-                            asyncio.create_task(_say_interrupt_ack())
+                            self._spawn_ephemeral(_say_interrupt_ack())
                     self._append_transcript_event("user", content)
                     self.reprompt_state["last_user_at"] = now
                     self.reprompt_state["waiting_user"] = False
@@ -407,7 +404,7 @@ class CallSessionLifecycleMixin:
                 except Exception as ev_err:
                     logger.debug(f"[{self.job_id}] Error evento user_input_transcribed: {ev_err}")
 
-            asyncio.create_task(_process_user_input_transcribed())
+            self._spawn_ephemeral(_process_user_input_transcribed())
 
         @self.session.on("conversation_item_added")
         def _on_conversation_item_added(ev):
@@ -502,7 +499,7 @@ class CallSessionLifecycleMixin:
                         logger.error(
                             f"Error encolando colgar desde participant_disconnected: {e}"
                         )
-                asyncio.create_task(disconnect_tasks())
+                self._spawn_ephemeral(disconnect_tasks())
 
     # ── Ciclo de vida ──────────────────────────────────────────────────────────
 
@@ -563,6 +560,14 @@ class CallSessionLifecycleMixin:
                         })
                     except Exception as save_err:
                         logger.warning(f"⚠️ [{self.job_id}] Error guardando estado transferred: {save_err}")
+
+                if self.bg_player is not None:
+                    try:
+                        await self.bg_player.aclose()
+                    except Exception:
+                        pass
+                    finally:
+                        self.bg_player = None
 
                 try:
                     await self.session.aclose()

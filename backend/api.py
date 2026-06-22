@@ -15,6 +15,7 @@ from services.rate_limiter import limiter
 from services.auth import get_supabase_jwt_secret
 from services.redis_service import get_redis, close_redis
 from services.queue_service import get_arq_pool, close_arq_pool
+from services.livekit_service import close_livekit_api
 from services.queue_service import enqueue_telegram_alert
 from middleware.tenant_context import TenantContextMiddleware
 
@@ -111,6 +112,10 @@ async def lifespan(app: FastAPI):
         pass
     try:
         await close_arq_pool()
+    except Exception:
+        pass
+    try:
+        await close_livekit_api()
     except Exception:
         pass
 

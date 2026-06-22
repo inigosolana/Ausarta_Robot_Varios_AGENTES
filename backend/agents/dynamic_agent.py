@@ -417,6 +417,8 @@ class CallSession(CallSessionLifecycleMixin):
 
         # Referencias a las tareas en background
         self._tasks: list[asyncio.Task] = []
+        self._ephemeral_tasks: list[asyncio.Task] = []
+        self._cleanup_done = False
         # FIX B — serializa los turns de workflow para evitar advance() en paralelo.
         self._workflow_lock = asyncio.Lock()
         # FIX F — control de fillers de latencia.
@@ -634,11 +636,83 @@ class CallSession(CallSessionLifecycleMixin):
                 logger.error(f"[{self.job_id}] Error en _handle_workflow_turn: {wf_err}")
 
     # ── Detección de idioma ────────────────────────────────────────────────────
+
+    def _spawn_ephemeral(self, coro) -> asyncio.Task:
+        task = asyncio.create_task(coro)
+        self._ephemeral_tasks.append(task)
+
+        def _done(t: asyncio.Task) -> None:
+            try:
+                self._ephemeral_tasks.remove(t)
+            except ValueError:
+                pass
+
+        task.add_done_callback(_done)
+        return task
+
+    def _cancel_task_list(self, tasks: list[asyncio.Task | None]) -> None:
+        for task in tasks:
+            if task is not None and not task.done():
+                task.cancel()
+
+    async def _await_cancelled(self, tasks: list[asyncio.Task | None]) -> None:
+        pending = [t for t in tasks if t is not None and not t.done()]
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
     def stop(self) -> None:
         """Señaliza el fin y cancela todas las tareas en curso."""
         self.stop_guard.set()
-        for t in self._tasks:
-            t.cancel()
+        self._cancel_task_list(self._tasks)
+        self._cancel_task_list(self._ephemeral_tasks)
+        if self._filler_task is not None and not self._filler_task.done():
+            self._filler_task.cancel()
+
+    async def cleanup(self) -> None:
+        """Libera audio WebRTC, sesión del agente y buffers (idempotente)."""
+        if self._cleanup_done:
+            return
+        self._cleanup_done = True
+
+        self.stop()
+
+        all_tasks: list[asyncio.Task | None] = [
+            *self._tasks,
+            *self._ephemeral_tasks,
+            self._filler_task,
+        ]
+        await self._await_cancelled(all_tasks)
+        self._tasks.clear()
+        self._ephemeral_tasks.clear()
+        self._filler_task = None
+
+        if self.bg_player is not None:
+            try:
+                await self.bg_player.aclose()
+            except Exception as bg_err:
+                logger.debug("[%s] bg_player.aclose: %s", self.job_id, bg_err)
+            finally:
+                self.bg_player = None
+
+        try:
+            await self.session.aclose()
+        except Exception as sess_err:
+            logger.debug("[%s] session.aclose: %s", self.job_id, sess_err)
+
+        try:
+            await self.ctx.room.disconnect()
+        except Exception as disc_err:
+            logger.debug("[%s] room.disconnect: %s", self.job_id, disc_err)
+
+        try:
+            from agents.livekit_client import close_livekit_admin_api
+
+            await close_livekit_admin_api()
+        except Exception as lk_err:
+            logger.debug("[%s] close_livekit_admin_api: %s", self.job_id, lk_err)
+
+        self.transcript_event_buffer.clear()
+        self.transcript_snapshot = {"transcript": "", "raw": []}
 
     async def finalize(self) -> None:
         """Delega el post-procesamiento al módulo post_call_processor."""
@@ -955,7 +1029,10 @@ async def entrypoint(ctx: JobContext):
 
     finally:
         if cs is not None:
-            cs.stop()
+            try:
+                await cs.cleanup()
+            except Exception as cleanup_err:
+                logger.warning(f"[{job_id}] Error en cleanup de sesión: {cleanup_err}")
 
         if not is_duplicate:
             logger.info(

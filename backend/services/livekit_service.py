@@ -31,17 +31,23 @@ class LazyLiveKitAPI:
     def _get_instance(self):
         if self._instance is None:
             if self._url and self._api_key and self._api_secret:
-                import asyncio
-                try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
                 self._instance = api.LiveKitAPI(self._url, self._api_key, self._api_secret)
             else:
                 print("⚠️ WARNING: LiveKit credentials missing.")
                 self._instance = None
         return self._instance
+
+    async def aclose(self) -> None:
+        inst = self._instance
+        if inst is None:
+            return
+        closer = getattr(inst, "aclose", None)
+        if callable(closer):
+            try:
+                await closer()
+            except Exception as exc:
+                logger.debug("LiveKitAPI aclose: %s", exc)
+        self._instance = None
 
     def __getattr__(self, item):
         inst = self._get_instance()
@@ -49,7 +55,13 @@ class LazyLiveKitAPI:
             raise AttributeError(f"LiveKitAPI not initialized (missing config), cannot get '{item}'")
         return getattr(inst, item)
 
+
 lkapi = LazyLiveKitAPI(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+
+
+async def close_livekit_api() -> None:
+    """Cierra el cliente HTTP singleton del backend API."""
+    await lkapi.aclose()
 
 
 async def create_isolated_room(room_name: str, metadata: dict | None = None):
