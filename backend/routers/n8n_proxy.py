@@ -55,7 +55,7 @@ async def proxy_n8n_invite(
                 return JSONResponse(status_code=resp.status, content=data)
     except Exception as e:
         logger.error(f"❌ Error en proxy n8n invite: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return JSONResponse(status_code=500, content={"error": "Error en proxy de invitación"})
 
 
 @router.post("/recover")

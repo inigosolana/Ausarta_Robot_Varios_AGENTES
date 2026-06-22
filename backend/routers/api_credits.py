@@ -414,6 +414,13 @@ async def get_api_credits(
         )
     )
 
+    try:
+        from services.api_credits_alerts import maybe_alert_low_balances
+
+        await maybe_alert_low_balances(providers)
+    except Exception as exc:
+        logger.debug("api-credits alerts omitidas: %s", exc)
+
     return {
         "last_checked": datetime.now(timezone.utc).isoformat(),
         "providers": providers,

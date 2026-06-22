@@ -305,7 +305,7 @@ async def get_top_performers(
         try:
             ag_res = _apply_tenant_filter(supabase.table("agent_config").select("id, name"), current_user).execute()
             agent_names = {a["id"]: a.get("name", "") for a in (ag_res.data or [])}
-        except:
+        except Exception:
             pass
 
         for aid, s in agent_stats.items():
@@ -651,7 +651,7 @@ async def get_monitoring_token(
         return {"token": token.to_jwt()}
     except Exception as e:
         logger.error(f"Error generating monitoring token: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error generando token de supervisión")
 
 @router.get("/dashboard/api-status")
 async def get_api_status(current_user: CurrentUser = Depends(get_current_user)):

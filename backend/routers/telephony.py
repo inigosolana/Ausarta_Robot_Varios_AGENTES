@@ -2201,7 +2201,7 @@ async def test_outbound_call(payload: TestOutboundCallRequest):
         raise
     except Exception as e:
         logger.error(f"❌ [test-outbound] Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Error en llamada de prueba") from e
 
 
 # Lock para evitar doble despacho accidental

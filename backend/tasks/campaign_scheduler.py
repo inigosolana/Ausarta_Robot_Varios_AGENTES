@@ -54,11 +54,12 @@ async def campaign_scheduler_task(ctx: dict[str, Any]) -> None:
         return
 
     # Rate limit por empresa: máximo de llamadas concurrentes por tenant
-    max_calls_per_empresa = int(os.getenv("MAX_CALLS_PER_EMPRESA", "5"))
+    from services.empresa_limits_service import get_empresa_max_concurrent_calls
 
     for camp in campaigns:
         campaign_id = camp["id"]
         empresa_id = camp.get("empresa_id") or 0
+        max_calls_per_empresa = await get_empresa_max_concurrent_calls(int(empresa_id or 0))
         campaign_type = (camp.get("type") or "").strip().lower()
         use_orchestrator = bool(camp.get("use_orchestrator"))
 

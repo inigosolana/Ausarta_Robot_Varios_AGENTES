@@ -30,7 +30,7 @@
         "method": "POST",
         "options": {},
         "sendBody": true,
-        "url": "http://15.216.15.30/api/calls/outbound"
+        "url": "{{ $env.FRONTEND_URL }}/api/calls/outbound"
       },
       "position": [
         300,
@@ -184,7 +184,7 @@
           "method": "POST",
           "options": {},
           "sendBody": true,
-          "url": "http://15.216.15.30/api/calls/outbound"
+          "url": "{{ $env.FRONTEND_URL }}/api/calls/outbound"
         },
         "position": [
           300,

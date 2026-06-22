@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from models.schemas import CampaignModel, CampaignLeadModel
 from datetime import datetime, timezone, timedelta
 import asyncio
+import json
 import random
 import os
 import logging
@@ -38,29 +39,7 @@ DEFAULT_AUSARTA_VOICE_ID = settings.default_cartesia_voice
 
 router = APIRouter(prefix="/api", tags=["campaigns"])
 
-
-def _load_empresa_kb_settings(empresa_id: int | None) -> dict:
-    """Contexto de empresa y flag de búsqueda en internet."""
-    if not empresa_id or not supabase:
-        return {"company_context": "", "kb_allow_internet_search": False}
-    try:
-        res = (
-            supabase.table("empresas")
-            .select("company_context, kb_allow_internet_search")
-            .eq("id", empresa_id)
-            .limit(1)
-            .execute()
-        )
-        if not res.data:
-            return {"company_context": "", "kb_allow_internet_search": False}
-        row = res.data[0]
-        return {
-            "company_context": row.get("company_context") or "",
-            "kb_allow_internet_search": bool(row.get("kb_allow_internet_search")),
-        }
-    except Exception as exc:
-        logger.warning("No se pudo cargar KB settings empresa %s: %s", empresa_id, exc)
-        return {"company_context": "", "kb_allow_internet_search": False}
+from utils.kb_settings import load_empresa_kb_settings
 
 
 def _resolve_empresa(user: CurrentUser, empresa_id_param: int | None = None) -> int | None:
@@ -595,7 +574,7 @@ async def get_agent_config_by_survey(
 
         agent_data = res_agent.data[0]
         agent_empresa_id = agent_data.get("empresa_id")
-        empresa_kb = _load_empresa_kb_settings(empresa_id or agent_empresa_id)
+        empresa_kb = load_empresa_kb_settings(empresa_id or agent_empresa_id, supabase_client=supabase)
         empresa_context = empresa_kb["company_context"]
 
         res_ai = supabase.table("ai_config").select("*").eq("agent_id", agent_id).execute()
@@ -793,7 +772,7 @@ async def get_agent_config_by_agent(
 
         agent_data = res_agent.data[0]
         empresa_id_resolved = agent_data.get("empresa_id")
-        empresa_kb = _load_empresa_kb_settings(empresa_id_resolved)
+        empresa_kb = load_empresa_kb_settings(empresa_id_resolved, supabase_client=supabase)
         empresa_context = empresa_kb["company_context"]
         res_ai = supabase.table("ai_config").select("*").eq("agent_id", agent_id).execute()
         ai_data = res_ai.data[0] if res_ai.data else {}
@@ -1206,6 +1185,49 @@ async def campaign_scheduler_loop():
 
 
 
+@router.post("/campaigns/{campaign_id}/simulate")
+async def simulate_campaign(
+    campaign_id: int,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Dry-run: cuántos leads se procesarían sin lanzar llamadas."""
+    from services.campaign_simulate_service import simulate_campaign_dispatch
+
+    camp = _load_campaign_or_404(campaign_id, current_user)
+    return await simulate_campaign_dispatch(camp)
+
+
+@router.get("/campaigns/{campaign_id}/export")
+async def export_campaign_results(
+    campaign_id: int,
+    format: str = "csv",
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Exporta resultados de la campaña (CSV)."""
+    from fastapi.responses import PlainTextResponse
+    from services.campaign_export_service import build_campaign_results_csv
+
+    _load_campaign_or_404(campaign_id, current_user)
+    if format.lower() not in ("csv",):
+        raise HTTPException(status_code=400, detail="format debe ser csv")
+
+    res = await asyncio.to_thread(
+        lambda: supabase.table("encuestas")
+        .select(
+            "id, telefono, fecha, status, seconds_used, comentarios, datos_extra, agent_results"
+        )
+        .eq("campaign_id", campaign_id)
+        .order("fecha", desc=True)
+        .execute()
+    )
+    csv_body = build_campaign_results_csv(res.data or [])
+    return PlainTextResponse(
+        content=csv_body,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="campaign_{campaign_id}_results.csv"'},
+    )
+
+
 # ──────────────────────────────────────────────
 # Endpoint de arranque manual de campaña (UI)
 # ──────────────────────────────────────────────
@@ -1238,7 +1260,7 @@ async def start_campaign(campaign_id: int, current_user: CurrentUser = Depends(r
         raise
     except Exception as e:
         logger.error(f"Error al iniciar campaña: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return JSONResponse(status_code=500, content={"error": "Error al iniciar campaña"})
 
 
 # ──────────────────────────────────────────────
@@ -1258,6 +1280,13 @@ async def receive_call_result(
 ):
     """Recibe resultados de n8n para actualizar el lead (compatibilidad legacy)."""
     raw = getattr(request.state, "verified_webhook_body", b"") or b"{}"
+    from services.webhook_event_service import log_webhook_event, mark_webhook_event_processed
+
+    event_id = await log_webhook_event(
+        source="campaign",
+        event_type="call-result",
+        payload=json.loads(raw) if raw else {},
+    )
     result = CallResultWebhook.model_validate_json(raw)
     logger.info(
         f"📥 [Webhook-legacy] Resultado para lead {result.lead_id}: {result.status} ({auth_method})"
@@ -1270,7 +1299,11 @@ async def receive_call_result(
         await asyncio.to_thread(
             supabase.table("campaign_leads").update(lead_update).eq("id", result.lead_id).execute
         )
+        if event_id:
+            await mark_webhook_event_processed(event_id)
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"❌ [Webhook-legacy] Error: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        if event_id:
+            await mark_webhook_event_processed(event_id, failed=True)
+        return JSONResponse(status_code=500, content={"error": "Error procesando webhook"})

@@ -29,7 +29,7 @@ Después de que la llamada termine, recupera los datos de la transcripción y el
 Este es el paso crucial para cerrar el ciclo y que el backend sepa que la llamada ha terminado (y que el frontend se actualice).
 
 - **Method**: POST
-- **URL**: `http://15.216.15.30/api/campaigns/webhook/call-result`
+- **URL**: `${FRONTEND_URL}/api/campaigns/webhook/call-result`
   *(mismo origen que el frontend; nginx hace proxy a `/api/`)*
 - **Body Parameters (JSON)**:
   - `lead_id`: `{{ $json.leadId }}` (el recibido en el paso 1)

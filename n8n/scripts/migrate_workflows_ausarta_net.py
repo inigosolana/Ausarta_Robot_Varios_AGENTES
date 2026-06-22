@@ -14,7 +14,7 @@ from pathlib import Path
 
 API_URL = os.getenv("N8N_API_URL", "https://n8n.ausarta.net").rstrip("/")
 API_KEY = os.getenv("N8N_API_KEY", "")
-DEFAULT_FRONTEND = "http://15.216.15.30"
+DEFAULT_FRONTEND = os.environ.get("FRONTEND_URL", "http://localhost:8080")
 BACKEND = os.getenv("AUSARTA_BACKEND_URL", os.getenv("FRONTEND_URL", DEFAULT_FRONTEND)).rstrip("/")
 FRONTEND = os.getenv("FRONTEND_URL", DEFAULT_FRONTEND).rstrip("/")
 

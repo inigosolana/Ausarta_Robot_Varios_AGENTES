@@ -47,7 +47,7 @@ ausarta-dozzle
 Desde tu ordenador, abre una terminal y crea un tunel SSH:
 
 ```bash
-ssh -L 9999:127.0.0.1:9999 usuario@15.216.15.30
+ssh -L 9999:127.0.0.1:9999 usuario@${SERVER_HOST}
 ```
 
 Despues abre en el navegador:
@@ -77,7 +77,7 @@ ports:
 y entra en:
 
 ```text
-http://15.216.15.30:9999
+${FRONTEND_URL}:9999
 ```
 
 Despues cierra el puerto o vuelve a dejarlo en `127.0.0.1`.

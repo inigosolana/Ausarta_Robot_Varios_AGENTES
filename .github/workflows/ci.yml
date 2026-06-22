@@ -59,6 +59,14 @@ jobs:
           pytest tests/ -v --tb=short -x \
             --asyncio-mode=auto \
             --ignore=tests/test_api.py
+
+      - name: Type check (mypy)
+        working-directory: backend
+        run: |
+          pip install mypy
+          mypy agents services routers utils tasks models middleware \
+            --ignore-missing-imports --no-strict-optional --python-version 3.11 \
+            --exclude 'scripts/' || true
         # test_api.py requiere Supabase real → excluido en CI básico
         # Para incluirlo, configura SUPABASE_URL/KEY como secrets en el repo
 

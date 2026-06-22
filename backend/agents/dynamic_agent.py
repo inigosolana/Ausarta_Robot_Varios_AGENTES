@@ -38,20 +38,9 @@ from livekit.plugins import (
 )
 
 # --- CONFIGURACIÓN DE LOGS ---
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(line_buffering=True) # type: ignore
-if hasattr(sys.stderr, 'reconfigure'):
-    sys.stderr.reconfigure(line_buffering=True) # type: ignore
+from agents.agent_logging import configure_agent_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("agent.log", mode='a', encoding='utf-8'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger("agent-dynamic")
+logger = configure_agent_logging("agent-dynamic")
 
 from utils.tracing import init_tracing, instrument_aiohttp_client
 

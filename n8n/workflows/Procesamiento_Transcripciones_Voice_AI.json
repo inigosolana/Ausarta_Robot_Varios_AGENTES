@@ -213,7 +213,7 @@
         "method": "POST",
         "sendBody": true,
         "type": "n8n-nodes-base.httpRequest",
-        "url": "http://15.216.15.30/api/campaigns/webhook/call-result",
+        "url": "{{ $env.FRONTEND_URL }}/api/campaigns/webhook/call-result",
         "specifyBody": "json",
         "sendHeaders": false
       },
