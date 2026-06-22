@@ -262,6 +262,32 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
                 await release_lock(f"lead:dispatch:{lead_id}", lead_lock_token)
                 return
 
+            if _empresa_id:
+                from services.billing_limits_service import (
+                    TenantSpendingLimitExceeded,
+                    enforce_tenant_spending_limit,
+                )
+
+                try:
+                    await enforce_tenant_spending_limit(int(_empresa_id), raise_http=False)
+                except TenantSpendingLimitExceeded as limit_exc:
+                    logger.warning(
+                        "[CampEmpresa] Lead %s bloqueado por gasto empresa %s",
+                        lead_id,
+                        _empresa_id,
+                    )
+                    await sb_query(
+                        lambda: supabase.table("campaign_leads")
+                        .update({
+                            "status": "failed",
+                            "error_msg": limit_exc.message[:500],
+                        })
+                        .eq("id", lead_id)
+                        .execute()
+                    )
+                    await release_lock(f"lead:dispatch:{lead_id}", lead_lock_token)
+                    return
+
             async with semaphore:
                 try:
                     resolved = await resolve_campaign_dispatch_agent(campaign, int(lead_id))

@@ -879,6 +879,32 @@ async def _dispatch_single_lead_drip(
     try:
         logger.info(f"☎️  [Drip] Iniciando lead {lead_id} ({phone}) → empresa={empresa_id} camp={campaign_id}")
 
+        if empresa_id:
+            from services.billing_limits_service import (
+                TenantSpendingLimitExceeded,
+                enforce_tenant_spending_limit,
+            )
+
+            try:
+                await enforce_tenant_spending_limit(int(empresa_id), raise_http=False)
+            except TenantSpendingLimitExceeded as limit_exc:
+                logger.warning(
+                    "[Drip] Lead %s bloqueado por límite de gasto empresa %s: %s",
+                    lead_id,
+                    empresa_id,
+                    limit_exc.message,
+                )
+                await asyncio.to_thread(
+                    supabase.table("campaign_leads")
+                    .update({
+                        "status": "failed",
+                        "error_msg": limit_exc.message[:500],
+                    })
+                    .eq("id", lead_id)
+                    .execute
+                )
+                return
+
         resolved = await resolve_campaign_dispatch_agent(campaign, int(lead_id))
         resolved_agent_id = resolved["agent_id"]
         resolved_agent_type = resolved["agent_type"]

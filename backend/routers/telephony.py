@@ -62,6 +62,7 @@ from services.sip_call_service import (
 )
 from services.auth import get_current_user, CurrentUser, require_admin, require_outbound_auth
 from services.tenant_context import get_current_empresa_id
+from middleware.tenant_context import assert_tenant_within_spending_limit
 from services.crypto_service import encrypt_data, decrypt_data
 from services.rate_limiter import limiter
 from services.queue_service import get_arq_pool
@@ -2130,6 +2131,10 @@ async def test_outbound_call(payload: TestOutboundCallRequest):
         raise HTTPException(status_code=400, detail="phone_number es obligatorio")
 
     empresa_id, survey_id, campaign_id = await _resolve_test_outbound_context(payload)
+
+    if empresa_id:
+        await _enforce_call_placement_limits(int(empresa_id))
+
     room_name = f"llamada_ausarta_{empresa_id}_{survey_id}"
 
     test_contact_id = 0
@@ -2285,6 +2290,12 @@ async def _check_and_increment_call_limit(empresa_id: int) -> None:
         )
 
 
+async def _enforce_call_placement_limits(empresa_id: int) -> None:
+    """Cuota de llamadas (403) + tope de gasto mensual (402) antes de emitir llamadas."""
+    await _check_and_increment_call_limit(empresa_id)
+    await assert_tenant_within_spending_limit(empresa_id)
+
+
 @router.post("/api/calls/outbound")
 async def make_outbound_call(request: dict, _auth: str = Depends(require_outbound_auth)):
     """Inicia una llamada SIP individual. Usado para pruebas desde el dashboard."""
@@ -2323,7 +2334,7 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
 
             # Fase 1 SaaS: verificar cuota mensual antes de crear la encuesta/llamada.
             if emp_id:
-                await _check_and_increment_call_limit(int(emp_id))
+                await _enforce_call_placement_limits(int(emp_id))
 
             resolved = await resolve_outbound_agent(
                 empresa_id=int(emp_id) if emp_id else None,
