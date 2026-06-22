@@ -106,7 +106,18 @@ async def create_outbound_call(
     )
     from services.sip_call_service import create_sip_participant_with_retry
 
-    return await create_sip_participant_with_retry(req)
+    emp_int: int | None = None
+    try:
+        emp_int = int(empresa_id)
+    except (TypeError, ValueError):
+        emp_int = None
+
+    return await create_sip_participant_with_retry(
+        req,
+        empresa_id=emp_int,
+        phone=number_to_dial,
+        source="livekit_service",
+    )
 
 
 async def wait_for_agent_ready(room_name: str, timeout: float = 15.0) -> bool:

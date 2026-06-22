@@ -25,7 +25,10 @@ async def test_create_sip_participant_with_retry_succeeds_second_attempt(monkeyp
 
     monkeypatch.setattr(lk_mod, "lkapi", FakeLk())
 
-    result = await sip_call_service.create_sip_participant_with_retry(object())
+    result = await sip_call_service.create_sip_participant_with_retry(
+        object(),
+        skip_guard=True,
+    )
     assert result["ok"] is True
     assert calls["n"] == 2
 
@@ -43,7 +46,7 @@ async def test_create_sip_participant_with_retry_raises_after_max(monkeypatch):
     monkeypatch.setattr(sip_call_service, "sip_retry_base_delay", lambda: 0.01)
 
     with pytest.raises(RuntimeError, match="trunk down"):
-        await sip_call_service.create_sip_participant_with_retry(object())
+        await sip_call_service.create_sip_participant_with_retry(object(), skip_guard=True)
 
 
 def test_sip_retry_max_attempts_default():

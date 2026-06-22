@@ -1,0 +1,16 @@
+# Trusted SIP peers — carriers allowed to send signaling to Kamailio :5060
+# One entry per line: IPv4, IPv4/mask, or IPv6 (mask optional, default /32)
+# Lines starting with # are ignored.
+#
+# Replace with production carrier IPs (Yeastar, CITELIA, etc.)
+# Also set SIP_TRUSTED_CIDRS in docker-compose (comma-separated).
+
+# Example Yeastar / carrier (RFC5737 documentation ranges — CHANGE IN PROD)
+# 203.0.113.10/32
+# 198.51.100.0/24
+
+# Ausarta public IP (if carriers route via this host)
+# 203.0.113.50/32
+
+# LiveKit SIP on internal Docker network (health / internal relay)
+172.16.0.0/12

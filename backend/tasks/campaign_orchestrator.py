@@ -289,7 +289,10 @@ async def process_campaign_empresa(ctx: dict[str, Any], campaign: dict) -> None:
                             room_name=room_name,
                             participant_identity=f"user_{phone}_{encuesta_id}",
                             participant_name="Cliente",
-                        )
+                        ),
+                        empresa_id=int(_empresa_id) if _empresa_id else None,
+                        phone=str(phone),
+                        source="campaign_orchestrator",
                     )
                     logger.info("✅ [CampEmpresa] Llamada SIP iniciada lead=%s → %s", lead_id, phone)
                 except Exception as sip_err:

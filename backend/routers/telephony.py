@@ -50,6 +50,7 @@ from services.trunk_service import resolve_outbound_trunk_id
 from services.agent_router import build_outbound_room_metadata, resolve_outbound_agent
 from services.call_results_service import build_encuesta_results_update
 from services.sip_call_service import (
+    SipOutboundRejected,
     create_sip_participant_with_retry,
     mark_call_failed,
     sip_retry_max_attempts,
@@ -2431,8 +2432,25 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
                     room_name=room_name,
                     participant_identity=f"user_{phone}_{encuesta_id}",
                     participant_name="Cliente",
-                )
+                ),
+                empresa_id=int(emp_id) if emp_id else None,
+                phone=str(phone),
+                source="telephony_outbound",
             )
+        except SipOutboundRejected as guard_err:
+            await _release_room_lock(room_name)
+            if supabase and encuesta_id:
+                await mark_call_failed(
+                    int(encuesta_id),
+                    guard_err.message,
+                    error_code=guard_err.code,
+                    source="outbound",
+                    empresa_id=int(emp_id) if emp_id else None,
+                    phone=str(phone),
+                    room_name=room_name,
+                )
+            status = 429 if guard_err.code.endswith("rate_limit") else 400
+            return JSONResponse(status_code=status, content={"error": guard_err.message})
         except Exception as sip_err:
             await _release_room_lock(room_name)
             if supabase and encuesta_id:

@@ -879,7 +879,10 @@ async def _dispatch_single_lead_drip(lead: dict, campaign: dict) -> None:
                     room_name=room_name,
                     participant_identity=f"user_{phone}_{encuesta_id}",
                     participant_name="Cliente",
-                )
+                ),
+                empresa_id=int(empresa_id) if empresa_id else None,
+                phone=str(phone),
+                source="campaign_drip",
             )
             logger.info(f"☎️ [Drip] SIP lanzado: {phone} → {room_name}")
         except Exception as sip_err:

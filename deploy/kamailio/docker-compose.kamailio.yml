@@ -21,6 +21,8 @@ services:
     volumes:
       - ./deploy/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
       - ./deploy/kamailio/dispatcher.list:/etc/kamailio/dispatcher.list:ro
+      - ./deploy/kamailio/trusted_peers.list:/etc/kamailio/trusted_peers.list:ro
+      - ./deploy/kamailio/entrypoint.sh:/etc/kamailio/entrypoint.sh:ro
       - ./deploy/kamailio/certs:/etc/kamailio/tls:ro
 
     env_file:
@@ -29,14 +31,11 @@ services:
     environment:
       SIP_DOMAIN: ${SIP_DOMAIN}
       EXTERNAL_SIP_IP: ${EXTERNAL_SIP_IP}
+      SIP_TRUSTED_CIDRS: ${SIP_TRUSTED_CIDRS:-}
 
-    command:
-      - kamailio
-      - -f
-      - /etc/kamailio/kamailio.cfg
-      - -E
-      - -DD
-      - -e
+    entrypoint: ["/bin/sh", "/etc/kamailio/entrypoint.sh"]
+
+    command: []
 
     healthcheck:
       test: ["CMD-SHELL", "kamcmd core.ping 2>/dev/null | grep -q pong || exit 1"]
