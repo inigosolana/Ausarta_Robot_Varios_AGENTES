@@ -49,6 +49,20 @@ class Settings(BaseSettings):
         validation_alias="SEMANTIC_ROUTER_TIER0_ONLY",
     )
 
+    # RAG híbrido (vector + keyword) y re-ranking
+    rag_hybrid_enabled: bool = Field(default=True, validation_alias="RAG_HYBRID_ENABLED")
+    rag_candidate_multiplier: int = Field(default=3, validation_alias="RAG_CANDIDATE_MULTIPLIER")
+    rag_vector_fetch_threshold: float = Field(
+        default=0.55,
+        validation_alias="RAG_VECTOR_FETCH_THRESHOLD",
+    )
+    rag_reranker: str = Field(default="heuristic", validation_alias="RAG_RERANKER")
+    rag_reranker_model: str = Field(
+        default="llama-3.1-8b-instant",
+        validation_alias="RAG_RERANKER_MODEL",
+    )
+    rag_reranker_timeout_ms: int = Field(default=400, validation_alias="RAG_RERANKER_TIMEOUT_MS")
+
     # Drip campaign
     drip_cooldown_min: int = Field(default=120, validation_alias="DRIP_COOLDOWN_MIN_SECONDS")
     drip_cooldown_max: int = Field(default=180, validation_alias="DRIP_COOLDOWN_MAX_SECONDS")

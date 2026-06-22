@@ -91,6 +91,139 @@ async def get_embedding(text: str) -> list[float] | None:
     return None
 
 
+async def _search_knowledge_vector(
+    empresa_id: int,
+    query: str,
+    *,
+    limit: int,
+    threshold: float,
+    agent_id: int | None,
+) -> list[dict[str, Any]]:
+    from services.supabase_service import supabase, sb_query
+
+    if not supabase:
+        return []
+
+    embedding = await asyncio.wait_for(get_embedding(query), timeout=10)
+    if not embedding:
+        return []
+
+    rpc_args: dict[str, Any] = {
+        "p_empresa_id": empresa_id,
+        "p_embedding": embedding,
+        "p_limit": limit,
+        "p_threshold": threshold,
+    }
+    if agent_id is not None:
+        rpc_args["p_agent_id"] = agent_id
+
+    result = await sb_query(
+        lambda args=rpc_args: supabase.rpc("search_knowledge_base", args).execute()
+    )
+    return result.data or []
+
+
+async def _search_knowledge_keyword(
+    empresa_id: int,
+    query: str,
+    *,
+    limit: int,
+    agent_id: int | None,
+) -> list[dict[str, Any]]:
+    from services.supabase_service import supabase, sb_query
+
+    if not supabase:
+        return []
+
+    rpc_args: dict[str, Any] = {
+        "p_empresa_id": empresa_id,
+        "p_query": query,
+        "p_limit": limit,
+    }
+    if agent_id is not None:
+        rpc_args["p_agent_id"] = agent_id
+
+    try:
+        result = await sb_query(
+            lambda args=rpc_args: supabase.rpc("search_knowledge_base_keyword", args).execute()
+        )
+        return result.data or []
+    except Exception as exc:
+        logger.debug(
+            "[knowledge] keyword search unavailable for empresa %s: %s",
+            empresa_id,
+            exc,
+        )
+        return []
+
+
+async def _search_knowledge_hybrid(
+    empresa_id: int,
+    query: str,
+    *,
+    limit: int,
+    threshold: float,
+    agent_id: int | None,
+) -> list[dict[str, Any]]:
+    from config import get_settings
+    from services.rag_hybrid import KnowledgeChunk, reciprocal_rank_fusion
+    from services.reranker_service import get_reranker
+
+    settings = get_settings()
+    candidate_limit = min(max(limit * settings.rag_candidate_multiplier, limit), 20)
+    vector_threshold = min(threshold, settings.rag_vector_fetch_threshold)
+
+    vector_rows, keyword_rows = await asyncio.gather(
+        _search_knowledge_vector(
+            empresa_id,
+            query,
+            limit=candidate_limit,
+            threshold=vector_threshold,
+            agent_id=agent_id,
+        ),
+        _search_knowledge_keyword(
+            empresa_id,
+            query,
+            limit=candidate_limit,
+            agent_id=agent_id,
+        ),
+    )
+
+    if not vector_rows and not keyword_rows:
+        return []
+
+    if not keyword_rows:
+        fused_chunks = [
+            KnowledgeChunk(
+                id=int(row["id"]),
+                titulo=str(row.get("titulo") or ""),
+                contenido=str(row.get("contenido") or ""),
+                similarity=float(row.get("similarity") or 0.0),
+                sources=("vector",),
+            )
+            for row in vector_rows
+        ]
+    else:
+        fused_chunks = reciprocal_rank_fusion(
+            [vector_rows, keyword_rows],
+            list_labels=["vector", "keyword"],
+        )
+
+    reranker = get_reranker()
+    reranked = await reranker.rerank(query, fused_chunks, top_k=limit)
+
+    results: list[dict[str, Any]] = []
+    for chunk in reranked:
+        if chunk.similarity < threshold and not chunk.keyword_score:
+            continue
+        results.append(chunk.as_dict())
+
+    if not results:
+        return [chunk.as_dict() for chunk in reranked[:limit]]
+
+    return results[:limit]
+
+
 async def search_knowledge(
     empresa_id: int,
     query: str,
@@ -100,32 +233,33 @@ async def search_knowledge(
 ) -> list[dict]:
     """
     Busca chunks relevantes en la base de conocimiento de una empresa.
+    Con RAG híbrido activo: vector + keyword (FTS) → RRF → re-ranking.
     Retorna lista de {id, titulo, contenido, similarity}.
     Si falla por cualquier razón, devuelve [] sin propagar la excepción.
     """
-    from services.supabase_service import supabase, sb_query
+    from config import get_settings
 
-    if not supabase:
+    if not query or not query.strip():
         return []
 
     try:
-        embedding = await asyncio.wait_for(get_embedding(query), timeout=10)
-        if not embedding:
-            return []
+        settings = get_settings()
+        if settings.rag_hybrid_enabled:
+            return await _search_knowledge_hybrid(
+                empresa_id,
+                query,
+                limit=limit,
+                threshold=threshold,
+                agent_id=agent_id,
+            )
 
-        rpc_args: dict = {
-            "p_empresa_id": empresa_id,
-            "p_embedding": embedding,
-            "p_limit": limit,
-            "p_threshold": threshold,
-        }
-        if agent_id is not None:
-            rpc_args["p_agent_id"] = agent_id
-
-        result = await sb_query(
-            lambda args=rpc_args: supabase.rpc("search_knowledge_base", args).execute()
+        return await _search_knowledge_vector(
+            empresa_id,
+            query,
+            limit=limit,
+            threshold=threshold,
+            agent_id=agent_id,
         )
-        return result.data or []
 
     except Exception as e:
         logger.warning("[knowledge] search_knowledge falló para empresa %s: %s", empresa_id, e)

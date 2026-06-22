@@ -47,7 +47,7 @@ async def test_cache_hit_skips_openai(monkeypatch):
     mock_redis.get = AsyncMock(return_value=json.dumps(MOCK_EMBEDDING))
 
     with (
-        patch("services.embedding_service.get_redis", AsyncMock(return_value=mock_redis)),
+        patch("services.redis_service.get_redis", AsyncMock(return_value=mock_redis)),
         patch("aiohttp.ClientSession") as mock_session_cls,
     ):
         from services.embedding_service import get_embedding
@@ -80,7 +80,7 @@ async def test_cache_miss_calls_openai_and_stores(monkeypatch):
     mock_session.__aexit__ = AsyncMock(return_value=False)
 
     with (
-        patch("services.embedding_service.get_redis", AsyncMock(return_value=mock_redis)),
+        patch("services.redis_service.get_redis", AsyncMock(return_value=mock_redis)),
         patch("aiohttp.ClientSession", return_value=mock_session),
     ):
         from services.embedding_service import get_embedding
@@ -110,7 +110,7 @@ async def test_openai_error_returns_none(monkeypatch):
     mock_session.__aexit__ = AsyncMock(return_value=False)
 
     with (
-        patch("services.embedding_service.get_redis", AsyncMock(return_value=mock_redis)),
+        patch("services.redis_service.get_redis", AsyncMock(return_value=mock_redis)),
         patch("aiohttp.ClientSession", return_value=mock_session),
     ):
         from services.embedding_service import get_embedding
