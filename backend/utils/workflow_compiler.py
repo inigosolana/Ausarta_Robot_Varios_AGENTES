@@ -12,6 +12,8 @@ no en cada turno, porque es costosa y el grafo no cambia durante la llamada.
 from __future__ import annotations
 
 import logging
+
+from utils.prompt_sanitizer import sanitize_untrusted_text
 import uuid
 from typing import Any
 
@@ -102,12 +104,20 @@ def _format_prompt_block(
     lines: list[str] = []
 
     if ntype == "message":
-        content = (node.get("content") or "").strip()
+        content = sanitize_untrusted_text(
+            (node.get("content") or "").strip(),
+            max_length=2000,
+            field_name="workflow_message",
+        )
         lines.append(f"PASO {step_num} [{label}]: Di EXACTAMENTE: \"{content}\"")
         _append_transitions(lines, node, adj, step_nums, default_label="  → Continúa al siguiente paso")
 
     elif ntype == "question":
-        content = (node.get("content") or node.get("prompt") or "").strip()
+        content = sanitize_untrusted_text(
+            (node.get("content") or node.get("prompt") or "").strip(),
+            max_length=2000,
+            field_name="workflow_question",
+        )
         variable = node.get("variable") or ""
         options = node.get("options") or []
         lines.append(f"PASO {step_num} [{label}]: Pregunta: \"{content}\"")
@@ -123,13 +133,21 @@ def _format_prompt_block(
 
     elif ntype == "llm_free":
         if mode == "mixed":
-            sub_prompt = (node.get("prompt") or "").strip()
+            sub_prompt = sanitize_untrusted_text(
+                (node.get("prompt") or "").strip(),
+                max_length=2000,
+                field_name="workflow_sub_prompt",
+            )
             lines.append(
                 f"PASO {step_num} [{label}]: Nodo libre. Usa el siguiente sub-prompt para este paso:\n"
                 f"  \"\"\"\n  {sub_prompt}\n  \"\"\""
             )
         else:
-            content = (node.get("content") or node.get("prompt") or "").strip()
+            content = sanitize_untrusted_text(
+                (node.get("content") or node.get("prompt") or "").strip(),
+                max_length=2000,
+                field_name="workflow_llm_free",
+            )
             lines.append(f"PASO {step_num} [{label}]: Responde libremente basándote en: \"{content}\"")
         lines.append("  → Cuando termines este segmento, avanza al siguiente paso.")
         _append_transitions(lines, node, adj, step_nums, default_label="  → Por defecto continúa al siguiente paso")
@@ -149,7 +167,12 @@ def _format_prompt_block(
         )
 
     else:
-        lines.append(f"PASO {step_num} [{label}]: {node.get('content', '')}")
+        fallback = sanitize_untrusted_text(
+            node.get("content", ""),
+            max_length=2000,
+            field_name="workflow_node",
+        )
+        lines.append(f"PASO {step_num} [{label}]: {fallback}")
 
     return "\n".join(lines)
 
