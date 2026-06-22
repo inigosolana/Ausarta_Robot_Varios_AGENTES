@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, Any
 from collections import defaultdict
 from services.supabase_service import supabase, get_ui_cache, sb_query
+from services.user_profiles_service import list_user_profiles_with_empresa
 from services.livekit_service import lkapi
 from services.auth import CurrentUser, get_current_user, require_admin
 import os
@@ -392,13 +393,8 @@ async def get_users_list(current_user: CurrentUser = Depends(require_admin)):
         if cached: return cached
     if not supabase: return []
     try:
-        def _fetch_users():
-            q = supabase.table("user_profiles").select("*, empresas(*)")
-            if current_user.role != "superadmin":
-                q = q.eq("empresa_id", current_user.empresa_id)
-            return q.order("created_at", desc=True).execute()
-        res = await sb_query(_fetch_users)
-        return res.data
+        empresa_filter = None if current_user.role == "superadmin" else current_user.empresa_id
+        return await list_user_profiles_with_empresa(empresa_id=empresa_filter)
     except Exception as e:
         logger.error(f"Error users list: {e}")
         return []

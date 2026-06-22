@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from services.supabase_service import supabase, clear_ui_cache, sb_query
+from services.user_profiles_service import list_user_profiles_with_empresa
 from services.auth import CurrentUser, require_admin, require_superadmin, require_platform_admin
 from services.profile_cache import invalidate_user_profile_cache
 from models.schemas import ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyListItem
@@ -294,18 +295,15 @@ async def list_admin_users(
     if not supabase:
         raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
 
-    query = supabase.table("user_profiles").select("*, empresas(*)").order("created_at", desc=True)
-
+    filter_empresa_id: int | None = None
     if has_global_access(current_user) or is_ausarta_platform_admin(current_user):
-        if empresa_id is not None:
-            query = query.eq("empresa_id", empresa_id)
+        filter_empresa_id = empresa_id
     else:
         if not current_user.empresa_id:
             raise HTTPException(status_code=400, detail="Usuario sin empresa asignada")
-        query = query.eq("empresa_id", current_user.empresa_id)
+        filter_empresa_id = current_user.empresa_id
 
-    res = await sb_query(lambda: query.execute())
-    return res.data or []
+    return await list_user_profiles_with_empresa(empresa_id=filter_empresa_id)
 
 
 @router.get("/empresas/{empresa_id}/crm-config")
