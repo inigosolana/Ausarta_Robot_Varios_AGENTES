@@ -1,20 +1,11 @@
 -- =============================================================================
 -- RAG híbrido: full-text search (BM25 proxy) sobre knowledge_base
+-- FTS en la RPC (sin índice GIN) para evitar picos de maintenance_work_mem
+-- en tablas grandes. Para >50k chunks, añadir search_vector + GIN en ventana
+-- de mantenimiento.
 -- =============================================================================
 
 CREATE EXTENSION IF NOT EXISTS vector;
-
-ALTER TABLE public.knowledge_base
-  ADD COLUMN IF NOT EXISTS search_vector tsvector
-  GENERATED ALWAYS AS (
-    to_tsvector(
-      'spanish',
-      coalesce(titulo, '') || ' ' || coalesce(contenido, '')
-    )
-  ) STORED;
-
-CREATE INDEX IF NOT EXISTS idx_kb_search_vector
-  ON public.knowledge_base USING GIN (search_vector);
 
 CREATE OR REPLACE FUNCTION public.search_knowledge_base_keyword(
   p_empresa_id BIGINT,
@@ -47,11 +38,14 @@ BEGIN
     kb.id,
     kb.titulo,
     kb.contenido,
-    ts_rank_cd(kb.search_vector, v_query)::FLOAT AS keyword_score
+    ts_rank_cd(
+      to_tsvector('spanish', coalesce(kb.titulo, '') || ' ' || coalesce(kb.contenido, '')),
+      v_query
+    )::FLOAT AS keyword_score
   FROM public.knowledge_base kb
   WHERE
     kb.empresa_id = p_empresa_id
-    AND kb.search_vector @@ v_query
+    AND to_tsvector('spanish', coalesce(kb.titulo, '') || ' ' || coalesce(kb.contenido, '')) @@ v_query
     AND (
       (p_agent_id IS NULL AND kb.agent_id IS NULL)
       OR (p_agent_id IS NOT NULL AND (kb.agent_id IS NULL OR kb.agent_id = p_agent_id))
