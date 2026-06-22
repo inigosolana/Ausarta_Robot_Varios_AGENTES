@@ -8,7 +8,9 @@ import os
 from fastapi import Header, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 
-from services.auth import _get_valid_keys, get_current_user
+from services.auth import _resolve_api_key, get_current_user
+from services.api_key_service import has_scope
+from services.tenant_context import set_current_empresa_id
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = logging.getLogger("api-backend")
@@ -33,14 +35,16 @@ async def require_integration_webhook_auth(
     """
     Autoriza webhooks de integración:
       1. X-N8N-Secret válido
-      2. X-API-Key válida (AUSARTA_API_KEY)
+      2. X-API-Key válida (api_keys por tenant o legacy env)
       3. JWT admin/superadmin
     """
     if verify_n8n_secret(x_n8n_secret):
         return "n8n-secret"
 
-    valid_keys = _get_valid_keys()
-    if api_key and api_key in valid_keys:
+    resolved = await _resolve_api_key(api_key)
+    if resolved and has_scope(resolved.scopes, "webhook"):
+        if resolved.empresa_id:
+            set_current_empresa_id(resolved.empresa_id)
         return "api-key"
 
     if creds and creds.credentials:

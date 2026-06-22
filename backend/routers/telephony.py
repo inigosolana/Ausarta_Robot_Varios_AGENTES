@@ -55,6 +55,7 @@ from services.sip_call_service import (
     sip_retry_max_attempts,
 )
 from services.auth import get_current_user, CurrentUser, require_admin, require_outbound_auth
+from services.tenant_context import get_current_empresa_id
 from services.crypto_service import encrypt_data, decrypt_data
 from services.rate_limiter import limiter
 from services.queue_service import get_arq_pool
@@ -2286,6 +2287,15 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
     try:
         if supabase:
             emp_id = request.get("empresa_id")
+            api_tenant = get_current_empresa_id()
+            if _auth == "api-key" and api_tenant:
+                if emp_id and int(emp_id) != int(api_tenant):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": "API key no autorizada para esta empresa"},
+                    )
+                emp_id = api_tenant
+
             if not emp_id and agent_id:
                 try:
                     agent_res = await sb_query(

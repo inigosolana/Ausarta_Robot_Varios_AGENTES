@@ -294,3 +294,31 @@ class WorkflowValidateResponse(BaseModel):
     step_count: int
     warnings: List[str] = []
 
+
+class ApiKeyCreateRequest(BaseModel):
+    description: str = Field(..., min_length=1, max_length=200)
+    empresa_id: Optional[int] = None
+    scopes: List[str] = Field(default_factory=lambda: ["outbound_call"])
+    expires_at: Optional[datetime] = None
+
+
+class ApiKeyCreateResponse(BaseModel):
+    id: str
+    key: str
+    empresa_id: int
+    key_prefix: str
+    scopes: List[str]
+    expires_at: Optional[datetime] = None
+
+
+class ApiKeyListItem(BaseModel):
+    id: str
+    empresa_id: int
+    key_prefix: str
+    description: Optional[str] = None
+    scopes: List[str]
+    is_active: bool
+    expires_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+

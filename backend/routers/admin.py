@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from services.supabase_service import supabase, clear_ui_cache, sb_query
 from services.auth import CurrentUser, require_admin, require_superadmin, invalidate_user_profile_cache
+from models.schemas import ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyListItem
+from services.api_key_service import create_api_key, list_api_keys, revoke_api_key
 from services.platform_access import (
     get_master_empresa_id,
     has_global_access,
@@ -1020,3 +1022,83 @@ async def get_usage_per_tenant(current_user: CurrentUser = Depends(require_admin
 
     out.sort(key=lambda x: x["empresa_nombre"].lower())
     return out
+
+
+@router.get("/api-keys", response_model=list[ApiKeyListItem])
+async def list_tenant_api_keys(
+    empresa_id: int | None = None,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Lista API keys del tenant (sin el valor en claro)."""
+    if current_user.role == "superadmin":
+        target_empresa = empresa_id
+    else:
+        if empresa_id and current_user.empresa_id and int(empresa_id) != int(current_user.empresa_id):
+            raise HTTPException(status_code=403, detail="No puedes ver API keys de otra empresa")
+        target_empresa = current_user.empresa_id
+
+    rows = await list_api_keys(empresa_id=target_empresa)
+    return rows
+
+
+@router.post("/api-keys", response_model=ApiKeyCreateResponse)
+@limiter.limit("10/minute")
+async def create_tenant_api_key(
+    request: Request,
+    payload: ApiKeyCreateRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Genera una API key por tenant. El valor en claro solo se devuelve una vez."""
+    if current_user.role == "superadmin":
+        if not payload.empresa_id and not current_user.empresa_id:
+            raise HTTPException(status_code=400, detail="empresa_id requerido para superadmin")
+        target_empresa = int(payload.empresa_id or current_user.empresa_id)
+    elif current_user.empresa_id:
+        if payload.empresa_id and int(payload.empresa_id) != int(current_user.empresa_id):
+            raise HTTPException(status_code=403, detail="No puedes crear keys para otra empresa")
+        target_empresa = int(current_user.empresa_id)
+    else:
+        raise HTTPException(status_code=400, detail="empresa_id requerido")
+
+    try:
+        created = await create_api_key(
+            empresa_id=target_empresa,
+            description=payload.description,
+            scopes=payload.scopes,
+            expires_at=payload.expires_at,
+            created_by=current_user.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    await log_audit_event(
+        user_id=current_user.user_id,
+        action="api_key.create",
+        target_type="api_key",
+        target_id=created["id"],
+        metadata={"empresa_id": target_empresa, "scopes": created["scopes"]},
+    )
+    return created
+
+
+@router.delete("/api-keys/{key_id}")
+async def revoke_tenant_api_key(
+    key_id: str,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Revoca una API key (is_active=false)."""
+    empresa_filter = None if current_user.role == "superadmin" else current_user.empresa_id
+    revoked = await revoke_api_key(key_id, empresa_id=empresa_filter)
+    if not revoked:
+        raise HTTPException(status_code=404, detail="API key no encontrada")
+
+    await log_audit_event(
+        user_id=current_user.user_id,
+        action="api_key.revoke",
+        target_type="api_key",
+        target_id=key_id,
+        metadata={"empresa_id": empresa_filter},
+    )
+    return {"status": "revoked", "id": key_id}

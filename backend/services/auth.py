@@ -27,6 +27,11 @@ from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredenti
 
 from services.supabase_service import supabase
 from services.tenant_context import set_current_empresa_id
+from services.api_key_service import (
+    ValidatedApiKey,
+    validate_api_key_from_db,
+    has_scope,
+)
 
 logger = logging.getLogger("api-backend")
 
@@ -66,32 +71,51 @@ def _is_development_env() -> bool:
     return (os.getenv("ENVIRONMENT") or "").strip().lower() == "development"
 
 
-async def require_api_key(api_key: str | None = Security(_API_KEY_HEADER)) -> str:
-    valid_keys = _get_valid_keys()
-    if not valid_keys:
-        if _is_development_env():
-            logger.warning(
-                "[Auth] AUSARTA_API_KEY no configurada — permitido solo con ENVIRONMENT=development."
-            )
-            return "dev-mode"
-        logger.error("[Auth] AUSARTA_API_KEY no configurada en entorno no-development — rechazando.")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="API key authentication not configured (set AUSARTA_API_KEY)",
-        )
+def _legacy_env_keys_enabled() -> bool:
+    return (os.getenv("AUSARTA_API_KEY_LEGACY", "true").strip().lower() in ("1", "true", "yes"))
 
+
+async def _resolve_api_key(raw_key: str | None) -> ValidatedApiKey | None:
+    """Valida API key: primero BD por tenant, luego fallback legacy env (deprecado)."""
+    if not raw_key or not str(raw_key).strip():
+        return None
+
+    key = str(raw_key).strip()
+    db_key = await validate_api_key_from_db(key)
+    if db_key:
+        return db_key
+
+    if _legacy_env_keys_enabled() and key in _get_valid_keys():
+        logger.warning(
+            "[Auth] API key legacy de entorno usada (sin aislamiento tenant). "
+            "Migra a api_keys en BD y desactiva AUSARTA_API_KEY_LEGACY."
+        )
+        return ValidatedApiKey(
+            key_id="legacy-env",
+            empresa_id=0,
+            scopes=("admin",),
+            source="legacy_env",
+        )
+    return None
+
+
+async def require_api_key(api_key: str | None = Security(_API_KEY_HEADER)) -> str:
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing X-API-Key header",
         )
 
-    if api_key not in valid_keys:
-        logger.warning(f"[Auth] API Key inválida recibida: {api_key[:8]}...")
+    resolved = await _resolve_api_key(api_key)
+    if not resolved:
+        logger.warning("[Auth] API Key inválida recibida: %s...", api_key[:8])
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid API Key",
         )
+
+    if resolved.empresa_id:
+        set_current_empresa_id(resolved.empresa_id)
     return api_key
 
 
@@ -433,93 +457,14 @@ async def require_outbound_auth(
     x_impersonate_token: Optional[str] = Header(None, alias="X-Impersonate-Token"),
 ) -> str:
     """
-    Para integraciones: X-API-Key válida.
-    Para el SPA (Probar llamada, etc.): Authorization Bearer (misma sesión Supabase que apiFetch).
-
-    # TODO SEGURIDAD — Refactorización de API Keys estáticas a dinámicas por BD
-    # =========================================================================
-    # PROBLEMA ACTUAL:
-    #   _get_valid_keys() lee AUSARTA_API_KEY desde una variable de entorno estática.
-    #   Si esa clave se filtra (logs, git, error de configuración), el atacante
-    #   obtiene acceso maestro SIN restricción de tenant ni de operación.
-    #
-    # SOLUCIÓN PROPUESTA: tabla `api_keys` en Supabase con aislamiento por empresa.
-    #
-    # DDL sugerido:
-    #   CREATE TABLE api_keys (
-    #       id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    #       empresa_id  integer NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
-    #       key_hash    text NOT NULL UNIQUE,   -- SHA-256 de la clave, nunca en claro
-    #       description text,
-    #       scopes      text[] NOT NULL DEFAULT '{outbound_call}',
-    #       is_active   boolean NOT NULL DEFAULT true,
-    #       expires_at  timestamptz,
-    #       created_at  timestamptz NOT NULL DEFAULT now(),
-    #       last_used_at timestamptz
-    #   );
-    #   ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
-    #   -- (añadir política: admin solo ve/gestiona sus propias keys)
-    #
-    # CÓMO REEMPLAZAR _get_valid_keys():
-    #   import hashlib
-    #   from services.redis_service import get_redis
-    #
-    #   async def _validate_api_key_from_db(raw_key: str) -> dict | None:
-    #       \"\"\"Devuelve {empresa_id, scopes} si la key es válida, None si no.\"\"\"
-    #       key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-    #
-    #       # 1. Intentar caché Redis (TTL: 5 min) para evitar una query por cada request
-    #       try:
-    #           r = await get_redis()
-    #           cached = await r.get(f"ausarta:api_key:{key_hash}")
-    #           if cached:
-    #               return json.loads(cached)
-    #           if cached == "INVALID":
-    #               return None
-    #       except Exception:
-    #           pass
-    #
-    #       # 2. Consultar BD con service_role (bypassa RLS para validación interna)
-    #       from services.supabase_service import supabase
-    #       res = supabase.table("api_keys") \\
-    #           .select("empresa_id,scopes,is_active,expires_at") \\
-    #           .eq("key_hash", key_hash) \\
-    #           .eq("is_active", True) \\
-    #           .limit(1) \\
-    #           .execute()
-    #
-    #       if not res.data:
-    #           await r.set(f"ausarta:api_key:{key_hash}", "INVALID", ex=300)
-    #           return None
-    #
-    #       row = res.data[0]
-    #       if row.get("expires_at") and row["expires_at"] < datetime.utcnow().isoformat():
-    #           return None
-    #
-    #       # Registrar último uso (fire-and-forget, no bloquea el request)
-    #       supabase.table("api_keys").update({"last_used_at": "now()"}).eq("key_hash", key_hash).execute()
-    #
-    #       payload = {"empresa_id": row["empresa_id"], "scopes": row["scopes"]}
-    #       await r.set(f"ausarta:api_key:{key_hash}", json.dumps(payload), ex=300)
-    #       return payload
-    #
-    # VENTAJA: cada API key está limitada a un empresa_id específico.
-    # Un atacante que obtenga una key solo tiene acceso al tenant del cliente,
-    # no a todos los tenants como ocurre con la variable estática actual.
-    # =========================================================================
+    Para integraciones: X-API-Key válida (tabla api_keys por tenant, o legacy env).
+    Para el SPA: Authorization Bearer (sesión Supabase).
     """
-    valid_keys = _get_valid_keys()
-    if not valid_keys:
-        if _is_development_env():
-            return "dev-mode"
-        logger.error("[Auth] AUSARTA_API_KEY no configurada en entorno no-development — rechazando.")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="API key authentication not configured (set AUSARTA_API_KEY)",
-        )
-
     if api_key is not None and str(api_key).strip() != "":
-        if api_key in valid_keys:
+        resolved = await _resolve_api_key(api_key)
+        if resolved and has_scope(resolved.scopes, "outbound_call"):
+            if resolved.empresa_id:
+                set_current_empresa_id(resolved.empresa_id)
             return "api-key"
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -534,6 +479,10 @@ async def require_outbound_auth(
                 detail="Admin required for outbound calls",
             )
         return "jwt"
+
+    if _is_development_env():
+        logger.warning("[Auth] Outbound sin credenciales — permitido solo en development.")
+        return "dev-mode"
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
