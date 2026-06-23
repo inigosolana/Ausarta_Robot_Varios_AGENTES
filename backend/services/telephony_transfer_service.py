@@ -6,6 +6,8 @@ import logging
 import os
 import re
 
+from typing import Any
+
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
@@ -51,7 +53,7 @@ async def is_internal_extension(empresa_id: int, target: str) -> bool:
                 return True
             count_res = await sb_query(
                 lambda eid=empresa_id: supabase.table("yeastar_extensions")
-                .select("id", count="exact")
+                .select("id", count="exact")  # type: ignore[arg-type]
                 .eq("empresa_id", eid)
                 .limit(1)
                 .execute()
@@ -88,7 +90,7 @@ async def execute_yeastar_transfer(
     target_extension: str | None = None,
     yeastar_call_id: str | None = None,
     outbound_prefix: str | None = None,
-) -> dict:
+) -> dict[str, Any] | JSONResponse:
     if not supabase:
         raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
 

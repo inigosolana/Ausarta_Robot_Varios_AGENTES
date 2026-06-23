@@ -67,8 +67,22 @@ jobs:
           mypy --config-file mypy.ini \
             agents/agent_lifecycle.py \
             agents/dynamic_agent.py \
-            routers/telephony.py \
             routers/admin_empresas.py \
+            routers/telephony.py \
+            routers/telephony_calls.py \
+            routers/telephony_encuesta.py \
+            routers/telephony_extensions.py \
+            routers/telephony_livekit_webhook.py \
+            routers/telephony_outbound.py \
+            routers/telephony_transfer.py \
+            routers/telephony_yeastar_webhook.py \
+            services/telephony_encuesta_service.py \
+            services/telephony_lead_propagation.py \
+            services/telephony_livekit_webhook_service.py \
+            services/telephony_outbound_service.py \
+            services/telephony_post_call_service.py \
+            services/telephony_room_utils.py \
+            services/telephony_transfer_service.py \
             services/telephony_yeastar_config_service.py
 
       - name: Type check (mypy) — codebase completo

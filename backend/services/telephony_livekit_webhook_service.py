@@ -6,8 +6,9 @@ import asyncio
 import json
 import logging
 import os
+from typing import Any, cast
 
-from livekit.api import WebhookReceiver
+from livekit.api import TokenVerifier, WebhookReceiver
 
 from services.supabase_service import supabase
 from services.telephony_lead_propagation import propagate_to_lead
@@ -22,7 +23,8 @@ _LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
 
 
 def parse_livekit_webhook(body_bytes: bytes, auth_token: str):
-    receiver = WebhookReceiver(_LIVEKIT_API_KEY, _LIVEKIT_API_SECRET)
+    verifier = TokenVerifier(_LIVEKIT_API_KEY, _LIVEKIT_API_SECRET)
+    receiver = WebhookReceiver(verifier)
     return receiver.receive(body_bytes.decode("utf-8"), auth_token)
 
 
@@ -69,8 +71,8 @@ async def handle_room_finished(encuesta_id: int, room_name: str, room_metadata: 
         if not res.data:
             return
 
-        enc = res.data[0]
-        current_status = enc.get("status") or ""
+        enc = cast(dict[str, Any], res.data[0])
+        current_status = str(enc.get("status") or "")
 
         if current_status not in TERMINAL_STATUSES:
             logger.warning(
@@ -89,7 +91,7 @@ async def handle_room_finished(encuesta_id: int, room_name: str, room_metadata: 
                 current_status,
             )
 
-        transcription = enc.get("transcription") or ""
+        transcription = str(enc.get("transcription") or "")
         empresa_id = enc.get("empresa_id")
         if transcription.strip() and empresa_id:
             try:
