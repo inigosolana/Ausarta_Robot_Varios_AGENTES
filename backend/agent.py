@@ -7,11 +7,11 @@ from agents.entrypoint import server  # noqa: E402
 from agents.dynamic_agent import (  # noqa: E402
     BRIDGE_SERVER_URL_INTERNAL,
     DISPATCH_AGENT_NAME,
-    _detect_language,
-    _normalize_goodbye_message,
     anonymize_text,
     cli,
+    detect_language,
     logger,
+    normalize_goodbye_message,
     server,
 )
 
@@ -19,8 +19,8 @@ __all__ = [
     "DynamicAgent",
     "CallSession",
     "anonymize_text",
-    "_detect_language",
-    "_normalize_goodbye_message",
+    "detect_language",
+    "normalize_goodbye_message",
     "entrypoint",
     "server",
     "cli",

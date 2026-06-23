@@ -1,4 +1,3 @@
-version: '3.8'
 
 # Variables de entorno: crea `.env` en la raíz (cp .env.example .env).
 # Docker Compose las carga automáticamente. Despliegue: ./scripts/deploy-compose.sh
@@ -49,6 +48,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: ausarta-backend:latest
     container_name: ausarta-v2-backend
     restart: unless-stopped
     ports:
@@ -73,9 +73,7 @@ services:
       retries: 3
 
   livekit-agent:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ausarta-backend:latest
     container_name: ausarta-livekit-agent
     restart: unless-stopped
     command: ["/agent_start.sh"]
@@ -95,9 +93,7 @@ services:
       - ausarta-network
 
   arq-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ausarta-backend:latest
     container_name: ausarta-arq-worker
     restart: unless-stopped
     command: ["arq", "worker.WorkerSettings"]

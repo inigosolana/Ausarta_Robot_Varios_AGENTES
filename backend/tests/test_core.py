@@ -1,6 +1,6 @@
 import pytest
 
-from agents.text_utils import _detect_language, _normalize_goodbye_message, anonymize_text
+from agents.text_utils import detect_language, normalize_goodbye_message, anonymize_text
 from utils.workflow_state import WorkflowStateMachine, _safe_eval_condition
 
 
@@ -91,27 +91,27 @@ def test_anonymize_empty_text():
 
 
 def test_detect_language_en():
-    assert _detect_language("Hello, how are you") == "en"
+    assert detect_language("Hello, how are you") == "en"
 
 
 def test_detect_language_fr():
-    assert _detect_language("Bonjour, comment ça va") == "fr"
+    assert detect_language("Bonjour, comment ça va") == "fr"
 
 
 def test_detect_language_unknown():
-    assert _detect_language("xyz qwr plm") is None
+    assert detect_language("xyz qwr plm") is None
 
 
 def test_normalize_goodbye_long_message():
-    assert _normalize_goodbye_message("Muchas gracias por su tiempo y por toda la información compartida hoy").count(" ") < 8
+    assert normalize_goodbye_message("Muchas gracias por su tiempo y por toda la información compartida hoy").count(" ") < 8
 
 
 def test_normalize_goodbye_adds_farewell():
-    assert _normalize_goodbye_message("Muchas gracias") == "Muchas gracias. Hasta luego."
+    assert normalize_goodbye_message("Muchas gracias") == "Muchas gracias. Hasta luego."
 
 
 def test_normalize_goodbye_empty():
-    assert _normalize_goodbye_message("") == "Muchas gracias. Hasta luego."
+    assert normalize_goodbye_message("") == "Muchas gracias. Hasta luego."
 
 
 def test_safe_eval_condition_rejects_dangerous_expression():

@@ -4,11 +4,12 @@ import logging
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request, Depends, APIRouter
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # Servicios internos
 from services.rate_limiter import limiter
@@ -141,6 +142,30 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Ausarta Voice Agent API", version="2.0.0", lifespan=lifespan)
 
+api_v1 = APIRouter(prefix="/api/v1", tags=["api-v1"])
+
+
+@api_v1.get("/")
+async def api_v1_root():
+    """Punto de entrada versionado; rutas bajo /api/v1/* delegan en /api/*."""
+    return {
+        "version": "v1",
+        "status": "ok",
+        "legacy_prefix": "/api",
+        "versioned_prefix": "/api/v1",
+    }
+
+
+class ApiV1RewriteMiddleware(BaseHTTPMiddleware):
+    """Alias /api/v1/<path> → /api/<path> sin duplicar routers."""
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if path.startswith("/api/v1/") and path != "/api/v1/":
+            request.scope["path"] = "/api/" + path[len("/api/v1/") :]
+            request.scope["raw_path"] = request.scope["path"].encode()
+        return await call_next(request)
+
 from utils.tracing import instrument_fastapi
 
 instrument_fastapi(app)
@@ -221,8 +246,10 @@ app.add_middleware(
 
 # Aislamiento multi-tenant: ContextVar empresa_id por request (OWASP)
 app.add_middleware(TenantContextMiddleware)
+app.add_middleware(ApiV1RewriteMiddleware)
 
 # --- REGISTRO DE ROUTERS ---
+app.include_router(api_v1)
 app.include_router(logs_router)
 app.include_router(dashboard_router)
 app.include_router(settings_router)

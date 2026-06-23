@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from agents.agent_common import (
     _count_words,
-    _detect_language,
+    detect_language,
     _estimate_thinking_complexity,
     _extract_transcript_from_session,
     _is_inbound_agent_config,
@@ -141,7 +141,7 @@ class CallSessionLifecycleMixin:
         if self.lang_state["detected"]:
             return
         self.lang_state["detected"] = True
-        detected = _detect_language(user_text)
+        detected = detect_language(user_text)
         if not detected or detected == self.lang_state["original_lang"]:
             return
         self.lang_state["switched"] = True

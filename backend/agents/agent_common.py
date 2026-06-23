@@ -137,7 +137,7 @@ _LANG_TOKENS: list[tuple[str, frozenset[str], int]] = [
     }), 1),
 ]
 
-def _detect_language(text: str) -> str | None:
+def detect_language(text: str) -> str | None:
     """
     Detecta el idioma de una frase corta usando tokens léxicos.
     Retorna el código BCP-47 detectado (ej: 'en', 'fr') o None si no hay
@@ -201,7 +201,7 @@ def _normalize_message_text(content) -> str:
     return str(content).strip()
 
 
-def _normalize_goodbye_message(message: str) -> str:
+def normalize_goodbye_message(message: str) -> str:
     """
     Garantiza una despedida corta para evitar retrasos al colgar.
     """

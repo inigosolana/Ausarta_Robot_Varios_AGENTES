@@ -184,21 +184,29 @@ class DynamicAgent(Agent, AgentToolsMixin, DynamicAgentLifecycleMixin):
             SemanticRouterService(custom_phrases=custom_phrases) if routing_enabled else None
         )
         
+        self.survey_id = "0"
         try:
             # Soportamos formatos:
             # 1. inigo_local_encuesta_123
             # 2. encuesta_123
             # 3. 123
-            parts = room_name.split('_')
-            self.survey_id = parts[-1] if parts else "0"
-            
-            # Verificación extra por si el formato es distinto
-            if not self.survey_id.isdigit() and len(parts) >= 2:
-                # Si el último no es dígito, probamos con el penúltimo
+            parts = room_name.split("_")
+            candidate = parts[-1] if parts else ""
+            if candidate.isdigit():
+                self.survey_id = candidate
+            elif len(parts) >= 2 and parts[-2].isdigit():
                 self.survey_id = parts[-2]
+            else:
+                logger.error(
+                    "No se pudo extraer survey_id numérico desde room_name '%s' (parts=%s); usando '0'",
+                    room_name,
+                    parts,
+                )
         except Exception as survey_parse_err:
-            logger.warning(
-                f"Error parseando survey_id desde room_name '{room_name}': {survey_parse_err}"
+            logger.error(
+                "Error parseando survey_id desde room_name '%s': %s; usando '0'",
+                room_name,
+                survey_parse_err,
             )
             self.survey_id = "0"
 
@@ -390,8 +398,8 @@ class DynamicAgent(Agent, AgentToolsMixin, DynamicAgentLifecycleMixin):
 from agents.call_session import CallSession  # noqa: E402,F401
 from agents.entrypoint import entrypoint, notify_system_alert, server  # noqa: E402,F401
 from agents.text_utils import (  # noqa: E402
-    _detect_language,
-    _normalize_goodbye_message,
+    detect_language,
+    normalize_goodbye_message,
     anonymize_text,
 )
 from agents.config_fetcher import fetch_agent_config, fetch_agent_config_by_agent_id  # noqa: E402,F401

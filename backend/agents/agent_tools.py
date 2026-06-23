@@ -14,7 +14,7 @@ from agents.agent_common import (
     _build_inbound_datos_extra,
     _extract_transcript_from_session,
     _is_inbound_agent_config,
-    _normalize_goodbye_message,
+    normalize_goodbye_message,
     _normalize_message_text,
 )
 from config import settings
@@ -474,7 +474,7 @@ class AgentToolsMixin:
                         if latest_user:
                             break
 
-            safe_goodbye = _normalize_goodbye_message(mensaje_despedida_manual)
+            safe_goodbye = normalize_goodbye_message(mensaje_despedida_manual)
             safe_goodbye.lower()
             identity_cues = (
                 "quien eres", "quién eres", "de parte de", "quien llama", "quién llama", "de donde", "de dónde"
@@ -499,7 +499,7 @@ class AgentToolsMixin:
         async def process_goodbye_and_hangup():
             try:
                 # Decir despedida sin interrupciones y colgar casi al instante al terminar
-                safe_goodbye = _normalize_goodbye_message(mensaje_despedida_manual)
+                safe_goodbye = normalize_goodbye_message(mensaje_despedida_manual)
                 if safe_goodbye != _normalize_message_text(mensaje_despedida_manual):
                     logger.info(f"✂️ [{self.room_name}] Despedida normalizada a formato corto: '{safe_goodbye}'")
                 current_session = getattr(self, "session", None)
