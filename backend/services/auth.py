@@ -72,7 +72,7 @@ def _is_development_env() -> bool:
 
 
 def _legacy_env_keys_enabled() -> bool:
-    return (os.getenv("AUSARTA_API_KEY_LEGACY", "true").strip().lower() in ("1", "true", "yes"))
+    return (os.getenv("AUSARTA_API_KEY_LEGACY", "false").strip().lower() in ("1", "true", "yes"))
 
 
 async def _resolve_api_key(raw_key: str | None) -> ValidatedApiKey | None:

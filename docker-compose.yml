@@ -28,7 +28,7 @@ x-app-environment: &app-environment
   SMTP_FROM: ${SMTP_FROM:-instalaciones@ausarta.es}
   SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
   AUSARTA_API_KEY: ${AUSARTA_API_KEY:-}
-  AUSARTA_API_KEY_LEGACY: ${AUSARTA_API_KEY_LEGACY:-true}
+  AUSARTA_API_KEY_LEGACY: ${AUSARTA_API_KEY_LEGACY:-false}
   AGENT_NAME_DISPATCH: ${AGENT_NAME_DISPATCH:-default_agent}
   ENABLE_RECORDING: ${ENABLE_RECORDING:-false}
   AGENTS_API_KEY: ${AGENTS_API_KEY:-}
@@ -177,7 +177,7 @@ services:
       DOZZLE_NO_ANALYTICS: "true"
       DOZZLE_LEVEL: "info"
       DOZZLE_USERNAME: ${DOZZLE_USERNAME:-admin}
-      DOZZLE_PASSWORD: ${DOZZLE_PASSWORD:-}
+      DOZZLE_PASSWORD: ${DOZZLE_PASSWORD:?DOZZLE_PASSWORD es obligatorio. Defínelo en .env para proteger el visor de logs.}
       DOZZLE_KEY: ${DOZZLE_KEY:-}
     networks:
       - ausarta-network
