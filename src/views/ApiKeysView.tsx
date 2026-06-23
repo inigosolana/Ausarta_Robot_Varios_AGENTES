@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Key,
   Plus,
@@ -17,15 +17,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { canManageApiKeys } from '../lib/platformAccess';
 import {
   createApiKey,
-  fetchApiKeys,
-  revokeApiKey,
+  useAdminEmpresasOptions,
+  useApiKeysList,
+  useInvalidateApiKeys,
   type ApiKeyCreateResult,
   type ApiKeyListItem,
   type ApiKeyScope,
-} from '../lib/apiKeys';
-import { apiFetch } from '../lib/apiFetch';
-
-type EmpresaOption = { id: number; nombre: string };
+} from '../api/apiKeys';
+import { revokeApiKey } from '../lib/apiKeys';
 
 const SCOPE_LABELS: Record<ApiKeyScope, { label: string; hint: string }> = {
   outbound_call: {
@@ -241,12 +240,19 @@ export const ApiKeysView: React.FC = () => {
   const { t } = useTranslation();
   const isSuperadmin = realProfile?.role === 'superadmin';
   const canAccess = canManageApiKeys(realProfile);
+  const invalidateApiKeys = useInvalidateApiKeys();
 
-  const [keys, setKeys] = useState<ApiKeyListItem[]>([]);
-  const [empresas, setEmpresas] = useState<EmpresaOption[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
   const [filterEmpresaId, setFilterEmpresaId] = useState<number | ''>('');
+  const empresaFilter = filterEmpresaId !== '' ? Number(filterEmpresaId) : undefined;
+
+  const keysQuery = useApiKeysList(empresaFilter, canAccess);
+  const empresasQuery = useAdminEmpresasOptions(canAccess);
+
+  const keys = keysQuery.data ?? [];
+  const empresas = empresasQuery.data ?? [];
+  const loading = keysQuery.isLoading;
+
+  const [creating, setCreating] = useState(false);
   const [revealResult, setRevealResult] = useState<ApiKeyCreateResult | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyListItem | null>(null);
 
@@ -256,40 +262,6 @@ export const ApiKeysView: React.FC = () => {
   const [expiresAt, setExpiresAt] = useState('');
 
   const availableScopes = isSuperadmin ? SUPERADMIN_SCOPES : ADMIN_SCOPES;
-
-  const loadKeys = useCallback(async () => {
-    setLoading(true);
-    try {
-      const empresaFilter = filterEmpresaId !== '' ? Number(filterEmpresaId) : undefined;
-      const data = await fetchApiKeys(empresaFilter);
-      setKeys(data.filter(k => k.is_active));
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error cargando API keys');
-      setKeys([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [filterEmpresaId]);
-
-  useEffect(() => {
-    if (!canAccess) return;
-    void loadKeys();
-  }, [canAccess, loadKeys]);
-
-  useEffect(() => {
-    if (!canAccess) return;
-    void (async () => {
-      try {
-        const res = await apiFetch('/api/admin/empresas');
-        if (res.ok) {
-          const data = await res.json();
-          setEmpresas(data || []);
-        }
-      } catch {
-        /* ignore */
-      }
-    })();
-  }, [canAccess]);
 
   const empresaName = useMemo(() => {
     const map = new Map(empresas.map(e => [e.id, e.nombre]));
@@ -328,7 +300,7 @@ export const ApiKeysView: React.FC = () => {
       setExpiresAt('');
       setScopes(['outbound_call']);
       setRevealResult(result);
-      await loadKeys();
+      invalidateApiKeys();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al crear');
     } finally {
@@ -358,7 +330,7 @@ export const ApiKeysView: React.FC = () => {
           onCancel={() => setRevokeTarget(null)}
           onRevoked={() => {
             setRevokeTarget(null);
-            void loadKeys();
+            invalidateApiKeys();
           }}
         />
       )}

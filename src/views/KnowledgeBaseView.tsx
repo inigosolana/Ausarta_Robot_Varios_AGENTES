@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   AlertCircle,
@@ -8,24 +8,20 @@ import {
   Users,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
 import type { Empresa } from '../types';
 import { KNOWLEDGE_FILE_ACCEPT } from '../lib/knowledgeUpload';
+import { apiFetch } from '../lib/apiFetch';
+import { useEmpresasAdmin } from '../api/empresas';
+import {
+  searchKnowledge,
+  useInvalidateKnowledge,
+  useKnowledgeCompanyContext,
+  useKnowledgeDocs,
+  type KnowledgeSearchResult,
+} from '../api/knowledge';
 import './knowledge-base.css';
 
-interface KBDoc {
-  titulo: string;
-  source_type: string;
-  chunks: number;
-  created_at: string;
-  ids: number[];
-}
-
-interface SearchResult {
-  titulo: string;
-  contenido: string;
-  similarity: number;
-}
+type SearchResult = KnowledgeSearchResult;
 
 const SOURCE_LABELS: Record<string, string> = {
   manual: 'Manual',
@@ -66,12 +62,19 @@ function matchColor(similarity: number): string {
 export function KnowledgeBaseView() {
   const { session, profile, isPlatformOwner } = useAuth();
   const token = session?.access_token ?? '';
-  const [empresas, setEmpresas] = useState<Empresa[]>([]);
+  const invalidateKnowledge = useInvalidateKnowledge();
+
+  const empresasQuery = useEmpresasAdmin(undefined, isPlatformOwner);
+  const empresas = (empresasQuery.data ?? []) as Empresa[];
+
   const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | null>(profile?.empresa_id ?? null);
   const empresa_id = isPlatformOwner ? selectedEmpresaId : profile?.empresa_id ?? null;
 
-  const [docs, setDocs] = useState<KBDoc[]>([]);
-  const [loading, setLoading] = useState(true);
+  const docsQuery = useKnowledgeDocs(empresa_id, Boolean(empresa_id));
+  const contextQuery = useKnowledgeCompanyContext(empresa_id, Boolean(empresa_id));
+
+  const docs = docsQuery.data ?? [];
+  const loading = docsQuery.isLoading;
   const [msg, setMsg] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
 
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -109,77 +112,41 @@ export function KnowledgeBaseView() {
   );
 
   useEffect(() => {
-    let cancelled = false;
-
-    const loadEmpresas = async () => {
-      if (isPlatformOwner) {
-        const { data } = await supabase.from('empresas').select('id, nombre').order('nombre');
-        if (cancelled) return;
-        setEmpresas((data || []) as Empresa[]);
-        setSelectedEmpresaId(prev => prev ?? (data?.length ? Number(data[0].id) : null));
-      } else {
-        setSelectedEmpresaId(profile?.empresa_id ?? null);
-      }
-    };
-
-    loadEmpresas();
-    return () => { cancelled = true; };
-  }, [isPlatformOwner, profile?.empresa_id]);
-
-  const load = useCallback(async () => {
-    if (!empresa_id) {
-      setDocs([]);
-      setLoading(false);
+    if (!isPlatformOwner) {
+      setSelectedEmpresaId(profile?.empresa_id ?? null);
       return;
     }
-    setLoading(true);
-    try {
-      const params = `?empresa_id=${empresa_id}`;
-      const res = await fetch(`${API_BASE}/api/knowledge/${params}`, { headers });
-      if (res.ok) setDocs(await res.json());
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
+    if (empresas.length > 0) {
+      setSelectedEmpresaId((prev) => prev ?? Number(empresas[0].id));
     }
-  }, [empresa_id, token]);
+  }, [isPlatformOwner, profile?.empresa_id, empresas]);
 
-  useEffect(() => { load(); }, [load]);
-
-  const loadCompanyContext = useCallback(async () => {
-    if (!empresa_id) {
+  useEffect(() => {
+    if (contextQuery.data) {
+      setCompanyContext(contextQuery.data.company_context);
+      setKbAllowInternet(contextQuery.data.kb_allow_internet_search);
+    } else if (!empresa_id) {
       setCompanyContext('');
-      return;
+      setKbAllowInternet(false);
     }
-    try {
-      const res = await fetch(`${API_BASE}/api/knowledge/company-context?empresa_id=${empresa_id}`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setCompanyContext(data.company_context || '');
-        setKbAllowInternet(Boolean(data.kb_allow_internet_search));
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }, [empresa_id, token]);
-
-  useEffect(() => { loadCompanyContext(); }, [loadCompanyContext]);
+  }, [contextQuery.data, empresa_id]);
 
   const saveCompanyContext = async () => {
     if (!empresa_id) return;
     setSavingContext(true);
     try {
-      const res = await fetch(`${API_BASE}/api/knowledge/company-context`, {
+      const res = await apiFetch('/api/knowledge/company-context', {
         method: 'PUT',
-        headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           empresa_id,
           company_context: companyContext,
           kb_allow_internet_search: kbAllowInternet,
         }),
       });
-      if (res.ok) flash('ok', 'Configuración de conocimiento guardada');
-      else flash('error', 'No se pudo guardar el contexto');
+      if (res.ok) {
+        flash('ok', 'Configuración de conocimiento guardada');
+        invalidateKnowledge();
+      } else flash('error', 'No se pudo guardar el contexto');
     } catch (e) {
       flash('error', String(e));
     } finally {
@@ -191,9 +158,8 @@ export function KnowledgeBaseView() {
     if (!empresa_id) return;
     setGeneratingContext(true);
     try {
-      const res = await fetch(`${API_BASE}/api/ai/company-context`, {
+      const res = await apiFetch('/api/ai/company-context', {
         method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({ empresa_id }),
       });
       const data = await res.json();
@@ -252,7 +218,7 @@ export function KnowledgeBaseView() {
         flash('ok', `"${data.titulo}" indexado — ${data.chunks_total} chunks`);
         setUploadFile(null);
         setUploadTitle('');
-        await load();
+        invalidateKnowledge();
       } else {
         const err = await res.json().catch(() => ({}));
         flash('error', err.detail || 'Error al indexar documento');
@@ -284,7 +250,7 @@ export function KnowledgeBaseView() {
         flash('ok', `URL "${data.titulo}" indexada — ${data.chunks_total} chunks`);
         setUrlInput('');
         setUrlTitle('');
-        await load();
+        invalidateKnowledge();
       } else {
         const err = await res.json().catch(() => ({}));
         flash('error', err.detail || 'Error al indexar URL');
@@ -307,7 +273,7 @@ export function KnowledgeBaseView() {
       );
       if (res.ok || res.status === 204) {
         flash('ok', `"${titulo}" eliminado`);
-        await load();
+        invalidateKnowledge();
       } else {
         flash('error', 'Error al eliminar');
       }
@@ -323,20 +289,9 @@ export function KnowledgeBaseView() {
     setSearching(true);
     setSearchResults([]);
     try {
-      const params = new URLSearchParams({
-        q: searchQ.trim(),
-        threshold: String(searchThreshold),
-        limit: '8',
-        empresa_id: String(empresa_id),
-      });
-      const res = await fetch(`${API_BASE}/api/knowledge/search?${params}`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setSearchResults(data.results || []);
-        if (!data.results?.length) flash('ok', 'No hay resultados con ese umbral de similitud');
-      } else {
-        flash('error', 'Error en búsqueda');
-      }
+      const results = await searchKnowledge(empresa_id, searchQ, searchThreshold);
+      setSearchResults(results);
+      if (!results.length) flash('ok', 'No hay resultados con ese umbral de similitud');
     } catch (e) {
       flash('error', String(e));
     } finally {
