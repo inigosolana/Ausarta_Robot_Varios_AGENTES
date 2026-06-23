@@ -65,9 +65,25 @@ jobs:
         run: |
           pip install mypy
           mypy --config-file mypy.ini \
+            agents/agent_common.py \
             agents/agent_lifecycle.py \
+            agents/agent_logging.py \
+            agents/agent_tools.py \
+            agents/audio_utils.py \
+            agents/call_session.py \
+            agents/config_fetcher.py \
+            agents/config_loader.py \
             agents/dynamic_agent.py \
+            agents/entrypoint.py \
+            agents/livekit_client.py \
+            agents/post_call_processor.py \
+            agents/semantic_routes.py \
+            agents/stt_tts_builder.py \
+            agents/text_utils.py \
+            agents/tools.py \
+            routers/admin_api_keys.py \
             routers/admin_empresas.py \
+            routers/admin_metrics.py \
             routers/telephony.py \
             routers/telephony_calls.py \
             routers/telephony_encuesta.py \

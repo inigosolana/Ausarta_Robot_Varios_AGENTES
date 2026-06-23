@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 import aiohttp
+from aiohttp import ClientTimeout
 
 from agents.agent_common import (
     BRIDGE_SERVER_URL_INTERNAL,
@@ -27,7 +28,7 @@ async def _fetch_with_retries(url: str, max_attempts: int = 3) -> dict[str, Any]
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     url,
-                    timeout=5,
+                    timeout=ClientTimeout(total=5),
                     headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
                 ) as resp:
                     if resp.status == 200:
@@ -164,7 +165,7 @@ async def _register_inbound_call_record(
             async with session.post(
                 f"{server_url}/inbound-call/register",
                 json=payload,
-                timeout=5,
+                timeout=ClientTimeout(total=5),
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()

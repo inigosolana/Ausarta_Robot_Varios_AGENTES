@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import aiohttp
 from livekit.agents import RunContext, function_tool
@@ -27,8 +27,20 @@ from services.queue_service import (
 
 logger = logging.getLogger("agent-dynamic")
 
+if TYPE_CHECKING:
+    from utils.workflow_state import WorkflowStateMachine
+
 
 class AgentToolsMixin:
+    if TYPE_CHECKING:
+        room_name: str
+        survey_id: str
+        agent_config: dict[str, Any]
+        data_saved: bool
+        hangup_started: bool
+        _workflow_sm: WorkflowStateMachine | None
+        _transfer_completed: asyncio.Event
+
     async def _guardar_encuesta_impl(
         self,
         context: RunContext,
@@ -453,7 +465,8 @@ class AgentToolsMixin:
         # Solo aceptamos este cierre "rápido por no buen momento" cuando hay rechazo explícito.
         try:
             latest_user = ""
-            chat_ctx = getattr(self.session, "chat_ctx", getattr(self.session, "chat_context", None))
+            current_session = getattr(self, "session", None)
+            chat_ctx = getattr(current_session, "chat_ctx", getattr(current_session, "chat_context", None))
             if chat_ctx and getattr(chat_ctx, "messages", None):
                 for m in reversed(chat_ctx.messages):
                     if getattr(m, "role", "") == "user":
@@ -489,7 +502,9 @@ class AgentToolsMixin:
                 safe_goodbye = _normalize_goodbye_message(mensaje_despedida_manual)
                 if safe_goodbye != _normalize_message_text(mensaje_despedida_manual):
                     logger.info(f"✂️ [{self.room_name}] Despedida normalizada a formato corto: '{safe_goodbye}'")
-                await self.session.say(safe_goodbye, allow_interruptions=False)
+                current_session = getattr(self, "session", None)
+                if current_session:
+                    await current_session.say(safe_goodbye, allow_interruptions=False)
 
                 # Margen corto para evitar silencios largos tras despedida.
                 # Si se necesita ajustar, usar AGENT_HANGUP_DELAY_SECONDS en entorno.

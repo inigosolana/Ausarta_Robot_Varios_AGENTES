@@ -154,7 +154,7 @@ async def build_resilient_tts_plugin(
         [cartesia_tts, openai_tts],
         max_retry_per_tts=1,
     )
-    adapter._ausarta_circuit_breaker = breaker  # noqa: SLF001 — hook métricas futuras
+    adapter._ausarta_circuit_breaker = breaker  # type: ignore[attr-defined]  # noqa: SLF001
     logger.info("🎙️ TTS resiliente: Cartesia primario + OpenAI fallback (circuit=%s)", breaker.name)
     return adapter
 
@@ -188,7 +188,7 @@ async def build_resilient_stt_plugin(
         attempt_timeout=float(os.getenv("CIRCUIT_BREAKER_STT_ATTEMPT_TIMEOUT", "10")),
         max_retry_per_stt=1,
     )
-    adapter._ausarta_circuit_breaker = breaker  # noqa: SLF001
+    adapter._ausarta_circuit_breaker = breaker  # type: ignore[attr-defined]  # noqa: SLF001
     logger.info(
         "🎙️ STT resiliente: Deepgram %s + OpenAI fallback (circuit=%s)",
         stt_model,
