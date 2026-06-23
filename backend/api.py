@@ -28,6 +28,9 @@ from routers.telephony import router as telephony_router
 from routers.telephony_extensions import router as telephony_extensions_router
 from routers.telephony_transfer import router as telephony_transfer_router
 from routers.telephony_livekit_webhook import router as telephony_livekit_webhook_router
+from routers.telephony_yeastar_webhook import router as telephony_yeastar_webhook_router
+from routers.telephony_encuesta import router as telephony_encuesta_router
+from routers.telephony_outbound import router as telephony_outbound_router
 from routers.admin import router as admin_router
 from routers.campaigns import router as campaigns_router
 from routers.campaign_webhook_legacy import router as campaign_webhook_legacy_router
@@ -224,6 +227,9 @@ app.include_router(telephony_router)
 app.include_router(telephony_extensions_router)
 app.include_router(telephony_transfer_router)
 app.include_router(telephony_livekit_webhook_router)
+app.include_router(telephony_yeastar_webhook_router)
+app.include_router(telephony_encuesta_router)
+app.include_router(telephony_outbound_router)
 app.include_router(admin_router)
 app.include_router(campaigns_router)
 app.include_router(campaign_webhook_legacy_router)
