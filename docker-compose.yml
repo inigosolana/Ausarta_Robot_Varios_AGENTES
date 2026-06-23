@@ -1,7 +1,7 @@
 version: '3.8'
 
-# Variables del panel de Portainer → se inyectan en los contenedores vía ${VAR}
-# No uses .env en disco: Portainer no lo crea en /data/compose/XX/
+# Variables de entorno: crea `.env` en la raíz (cp .env.example .env).
+# Docker Compose las carga automáticamente. Despliegue: ./scripts/deploy-compose.sh
 x-app-environment: &app-environment
   SUPABASE_URL: ${SUPABASE_URL}
   SUPABASE_KEY: ${SUPABASE_KEY}
@@ -145,6 +145,7 @@ services:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-${SUPABASE_URL}}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-${SUPABASE_KEY}}
         VITE_API_URL: ${VITE_API_URL:-}
+        VITE_LIVEKIT_URL: ${VITE_LIVEKIT_URL:-${LIVEKIT_URL}}
         VITE_AUSARTA_PUBLIC_IP: ${VITE_AUSARTA_PUBLIC_IP:-${AUSARTA_PUBLIC_IP:-}}
     container_name: ausarta-v2-frontend
     restart: unless-stopped

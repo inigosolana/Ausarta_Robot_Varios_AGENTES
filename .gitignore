@@ -40,13 +40,14 @@ backend/__pycache__/
 backend/*.pyc
 backend/venv/
 
-# Environment variables
+# Environment variables (secretos locales — no commitear)
 .env
 .env.local
 .env.*.local
 *.env
 stack.env
 !.env.example
+!.env.local.example
 *.backup
 
 # Runtime data / logs
