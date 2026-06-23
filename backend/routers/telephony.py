@@ -211,6 +211,27 @@ def _resolve_yeastar_webhook_url() -> str:
     return ""
 
 
+def _split_yeastar_api_url(raw_url: str) -> tuple[str, int]:
+    url = (raw_url or "").strip().rstrip("/")
+    if not url:
+        return "", 0
+
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url if "://" in url else f"https://{url}")
+        port = parsed.port or 0
+        netloc = parsed.hostname or parsed.netloc or url
+        scheme = parsed.scheme or "https"
+        return f"{scheme}://{netloc}", int(port)
+    except Exception:
+        return url, 0
+
+
+def _normalize_yeastar_pbx_url(raw_url: str, api_mode: str) -> tuple[str, int]:
+    api_url, parsed_port = _split_yeastar_api_url(raw_url)
+    default_port = 443
+    return api_url, parsed_port or default_port
 
 
 @router.get("/api/telephony/platform-info")

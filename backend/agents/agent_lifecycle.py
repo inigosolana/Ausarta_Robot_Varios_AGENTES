@@ -5,7 +5,7 @@ import logging
 import os
 import random
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agents.agent_common import (
     _count_words,
@@ -28,9 +28,20 @@ from services.queue_service import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Coroutine
+
     from livekit import rtc
-    from livekit.agents import AgentSession, AudioConfig, BackgroundAudioPlayer, BuiltinAudioClip
+    from livekit.agents import (
+        AgentSession,
+        AudioConfig,
+        BackgroundAudioPlayer,
+        BuiltinAudioClip,
+        JobContext,
+    )
+    from livekit.agents.metrics import UsageCollector
     from utils.workflow_state import WorkflowStateMachine
+
+    from agents.dynamic_agent import DynamicAgent
 else:
     from livekit import rtc
     from livekit.agents import AudioConfig, BackgroundAudioPlayer, BuiltinAudioClip
@@ -39,6 +50,12 @@ logger = logging.getLogger("agent-dynamic")
 
 
 class DynamicAgentLifecycleMixin:
+    if TYPE_CHECKING:
+        room_name: str
+        survey_id: str
+        greeting: str
+        session: AgentSession
+
     async def on_enter(self, *args, **kwargs) -> None:
         """Método llamado cuando el agente entra en la sesión. Lanza el saludo inicial."""
         logger.info(f"--- 🎭 AGENTE EN SALA: {self.room_name} (Survey ID: {self.survey_id}) ---")
@@ -77,6 +94,50 @@ class DynamicAgentLifecycleMixin:
 
 
 class CallSessionLifecycleMixin:
+    if TYPE_CHECKING:
+        ctx: JobContext
+        job_id: str
+        room_name: str
+        survey_id: str
+        agent_config: dict[str, Any]
+        session: AgentSession
+        agent_instance: DynamicAgent
+        voice_id: str
+        speaking_speed: float
+        tts_model: str
+        lang_state: dict[str, Any]
+        loop_obj: asyncio.AbstractEventLoop
+        stop_guard: asyncio.Event
+        finished: asyncio.Event
+        AMD_WINDOW_SECONDS: float
+        SILENCE_REPROMPT_DELAY: float
+        CALL_TIMEOUT_SECONDS: int
+        amd_state: dict[str, Any]
+        transcript_event_buffer: list[dict[str, Any]]
+        VOICEMAIL_PATTERNS: tuple[str, ...]
+        REPROMPT_PHRASES: list[str]
+        INTERRUPTION_ACKS: list[str]
+        LATENCY_FILLERS: list[str]
+        reprompt_state: dict[str, Any]
+        reprompt_phrases_lc: set[str]
+        runtime_state: dict[str, Any]
+        max_short_interrupt_words: int
+        bg_player: BackgroundAudioPlayer | None
+        usage_collector: UsageCollector
+        _filler_task: asyncio.Task[None] | None
+        _llm_responding: bool
+        _tasks: list[asyncio.Task[Any]]
+        _workflow_lock: asyncio.Lock
+
+        def _spawn_ephemeral(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]: ...
+        def _append_transcript_event(self, role: str, content: str) -> None: ...
+        async def _save_transcript_snapshot(self, reason: str = "auto") -> None: ...
+        async def _handle_workflow_turn(
+            self,
+            user_response: str,
+            wf_sm: WorkflowStateMachine,
+        ) -> None: ...
+
     async def _try_switch_language(self, user_text: str) -> None:
         if self.lang_state["detected"]:
             return
@@ -101,7 +162,7 @@ class CallSessionLifecycleMixin:
                 elif hasattr(self.session, "update_chat_ctx"):
                     from livekit.agents.llm import ChatMessage
                     new_ctx = chat_ctx.copy() if hasattr(chat_ctx, "copy") else chat_ctx
-                    new_ctx.messages.append(ChatMessage.create(text=override_msg, role="system"))
+                    new_ctx.messages.append(ChatMessage.create(text=override_msg, role="system"))  # type: ignore[attr-defined]
                     await self.session.update_chat_ctx(new_ctx)
                 logger.info(f"🌐 [{self.job_id}] Override de idioma '{detected}' inyectado.")
         except Exception as ctx_err:
@@ -113,7 +174,7 @@ class CallSessionLifecycleMixin:
                 speaking_speed=self.speaking_speed,
                 tts_model=self.tts_model,
             )
-            await self.session.update_options(tts=new_tts)
+            await self.session.update_options(tts=new_tts)  # type: ignore
             logger.info(f"🎙️ [{self.job_id}] TTS actualizado a idioma '{detected}'.")
         except Exception as tts_err:
             logger.warning(f"⚠️ [{self.job_id}] No se pudo actualizar TTS al idioma '{detected}': {tts_err}")

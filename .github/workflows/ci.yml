@@ -60,7 +60,14 @@ jobs:
           pytest tests/ -v --tb=short -x \
             --asyncio-mode=auto
 
-      - name: Type check (mypy)
+      - name: Type check (mypy) — agent_lifecycle
+        working-directory: backend
+        run: |
+          pip install mypy
+          mypy agents/agent_lifecycle.py \
+            --ignore-missing-imports --no-strict-optional --python-version 3.11
+
+      - name: Type check (mypy) — codebase completo
         working-directory: backend
         continue-on-error: true
         run: |
