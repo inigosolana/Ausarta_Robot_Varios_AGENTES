@@ -111,7 +111,7 @@ async def update_empresa_limits(
         lambda: supabase.table("empresas")
         .update(update)
         .eq("id", empresa_id)
-        .select("id, nombre, plan, max_llamadas_mes, max_agentes, llamadas_consumidas_mes")
+        .select("id, nombre, plan, max_llamadas_mes, max_agentes, llamadas_consumidas_mes")  # type: ignore[attr-defined]
         .execute()
     )
 
@@ -245,7 +245,7 @@ async def update_empresa_crm_config(
         text = str(value or "").strip()
         return text or None
 
-    updates: dict[str, object] = {}
+    updates: dict[str, str | None] = {}
     if "crm_type" in payload:
         updates["crm_type"] = str(payload.get("crm_type") or "custom").strip().lower() or "custom"
     if "crm_webhook_url" in payload:
@@ -261,7 +261,7 @@ async def update_empresa_crm_config(
             lambda: supabase.table("empresas")
             .update(updates)
             .eq("id", empresa_id)
-            .select("id, nombre, crm_type, crm_webhook_url, webhook_url")
+            .select("id, nombre, crm_type, crm_webhook_url, webhook_url")  # type: ignore[attr-defined]
             .execute()
         )
     except Exception as e:

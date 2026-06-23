@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 from services.crypto_service import decrypt_data
 from services.supabase_service import sb_query, supabase
-from services.yeastar_service import YeastarClient
+from services.yeastar_service import YeastarApiMode, YeastarClient
 
 
 async def get_yeastar_config_row(empresa_id: int) -> dict | None:
@@ -42,10 +42,12 @@ def yeastar_config_to_response(row: dict) -> dict:
     }
 
 
-def infer_yeastar_api_mode(raw_url: str, explicit_mode: str | None = None) -> str:
+def infer_yeastar_api_mode(raw_url: str, explicit_mode: str | None = None) -> YeastarApiMode:
     mode = (explicit_mode or "").strip().lower()
-    if mode in {"pseries", "cloud_pbx"}:
-        return mode
+    if mode == "cloud_pbx":
+        return "cloud_pbx"
+    if mode == "pseries":
+        return "pseries"
     url = (raw_url or "").strip().lower()
     if ".cloud." in url or "yeastarcloud" in url:
         return "cloud_pbx"

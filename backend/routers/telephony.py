@@ -393,7 +393,7 @@ async def create_citelia_outbound_trunk(
         lambda tid=trunk["id"], eid=empresa_id: supabase.table("empresas")
         .update({"sip_outbound_trunk_id": tid})
         .eq("id", eid)
-        .select("id, nombre, sip_outbound_trunk_id, sip_inbound_trunk_id")
+        .select("id, nombre, sip_outbound_trunk_id, sip_inbound_trunk_id")  # type: ignore[attr-defined]
         .execute()
     )
 

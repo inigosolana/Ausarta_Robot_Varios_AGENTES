@@ -269,7 +269,7 @@ class DynamicAgent(Agent, AgentToolsMixin, DynamicAgentLifecycleMixin):
         if extraction_schema and isinstance(extraction_schema, list) and len(extraction_schema) > 0:
             raw_schema = _build_guardar_encuesta_raw_schema(extraction_schema)
 
-            @function_tool(name="guardar_encuesta", raw_schema=raw_schema)
+            @function_tool(raw_schema=raw_schema)
             async def _tool_guardar_encuesta_strict(
                 ctx: RunContext, raw_arguments: dict[str, Any]
             ) -> str | None:

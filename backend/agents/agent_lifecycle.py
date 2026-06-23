@@ -54,7 +54,6 @@ class DynamicAgentLifecycleMixin:
         room_name: str
         survey_id: str
         greeting: str
-        session: AgentSession
 
     async def on_enter(self, *args, **kwargs) -> None:
         """Método llamado cuando el agente entra en la sesión. Lanza el saludo inicial."""
