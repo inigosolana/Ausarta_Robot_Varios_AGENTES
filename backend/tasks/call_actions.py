@@ -74,11 +74,15 @@ async def agent_post_guardar_encuesta(ctx: dict[str, Any], payload: dict) -> Non
                         .execute()
                     )
                     consumed = int(count_res.count or 0)
-                    if consumed >= int(max_llamadas_mes * 0.8):
-                        await ctx["redis"].enqueue_job(
-                            "send_telegram_alert_task",
-                            f"[AUSARTA] Empresa {empresa.get('nombre') or empresa_id} ha superado el 80% de su cuota mensual ({consumed}/{max_llamadas_mes}).",
-                        )
+                    from services.tenant_quota_alerts import maybe_alert_call_quota_threshold
+
+                    await maybe_alert_call_quota_threshold(
+                        empresa_id,
+                        consumed=consumed,
+                        max_calls=max_llamadas_mes,
+                        empresa_nombre=empresa.get("nombre"),
+                        redis=ctx.get("redis"),
+                    )
 
             streak_key = f"ausarta:failed_streak:{empresa_id}"
             if status == "failed":

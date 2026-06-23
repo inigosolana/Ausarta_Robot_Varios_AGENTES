@@ -50,5 +50,5 @@ async def nombre_herramienta(context: RunContext, param: str) -> str:
 - [x] Añadir function_tool `consultar_cliente` en agent.py (+ `external_db_allowed_queries` en config API)
 - [x] Personalidad dinámica: `critical_rules` + entusiasmo/velocidad/voz en prompt y TTS
 - [x] Resumen LLM al colgar → `resumen_llamada` en Supabase (sin sync a Notion)
-- [ ] Alertas operativas → Telegram (cuota 80%/100%, incidencias, etc.)
+- [x] Alertas operativas → Telegram (cuota 80%/100% llamadas y gasto EUR; ver `tenant_quota_alerts.py`)
 - [x] knowledge_base + pgvector + RPC `search_knowledge_base` (migraciones en `backend/supabase/migrations/`)

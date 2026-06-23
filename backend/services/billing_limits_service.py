@@ -157,6 +157,23 @@ async def enforce_tenant_spending_limit(
       - raise_http=False → TenantSpendingLimitExceeded (workers ARQ)
     """
     status = await evaluate_tenant_spending(empresa_id, period=period)
+
+    if status.limit_eur is not None and status.limit_eur > 0:
+        try:
+            from services.redis_service import get_redis
+            from services.tenant_quota_alerts import maybe_alert_spend_quota_threshold
+
+            redis = await get_redis()
+            await maybe_alert_spend_quota_threshold(
+                empresa_id,
+                spent_eur=status.spent_eur,
+                limit_eur=status.limit_eur,
+                period=status.period,
+                redis=redis,
+            )
+        except Exception as exc:
+            logger.debug("[billing-limit] Alerta gasto omitida: %s", exc)
+
     if not status.limit_exceeded:
         return status
 

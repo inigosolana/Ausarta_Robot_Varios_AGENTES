@@ -25,6 +25,7 @@ from routers.dashboard import router as dashboard_router
 from routers.settings import router as settings_router
 from routers.agents import router as agents_router
 from routers.telephony import router as telephony_router
+from routers.telephony_extensions import router as telephony_extensions_router
 from routers.admin import router as admin_router
 from routers.campaigns import router as campaigns_router
 from routers.campaign_webhook_legacy import router as campaign_webhook_legacy_router
@@ -218,6 +219,7 @@ app.include_router(dashboard_router)
 app.include_router(settings_router)
 app.include_router(agents_router)
 app.include_router(telephony_router)
+app.include_router(telephony_extensions_router)
 app.include_router(admin_router)
 app.include_router(campaigns_router)
 app.include_router(campaign_webhook_legacy_router)
