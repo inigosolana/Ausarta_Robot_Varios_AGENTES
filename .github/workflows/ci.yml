@@ -24,6 +24,7 @@ jobs:
       LIVEKIT_URL: ""
       LIVEKIT_API_KEY: ""
       LIVEKIT_API_SECRET: ""
+      IMPERSONATION_SECRET: "test-impersonation-secret"
 
     services:
       redis:
@@ -57,18 +58,16 @@ jobs:
         working-directory: backend
         run: |
           pytest tests/ -v --tb=short -x \
-            --asyncio-mode=auto \
-            --ignore=tests/test_api.py
+            --asyncio-mode=auto
 
       - name: Type check (mypy)
         working-directory: backend
+        continue-on-error: true
         run: |
           pip install mypy
           mypy agents services routers utils tasks models middleware \
             --ignore-missing-imports --no-strict-optional --python-version 3.11 \
-            --exclude 'scripts/' || true
-        # test_api.py requiere Supabase real → excluido en CI básico
-        # Para incluirlo, configura SUPABASE_URL/KEY como secrets en el repo
+            --exclude 'scripts/'
 
       - name: Upload test results
         if: always()

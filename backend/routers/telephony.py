@@ -1,12 +1,11 @@
 """
-telephony.py — Configuración Yeastar PBX, troncales y utilidades de sala LiveKit.
+telephony.py — Configuración Yeastar PBX, troncales SIP y auto-provision inbound.
 
-Endpoints de transferencia, webhook LiveKit, encuestas y outbound viven en routers dedicados.
+Colgar sala, encuestas, outbound y webhooks viven en routers telephony_* dedicados.
 """
 from fastapi import APIRouter, Body, Depends, Request, HTTPException
 from fastapi.responses import JSONResponse, Response
 from models.schemas import (
-    CallEndRequest,
     YeastarPSeriesConfigCreate,
     YeastarPSeriesConfigResponse,
     YeastarPSeriesConfigTest,
@@ -14,7 +13,6 @@ from models.schemas import (
 from services.supabase_service import supabase, sb_query
 from services.platform_access import has_global_access
 from services.livekit_service import (
-    lkapi,
     ensure_citelia_outbound_trunk,
     ensure_yeastar_inbound_trunk,
     list_sip_trunks,
@@ -30,7 +28,6 @@ from services.telephony_yeastar_config_service import (
 )
 from services.auth import get_current_user, CurrentUser, require_admin
 from services.crypto_service import encrypt_data, decrypt_data
-from livekit import api
 import json
 import os
 from datetime import datetime, timezone
@@ -825,57 +822,3 @@ async def _resolve_inbound_agent_id(empresa_id: int) -> int | None:
     )
     return int(preferred["id"]) if preferred.get("id") is not None else None
 
-# ──────────────────────────────────────────────
-# Colgar sala
-# ──────────────────────────────────────────────
-
-@router.post("/colgar")
-async def finalizar_llamada(req: CallEndRequest):
-    """Cierra una sala de LiveKit."""
-    try:
-        logger.info(f"✂️ Cerrando sala: {req.nombre_sala}")
-        await lkapi.room.delete_room(api.DeleteRoomRequest(room=req.nombre_sala))
-        return {"status": "ok", "message": f"Sala {req.nombre_sala} cerrada"}
-    except Exception as e:
-        err_msg = str(e).lower()
-        # Sala ya cerrada (cliente colgó primero, room_finished, etc.) → tratar como éxito
-        if "not_found" in err_msg or "does not exist" in err_msg or "404" in err_msg:
-            logger.info(f"✓ Sala {req.nombre_sala} ya cerrada (no existe). OK.")
-            return {"status": "ok", "message": "Sala ya cerrada"}
-        logger.error(f"⚠️ Error al cerrar sala {req.nombre_sala}: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# COLGAR LLAMADA — Endpoint para panel de monitorización en vivo
-# ─────────────────────────────────────────────────────────────────────────────
-
-@router.post("/api/calls/hang_up")
-async def hang_up_call(
-    payload: dict,
-    current_user: CurrentUser = Depends(require_admin),
-):
-    """
-    Cierra/cuelga una sala LiveKit activa.
-    Body: { "room_name": str }
-    """
-    room_name = (payload.get("room_name") or "").strip()
-    if not room_name:
-        raise HTTPException(status_code=400, detail="room_name es obligatorio")
-
-    try:
-        from services.queue_service import get_arq_pool
-        arq_pool = await get_arq_pool()
-        job = await arq_pool.enqueue_job("colgar_sala", room_name)
-        logger.info(f"📬 [hang_up] Colgar sala {room_name} encolado (job={getattr(job, 'job_id', 'n/a')})")
-    except Exception as q_err:
-        logger.warning(f"⚠️ [hang_up] No se pudo encolar colgar sala {room_name}: {q_err}")
-        if lkapi:
-            try:
-                from livekit import api as lk_api
-                await lkapi.room.delete_room(lk_api.DeleteRoomRequest(room=room_name))
-                logger.info(f"✅ [hang_up] Sala {room_name} cerrada directamente via LiveKit API")
-            except Exception as lk_err:
-                raise HTTPException(status_code=502, detail=f"Error cerrando sala: {lk_err}") from lk_err
-
-    return {"status": "ok", "room_name": room_name, "message": "Sala cerrada"}
