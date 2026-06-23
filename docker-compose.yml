@@ -31,7 +31,7 @@ x-app-environment: &app-environment
   AUSARTA_API_KEY_LEGACY: ${AUSARTA_API_KEY_LEGACY:-false}
   AGENT_NAME_DISPATCH: ${AGENT_NAME_DISPATCH:-default_agent}
   ENABLE_RECORDING: ${ENABLE_RECORDING:-false}
-  AGENTS_API_KEY: ${AGENTS_API_KEY:-}
+  AGENTS_API_KEY: ${AGENTS_API_KEY:?AGENTS_API_KEY es obligatorio. Defínelo en .env para autenticar el agente LiveKit contra el backend.}
   VOICE_ID_AUSARTA: ${VOICE_ID_AUSARTA:-}
   VOICE_ID_ESPANOL_F: ${VOICE_ID_ESPANOL_F:-}
   VOICE_ID_INES: ${VOICE_ID_INES:-}

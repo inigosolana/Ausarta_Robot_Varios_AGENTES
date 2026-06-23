@@ -143,7 +143,7 @@ async def _resolve_sse_user(token: str) -> CurrentUser:
     por lo que usamos query param como alternativa estándar para SSE autenticado.
     """
     try:
-        auth_user = _get_user_from_supabase_jwt(token)
+        auth_user = await _get_user_from_supabase_jwt(token)
         user_id = auth_user.get("id")
         if not user_id:
             raise HTTPException(status_code=401, detail="Token inválido")

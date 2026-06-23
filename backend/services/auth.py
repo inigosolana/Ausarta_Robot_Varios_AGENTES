@@ -7,6 +7,7 @@ Incluye:
 - Verificación de token de impersonation (HMAC-SHA256).
 """
 import os
+import asyncio
 import hmac
 import json
 import time
@@ -146,19 +147,23 @@ def _get_jwks_client() -> PyJWKClient | None:
 
 
 _jwks_client: PyJWKClient | None = None
+_jwks_lock = asyncio.Lock()
 
 
-def _jwks() -> PyJWKClient:
+async def _jwks() -> PyJWKClient:
     global _jwks_client
-    if _jwks_client is None:
-        client = _get_jwks_client()
-        if client is None:
-            raise HTTPException(status_code=500, detail="SUPABASE_URL no configurada para JWKS")
-        _jwks_client = client
+    if _jwks_client is not None:
+        return _jwks_client
+    async with _jwks_lock:
+        if _jwks_client is None:
+            client = _get_jwks_client()
+            if client is None:
+                raise HTTPException(status_code=500, detail="SUPABASE_URL no configurada para JWKS")
+            _jwks_client = client
     return _jwks_client
 
 
-def _get_user_from_supabase_jwt(token: str) -> dict:
+async def _get_user_from_supabase_jwt(token: str) -> dict:
     """
     Valida el JWT de Supabase localmente.
     - HS256: SUPABASE_JWT_SECRET (legacy)
@@ -178,7 +183,7 @@ def _get_user_from_supabase_jwt(token: str) -> dict:
             decode_kwargs["algorithms"] = ["HS256"]
             payload = pyjwt.decode(token, jwt_secret, **decode_kwargs)
         elif alg in ("ES256", "RS256"):
-            signing_key = _jwks().get_signing_key_from_jwt(token)
+            signing_key = (await _jwks()).get_signing_key_from_jwt(token)
             decode_kwargs["algorithms"] = [alg]
             payload = pyjwt.decode(
                 token,
@@ -262,7 +267,7 @@ async def get_current_user(
         raise HTTPException(status_code=500, detail="No hay conexión con Supabase")
 
     token = creds.credentials
-    auth_user = _get_user_from_supabase_jwt(token)
+    auth_user = await _get_user_from_supabase_jwt(token)
     user_id = auth_user.get("id")
     if not user_id:
         raise HTTPException(status_code=401, detail="Token sin user_id")

@@ -57,6 +57,7 @@ check_required_var() {
   fi
 }
 
+check_required_var "AGENTS_API_KEY"         "Necesaria para autenticar el agente LiveKit contra el backend."
 check_required_var "DOZZLE_PASSWORD"        "Necesaria para proteger el visor de logs Docker."
 check_required_var "IMPERSONATION_SECRET"   "Necesaria para tokens de impersonación admin."
 check_required_var "REDIS_PASSWORD"         "Necesaria para autenticar Redis en producción."
