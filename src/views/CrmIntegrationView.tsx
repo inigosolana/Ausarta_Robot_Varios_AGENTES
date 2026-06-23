@@ -13,7 +13,8 @@ import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import { apiFetch } from '../lib/apiFetch';
 import { useAuth } from '../contexts/AuthContext';
-import type { Empresa } from '../types';
+import { useEmpresasAdmin } from '../api/empresas';
+import { useCrmConfig, useInvalidateCrmConfig } from '../api/crm';
 
 const ZAPIER_TEST_PAYLOAD = {
     event: 'call.completed',
@@ -142,68 +143,44 @@ const CrmCard: React.FC<{
 const CrmIntegrationView: React.FC = () => {
     const { profile, isPlatformOwner } = useAuth();
     const { t } = useTranslation();
+    const invalidateCrmConfig = useInvalidateCrmConfig();
 
-    const [empresas, setEmpresas] = useState<Empresa[]>([]);
+    const { data: empresas = [], isLoading: empresasLoading } = useEmpresasAdmin(undefined, isPlatformOwner);
     const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | null>(null);
     const [webhookUrl, setWebhookUrl] = useState('');
     const [crmType, setCrmType] = useState('hubspot');
     const [automationWebhookUrl, setAutomationWebhookUrl] = useState('');
     const [isSavingCrm, setIsSavingCrm] = useState(false);
     const [isSavingAutomation, setIsSavingAutomation] = useState(false);
-    const [isLoading, setIsLoading] = useState(true);
+
+    const {
+        data: crmConfig,
+        isLoading: configLoading,
+        isFetching: configFetching,
+    } = useCrmConfig(selectedEmpresaId, Boolean(selectedEmpresaId));
+    const isLoading = empresasLoading || configLoading || configFetching;
 
     useEffect(() => {
         if (isPlatformOwner) {
-            void loadEmpresas();
+            if (!empresas.length) return;
+            setSelectedEmpresaId((prev) => {
+                if (prev != null) return prev;
+                const ausarta = empresas.find((emp) => emp.nombre?.toLowerCase() === 'ausarta');
+                return ausarta?.id ?? empresas[0].id ?? null;
+            });
             return;
         }
         if (profile?.empresa_id) {
             setSelectedEmpresaId(profile.empresa_id);
-            void loadIntegrationConfig(profile.empresa_id);
-            return;
         }
-        setIsLoading(false);
-    }, [profile?.empresa_id, isPlatformOwner]);
+    }, [profile?.empresa_id, isPlatformOwner, empresas]);
 
     useEffect(() => {
-        if (!selectedEmpresaId) return;
-        void loadIntegrationConfig(selectedEmpresaId);
-    }, [selectedEmpresaId]);
-
-    const loadEmpresas = async () => {
-        try {
-            const res = await apiFetch('/api/empresas');
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data: Empresa[] = await res.json();
-            setEmpresas(data || []);
-            if (data?.length && !selectedEmpresaId) {
-                const ausarta = data.find((emp) => emp.nombre?.toLowerCase() === 'ausarta');
-                setSelectedEmpresaId(ausarta?.id ?? data[0].id);
-            }
-        } catch (error) {
-            console.error('Error loading companies:', error);
-            toast.error(t('Error loading companies', 'Error al cargar empresas'));
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const loadIntegrationConfig = async (empresaId: number) => {
-        setIsLoading(true);
-        try {
-            const res = await apiFetch(`/api/admin/empresas/${empresaId}/crm-config`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            setCrmType(data.crm_type || 'hubspot');
-            setWebhookUrl(data.crm_webhook_url || '');
-            setAutomationWebhookUrl(data.webhook_url || '');
-        } catch (error) {
-            console.error('Error loading integration config:', error);
-            toast.error(t('Error loading configuration', 'Error al cargar configuración'));
-        } finally {
-            setIsLoading(false);
-        }
-    };
+        if (!crmConfig) return;
+        setCrmType(crmConfig.crm_type || 'hubspot');
+        setWebhookUrl(crmConfig.crm_webhook_url || '');
+        setAutomationWebhookUrl(crmConfig.webhook_url || '');
+    }, [crmConfig, selectedEmpresaId]);
 
     const handleSaveCrm = async () => {
         if (!selectedEmpresaId) return;
@@ -215,6 +192,7 @@ const CrmIntegrationView: React.FC = () => {
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             toast.success(t('CRM configuration saved', 'Configuracion CRM guardada'));
+            if (selectedEmpresaId) invalidateCrmConfig(selectedEmpresaId);
         } catch (error) {
             console.error('Error saving CRM config:', error);
             toast.error(t('Error saving CRM config', 'Error al guardar configuracion CRM'));
@@ -233,6 +211,7 @@ const CrmIntegrationView: React.FC = () => {
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             toast.success(t('Automation webhook saved', 'Webhook de automatizacion guardado'));
+            if (selectedEmpresaId) invalidateCrmConfig(selectedEmpresaId);
         } catch (error) {
             console.error('Error saving automation webhook:', error);
             toast.error(t('Error saving webhook', 'Error al guardar webhook'));

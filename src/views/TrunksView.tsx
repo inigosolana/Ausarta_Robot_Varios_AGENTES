@@ -1,32 +1,30 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Building2, Route, Save, RefreshCw, Plus, Pencil, Trash2, X, Phone, Server, AlertTriangle } from 'lucide-react';
-import { apiFetch, fetchTrunks, type TelephonyTrunk } from '../lib/apiFetch';
+import { apiFetch, type TelephonyTrunk } from '../lib/apiFetch';
 import { useAuth } from '../contexts/AuthContext';
-
-type EmpresaRow = {
-  id: number;
-  nombre: string;
-  sip_outbound_trunk_id?: string | null;
-  sip_inbound_trunk_id?: string | null;
-};
-
-type Extension = {
-  id: string;
-  extension_number: string;
-  extension_name: string | null;
-  departamento: string | null;
-};
+import {
+  useInvalidateTrunks,
+  useTrunkEmpresas,
+  useTrunkExtensions,
+  useTrunksData,
+  type TrunkExtension,
+} from '../api/trunks';
 
 type ExtModalState = {
   open: boolean;
   mode: 'add' | 'edit';
-  ext: Partial<Extension>;
+  ext: Partial<TrunkExtension>;
 };
 
 const TrunksView: React.FC = () => {
   const { profile, isPlatformOwner } = useAuth();
-  const [rows, setRows] = useState<EmpresaRow[]>([]);
-  const [loading, setLoading] = useState(false);
+  const {
+    invalidateExtensions,
+    invalidateTrunksData,
+    updateEmpresaRow,
+  } = useInvalidateTrunks();
+
+  const { data: rows = [], isLoading: loading, refetch: reloadEmpresas } = useTrunkEmpresas();
   const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | null>(null);
   const [outbound, setOutbound] = useState('');
   const [inbound, setInbound] = useState('');
@@ -36,15 +34,21 @@ const TrunksView: React.FC = () => {
   const [syncingInbound, setSyncingInbound] = useState(false);
   const [selectedYeastarTrunkId, setSelectedYeastarTrunkId] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [livekitTrunks, setLivekitTrunks] = useState<TelephonyTrunk[]>([]);
-  const [yeastarTrunks, setYeastarTrunks] = useState<TelephonyTrunk[]>([]);
-  const [trunksLoading, setTrunksLoading] = useState(false);
   const [trunksMsg, setTrunksMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [trunkErrors, setTrunkErrors] = useState<Record<string, string>>({});
 
-  // Extensions state
-  const [extensions, setExtensions] = useState<Extension[]>([]);
-  const [extLoading, setExtLoading] = useState(false);
+  const {
+    data: extensions = [],
+    isLoading: extLoading,
+  } = useTrunkExtensions(selectedEmpresaId, Boolean(selectedEmpresaId));
+  const {
+    data: trunksData,
+    isLoading: trunksLoading,
+    refetch: reloadTrunks,
+  } = useTrunksData(selectedEmpresaId, Boolean(selectedEmpresaId));
+
+  const livekitTrunks = trunksData?.livekit_trunks || [];
+  const yeastarTrunks = trunksData?.yeastar_trunks || [];
+  const trunkErrors = trunksData?.errors || {};
   const [extMsg, setExtMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [extStatuses, setExtStatuses] = useState<Record<string, string>>({});
   const [syncingExt, setSyncingExt] = useState(false);
@@ -63,6 +67,31 @@ const TrunksView: React.FC = () => {
     () => rows.find(r => r.id === selectedEmpresaId) || null,
     [rows, selectedEmpresaId],
   );
+
+  useEffect(() => {
+    if (!rows.length || selectedEmpresaId) return;
+    setSelectedEmpresaId(rows[0].id);
+    setOutbound(rows[0].sip_outbound_trunk_id || '');
+    setInbound(rows[0].sip_inbound_trunk_id || '');
+  }, [rows, selectedEmpresaId]);
+
+  useEffect(() => {
+    if (!yeastarTrunks.length) {
+      setSelectedYeastarTrunkId('');
+      return;
+    }
+    setSelectedYeastarTrunkId((prev) => (
+      yeastarTrunks.some((trunk) => trunk.id === prev || trunk.name === prev)
+        ? prev
+        : yeastarTrunks[0]?.id || yeastarTrunks[0]?.name || ''
+    ));
+  }, [yeastarTrunks, selectedEmpresaId]);
+
+  useEffect(() => {
+    if (!selected) return;
+    setOutbound(selected.sip_outbound_trunk_id || '');
+    setInbound(selected.sip_inbound_trunk_id || '');
+  }, [selected]);
 
   const companyNumbers = useMemo(() => {
     const allTrunks = [...livekitTrunks, ...yeastarTrunks];
@@ -90,65 +119,6 @@ const TrunksView: React.FC = () => {
     };
   }, [livekitTrunks, yeastarTrunks]);
 
-  const loadEmpresas = async () => {
-    setLoading(true);
-    setMsg(null);
-    try {
-      const res = await apiFetch('/api/admin/empresas');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: EmpresaRow[] = await res.json();
-      setRows(data || []);
-      if (data?.length && !selectedEmpresaId) {
-        setSelectedEmpresaId(data[0].id);
-        setOutbound(data[0].sip_outbound_trunk_id || '');
-        setInbound(data[0].sip_inbound_trunk_id || '');
-      }
-    } catch (err: any) {
-      setMsg({ ok: false, text: err?.message || 'No se pudieron cargar las empresas' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadExtensions = useCallback(async (empresaId: number) => {
-    setExtLoading(true);
-    setExtMsg(null);
-    try {
-      const res = await apiFetch(`/api/empresas/${empresaId}/extensions`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: Extension[] = await res.json();
-      setExtensions(data || []);
-    } catch (err: any) {
-      setExtMsg({ ok: false, text: err?.message || 'No se pudieron cargar las extensiones' });
-    } finally {
-      setExtLoading(false);
-    }
-  }, []);
-
-  const loadAvailableTrunks = useCallback(async (empresaId: number) => {
-    setTrunksLoading(true);
-    setTrunksMsg(null);
-    try {
-      const data = await fetchTrunks(empresaId);
-      const nextYeastarTrunks = data.yeastar_trunks || [];
-      setLivekitTrunks(data.livekit_trunks || []);
-      setYeastarTrunks(nextYeastarTrunks);
-      setSelectedYeastarTrunkId(prev => (
-        nextYeastarTrunks.some((trunk) => trunk.id === prev || trunk.name === prev)
-          ? prev
-          : nextYeastarTrunks[0]?.id || nextYeastarTrunks[0]?.name || ''
-      ));
-      setTrunkErrors(data.errors || {});
-    } catch (err: any) {
-      setLivekitTrunks([]);
-      setYeastarTrunks([]);
-      setTrunkErrors({});
-      setTrunksMsg({ ok: false, text: err?.message || 'No se pudieron cargar las troncales disponibles' });
-    } finally {
-      setTrunksLoading(false);
-    }
-  }, []);
-
   const syncExtensionsFromYeastar = async () => {
     if (!selectedEmpresaId) return;
     setSyncingExt(true);
@@ -162,8 +132,8 @@ const TrunksView: React.FC = () => {
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
       const data = await res.json();
-      setExtensions(data.extensions || []);
       setExtMsg({ ok: true, text: `${data.synced || 0} extensiones sincronizadas desde Yeastar` });
+      if (selectedEmpresaId) await invalidateExtensions(selectedEmpresaId);
     } catch (err: any) {
       setExtMsg({ ok: false, text: err?.message || 'No se pudo sincronizar con Yeastar' });
     } finally {
@@ -189,19 +159,6 @@ const TrunksView: React.FC = () => {
       setStatusLoading(false);
     }
   };
-
-  useEffect(() => {
-    loadEmpresas();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!selected) return;
-    setOutbound(selected.sip_outbound_trunk_id || '');
-    setInbound(selected.sip_inbound_trunk_id || '');
-    loadExtensions(selected.id);
-    loadAvailableTrunks(selected.id);
-  }, [selected, loadExtensions, loadAvailableTrunks]);
 
   const phoneText = (trunk: TelephonyTrunk) => {
     const numbers = trunk.phone_numbers || [];
@@ -289,15 +246,10 @@ const TrunksView: React.FC = () => {
       }
       const json = await res.json();
       const updated = json?.empresa || {};
-      setRows(prev => prev.map(r => (
-        r.id === selectedEmpresaId
-          ? {
-            ...r,
-            sip_outbound_trunk_id: updated.sip_outbound_trunk_id ?? null,
-            sip_inbound_trunk_id: updated.sip_inbound_trunk_id ?? null,
-          }
-          : r
-      )));
+      updateEmpresaRow(selectedEmpresaId, {
+        sip_outbound_trunk_id: updated.sip_outbound_trunk_id ?? null,
+        sip_inbound_trunk_id: updated.sip_inbound_trunk_id ?? null,
+      });
       setMsg({ ok: true, text: 'Troncales guardados correctamente' });
     } catch (err: any) {
       setMsg({ ok: false, text: err?.message || 'No se pudo guardar' });
@@ -324,15 +276,10 @@ const TrunksView: React.FC = () => {
       const updated = json?.empresa || {};
       if (trunk?.id) {
         setOutbound(trunk.id);
-        setRows(prev => prev.map(r => (
-          r.id === selectedEmpresaId
-            ? {
-              ...r,
-              sip_outbound_trunk_id: updated.sip_outbound_trunk_id ?? trunk.id,
-              sip_inbound_trunk_id: updated.sip_inbound_trunk_id ?? r.sip_inbound_trunk_id ?? null,
-            }
-            : r
-        )));
+        updateEmpresaRow(selectedEmpresaId, {
+          sip_outbound_trunk_id: updated.sip_outbound_trunk_id ?? trunk.id,
+          sip_inbound_trunk_id: updated.sip_inbound_trunk_id ?? selected?.sip_inbound_trunk_id ?? null,
+        });
       }
       setMsg({
         ok: true,
@@ -340,7 +287,7 @@ const TrunksView: React.FC = () => {
           ? `Troncal CITELIA creada correctamente (${trunk.id})`
           : `Troncal CITELIA reutilizada (${trunk.id})`,
       });
-      await loadAvailableTrunks(selectedEmpresaId);
+      if (selectedEmpresaId) await invalidateTrunksData(selectedEmpresaId);
     } catch (err: any) {
       setMsg({ ok: false, text: err?.message || 'No se pudo crear la troncal CITELIA' });
     } finally {
@@ -365,18 +312,14 @@ const TrunksView: React.FC = () => {
       const trunk = json?.inbound || {};
       if (!trunk?.id) throw new Error('LiveKit no devolvio ID de troncal entrante');
       setInbound(trunk.id);
-      setRows(prev => prev.map(r => (
-        r.id === selectedEmpresaId
-          ? { ...r, sip_inbound_trunk_id: trunk.id }
-          : r
-      )));
+      updateEmpresaRow(selectedEmpresaId, { sip_inbound_trunk_id: trunk.id });
       setMsg({
         ok: true,
         text: trunk.created
           ? `Inbound LiveKit creada desde Yeastar (${trunk.id})`
           : `Inbound LiveKit actualizada desde Yeastar (${trunk.id})`,
       });
-      await loadAvailableTrunks(selectedEmpresaId);
+      if (selectedEmpresaId) await invalidateTrunksData(selectedEmpresaId);
     } catch (err: any) {
       setMsg({ ok: false, text: err?.message || 'No se pudo crear la inbound LiveKit desde Yeastar' });
     } finally {
@@ -388,7 +331,7 @@ const TrunksView: React.FC = () => {
     setExtModal({ open: true, mode: 'add', ext: {} });
   };
 
-  const openEditExt = (ext: Extension) => {
+  const openEditExt = (ext: TrunkExtension) => {
     setExtModal({ open: true, mode: 'edit', ext: { ...ext } });
   };
 
@@ -428,7 +371,7 @@ const TrunksView: React.FC = () => {
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
 
-      await loadExtensions(selectedEmpresaId);
+      if (selectedEmpresaId) await invalidateExtensions(selectedEmpresaId);
       closeModal();
       setExtMsg({ ok: true, text: mode === 'add' ? 'Extensión creada' : 'Extensión actualizada' });
     } catch (err: any) {
@@ -450,7 +393,7 @@ const TrunksView: React.FC = () => {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
-      setExtensions(prev => prev.filter(e => e.id !== extId));
+      if (selectedEmpresaId) await invalidateExtensions(selectedEmpresaId);
       setExtMsg({ ok: true, text: 'Extensión eliminada' });
     } catch (err: any) {
       setExtMsg({ ok: false, text: err?.message || 'No se pudo eliminar' });
@@ -497,7 +440,7 @@ const TrunksView: React.FC = () => {
               ))}
             </select>
             <button
-              onClick={loadEmpresas}
+              onClick={() => void reloadEmpresas()}
               className="h-10 px-3 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600"
               title="Refrescar"
             >
@@ -700,7 +643,7 @@ const TrunksView: React.FC = () => {
               <p className="text-xs text-gray-500">Consulta directa de LiveKit y Yeastar para la empresa seleccionada.</p>
             </div>
             <button
-              onClick={() => loadAvailableTrunks(selectedEmpresaId)}
+              onClick={() => selectedEmpresaId && void reloadTrunks()}
               disabled={trunksLoading}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
               title="Refrescar troncales disponibles"

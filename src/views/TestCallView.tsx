@@ -4,14 +4,11 @@ import {
     Phone, Loader2, Bot, PhoneCall, PhoneIncoming, PhoneOutgoing,
     Copy, Check, AlertTriangle, ExternalLink,
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import type { AgentConfig } from '../types';
-import { apiFetch, extractInboundPhoneNumbers, fetchTrunks } from '../lib/apiFetch';
+import { apiFetch } from '../lib/apiFetch';
 import { getAgentCallDirection, type AgentCallDirection } from '../lib/agentVoiceOptions';
 import { LiveCallPanel } from '../components/LiveCallPanel';
-
-const API_URL = (import.meta as any).env.VITE_API_URL || window.location.origin + '/api' || 'http://localhost:8001/api';
+import { useInboundPhoneNumbers, useTestCallAgents } from '../api/testCall';
 
 type CallMode = AgentCallDirection;
 
@@ -38,114 +35,53 @@ const MODE_STYLES = {
 
 const TestCallView: React.FC = () => {
     const { profile } = useAuth();
-    const [agents, setAgents] = useState<AgentConfig[]>([]);
+    const agentsEmpresaId =
+        profile && profile.role !== 'superadmin' && profile.empresa_id
+            ? profile.empresa_id
+            : undefined;
+
+    const { data: agents = [], isLoading: loading } = useTestCallAgents(agentsEmpresaId, Boolean(profile));
     const [selectedAgentId, setSelectedAgentId] = useState<string>('');
     const [callMode, setCallMode] = useState<CallMode>('outbound');
     const [modeTouched, setModeTouched] = useState(false);
     const [phoneNumber, setPhoneNumber] = useState('+34');
-    const [loading, setLoading] = useState(true);
     const [isCalling, setIsCalling] = useState(false);
     const [callResult, setCallResult] = useState<{ success: boolean; message: string } | null>(null);
     const [activeRoomName, setActiveRoomName] = useState<string | null>(null);
-    const [inboundNumbers, setInboundNumbers] = useState<string[]>([]);
-    const [inboundLoading, setInboundLoading] = useState(false);
-    const [inboundError, setInboundError] = useState('');
     const [copiedNumber, setCopiedNumber] = useState<string | null>(null);
 
     useEffect(() => {
-        loadAgents();
-    }, [profile]);
-
-    const loadAgents = async () => {
-        setLoading(true);
-        try {
-            let apiUrl = `${API_URL}/agents`;
-            if (profile && profile.role !== 'superadmin' && profile.empresa_id) {
-                apiUrl += `?empresa_id=${profile.empresa_id}`;
-            }
-
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 12000);
-            let loadedAgents: AgentConfig[] = [];
-
-            try {
-                const res = await fetch(apiUrl, { signal: controller.signal });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                loadedAgents = Array.isArray(data) ? data : [];
-            } finally {
-                clearTimeout(timeout);
-            }
-
-            if (!loadedAgents.length) {
-                let query = supabase
-                    .from('agent_config')
-                    .select('id, name, use_case, description, instructions, greeting, empresa_id, agent_type, tipo_resultados');
-
-                if (profile && profile.role !== 'superadmin' && profile.empresa_id) {
-                    query = query.eq('empresa_id', profile.empresa_id);
-                }
-
-                const { data, error } = await query.order('name');
-                if (error) throw error;
-                loadedAgents = (data || []) as AgentConfig[];
-            }
-
-            setAgents(loadedAgents);
-            if (loadedAgents.length > 0) {
-                setSelectedAgentId((prev) =>
-                    prev && loadedAgents.some((a) => String(a.id) === prev)
-                        ? prev
-                        : String(loadedAgents[0].id)
-                );
-            } else {
-                setSelectedAgentId('');
-            }
-        } catch (err) {
-            console.error('Error loading agents:', err);
-            setAgents([]);
+        if (!agents.length) {
             setSelectedAgentId('');
-        } finally {
-            setLoading(false);
+            return;
         }
-    };
+        setSelectedAgentId((prev) =>
+            prev && agents.some((a) => String(a.id) === prev)
+                ? prev
+                : String(agents[0].id),
+        );
+    }, [agents]);
 
     const selectedAgent = agents.find((a) => String(a.id) === selectedAgentId);
     const empresaId = selectedAgent?.empresa_id ?? profile?.empresa_id ?? null;
     const detectedDirection = selectedAgent ? getAgentCallDirection(selectedAgent) : null;
     const styles = MODE_STYLES[callMode];
 
+    const {
+        data: inboundNumbers = [],
+        isLoading: inboundLoading,
+        isError: inboundIsError,
+        error: inboundQueryError,
+    } = useInboundPhoneNumbers(empresaId, callMode === 'inbound' && Boolean(empresaId));
+    const inboundError = inboundIsError
+        ? (inboundQueryError instanceof Error ? inboundQueryError.message : 'No se pudieron cargar los números entrantes')
+        : '';
+
     useEffect(() => {
         if (!selectedAgent || modeTouched) return;
         const direction = getAgentCallDirection(selectedAgent);
         if (direction) setCallMode(direction);
     }, [selectedAgentId, selectedAgent, modeTouched]);
-
-    useEffect(() => {
-        if (callMode !== 'inbound' || !empresaId) {
-            setInboundNumbers([]);
-            setInboundError('');
-            return;
-        }
-
-        let cancelled = false;
-        setInboundLoading(true);
-        setInboundError('');
-
-        fetchTrunks(empresaId)
-            .then((data) => {
-                if (cancelled) return;
-                setInboundNumbers(extractInboundPhoneNumbers(data));
-            })
-            .catch((err: Error) => {
-                if (!cancelled) setInboundError(err?.message || 'No se pudieron cargar los números entrantes');
-            })
-            .finally(() => {
-                if (!cancelled) setInboundLoading(false);
-            });
-
-        return () => { cancelled = true; };
-    }, [callMode, empresaId]);
 
     const handleModeChange = (mode: CallMode) => {
         setModeTouched(true);

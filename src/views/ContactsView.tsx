@@ -1,6 +1,4 @@
 import React, {
-  useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -25,40 +23,16 @@ import {
   CalendarDays,
   MessageSquareText,
 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Contact {
-  id: string;
-  nombre: string | null;
-  telefono: string;
-  email: string | null;
-  empresa_nombre: string | null;
-  etiquetas: string[];
-  total_llamadas: number;
-  ultima_llamada: string | null;
-  ultima_disposicion: string | null;
-  score: number;
-  notas: string | null;
-  datos_extra: Record<string, unknown> | null;
-  created_at: string;
-}
-
-interface CallRecord {
-  id: string;
-  fecha: string;
-  status: string;
-  disposicion: string | null;
-  sentimiento: string | null;
-  resumen: string | null;
-  duracion_segundos: number | null;
-  comentarios: string | null;
-}
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
+import { apiFetch } from '../lib/apiFetch';
+import {
+  contactKeys,
+  useContactCalls,
+  useContactsList,
+  useInvalidateContacts,
+  type Contact,
+} from '../api/contacts';
 
 const DISPOSICION_BADGE: Record<string, string> = {
   completada: 'bg-green-100 text-green-700',
@@ -90,28 +64,35 @@ function formatDuration(seconds: number | null) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ContactsView() {
-  const { session, profile } = useAuth();
-  const token = session?.access_token ?? '';
+  const { profile } = useAuth();
+  const queryClient = useQueryClient();
+  const invalidateContacts = useInvalidateContacts();
   const empresa_id = profile?.empresa_id ?? null;
-  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-
-  // List state
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
   const PAGE_SIZE = 25;
 
-  // Filters
+  const [page, setPage] = useState(1);
   const [searchQ, setSearchQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [filterDisposicion, setFilterDisposicion] = useState('');
   const [filterEtiqueta, setFilterEtiqueta] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Detail panel
+  const listFilters = useMemo(() => ({
+    page,
+    pageSize: PAGE_SIZE,
+    empresaId: empresa_id,
+    q: debouncedQ || undefined,
+    disposicion: filterDisposicion || undefined,
+    etiqueta: filterEtiqueta || undefined,
+  }), [page, empresa_id, debouncedQ, filterDisposicion, filterEtiqueta]);
+
+  const { data: contacts = [], isLoading: loading } = useContactsList(listFilters, Boolean(profile));
+
   const [selected, setSelected] = useState<Contact | null>(null);
-  const [calls, setCalls] = useState<CallRecord[]>([]);
-  const [callsLoading, setCallsLoading] = useState(false);
+  const {
+    data: calls = [],
+    isLoading: callsLoading,
+  } = useContactCalls(selected?.id ?? null, empresa_id, Boolean(selected));
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Contact>>({});
   const [saving, setSaving] = useState(false);
@@ -136,52 +117,13 @@ export function ContactsView() {
     }, 300);
   };
 
-  // ─── Load contacts ──────────────────────────────────────────────────────────
-
-  const loadContacts = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ page: String(page), page_size: String(PAGE_SIZE) });
-      if (empresa_id) params.set('empresa_id', String(empresa_id));
-      if (debouncedQ) params.set('q', debouncedQ);
-      if (filterDisposicion) params.set('disposicion', filterDisposicion);
-      if (filterEtiqueta) params.set('etiqueta', filterEtiqueta);
-
-      const res = await fetch(`${API_BASE}/api/contacts/?${params}`, { headers });
-      if (res.ok) setContacts(await res.json());
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, debouncedQ, filterDisposicion, filterEtiqueta, empresa_id, headers]);
-
-  useEffect(() => { loadContacts(); }, [loadContacts]);
-
-  // ─── Load calls for selected contact ────────────────────────────────────────
-
-  const loadCalls = useCallback(async (contactId: string) => {
-    setCallsLoading(true);
-    setCalls([]);
-    try {
-      const params = empresa_id ? `?empresa_id=${empresa_id}` : '';
-      const res = await fetch(`${API_BASE}/api/contacts/${contactId}/calls${params}`, { headers });
-      if (res.ok) setCalls(await res.json());
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setCallsLoading(false);
-    }
-  }, [empresa_id, headers]);
+  // ─── Save contact ────────────────────────────────────────────────────────────
 
   const selectContact = (c: Contact) => {
     setSelected(c);
     setEditing(false);
     setEditData({});
-    loadCalls(c.id);
   };
-
-  // ─── Save contact ────────────────────────────────────────────────────────────
 
   const startEdit = () => {
     if (!selected) return;
@@ -201,15 +143,16 @@ export function ContactsView() {
     setSaving(true);
     try {
       const params = empresa_id ? `?empresa_id=${empresa_id}` : '';
-      const res = await fetch(`${API_BASE}/api/contacts/${selected.id}${params}`, {
+      const res = await apiFetch(`/api/contacts/${selected.id}${params}`, {
         method: 'PUT',
-        headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify(editData),
       });
       if (res.ok) {
         const updated = await res.json();
         setSelected(updated);
-        setContacts(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+        queryClient.setQueryData<Contact[]>(contactKeys.list(listFilters), (prev) =>
+          (prev || []).map((c) => (c.id === updated.id ? updated : c)),
+        );
         setEditing(false);
         flash('ok', 'Contacto actualizado');
       } else {
@@ -246,12 +189,12 @@ export function ContactsView() {
     if (!confirm(`¿Eliminar el contacto "${selected.nombre || selected.telefono}"?`)) return;
     try {
       const params = empresa_id ? `?empresa_id=${empresa_id}` : '';
-      await fetch(`${API_BASE}/api/contacts/${selected.id}${params}`, {
-        method: 'DELETE',
-        headers,
-      });
+      await apiFetch(`/api/contacts/${selected.id}${params}`, { method: 'DELETE' });
       setSelected(null);
-      setContacts(prev => prev.filter(c => c.id !== selected.id));
+      queryClient.setQueryData<Contact[]>(contactKeys.list(listFilters), (prev) =>
+        (prev || []).filter((c) => c.id !== selected.id),
+      );
+      invalidateContacts();
       flash('ok', 'Contacto eliminado');
     } catch (e) {
       flash('error', String(e));
