@@ -17,7 +17,7 @@ from typing import Any, Final
 
 import aiohttp
 
-from config import settings
+from config import get_settings
 
 logger = logging.getLogger("customer-anger")
 
@@ -188,7 +188,7 @@ async def analyze_customer_anger(transcript: str) -> CustomerAngerResult:
             reason="circuit_open",
         )
 
-    model = os.getenv("CUSTOMER_ANGER_MODEL", settings.semantic_router_model).strip()
+    model = os.getenv("CUSTOMER_ANGER_MODEL", get_settings().semantic_router_model).strip()
     timeout_s = float(os.getenv("CUSTOMER_ANGER_TIMEOUT_MS", "400")) / 1000.0
     max_chars = int(os.getenv("CUSTOMER_ANGER_MAX_TRANSCRIPT_CHARS", "12000"))
     snippet = text if len(text) <= max_chars else text[-max_chars:]

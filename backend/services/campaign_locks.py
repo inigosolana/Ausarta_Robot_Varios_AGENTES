@@ -7,15 +7,15 @@ import asyncio
 import logging
 import os
 
-from config import settings
+from config import get_settings
 from services.supabase_service import supabase
 
 logger = logging.getLogger("api-backend")
 
 _empresas_en_llamada_fallback: set[int] = set()
 
-COOLDOWN_MIN = int(os.getenv("DRIP_COOLDOWN_MIN_SECONDS", str(settings.drip_cooldown_min)))
-COOLDOWN_MAX = int(os.getenv("DRIP_COOLDOWN_MAX_SECONDS", str(settings.drip_cooldown_max)))
+COOLDOWN_MIN = int(os.getenv("DRIP_COOLDOWN_MIN_SECONDS", str(get_settings().drip_cooldown_min)))
+COOLDOWN_MAX = int(os.getenv("DRIP_COOLDOWN_MAX_SECONDS", str(get_settings().drip_cooldown_max)))
 EMPRESA_LOCK_TTL = COOLDOWN_MAX + 300 + 60
 
 

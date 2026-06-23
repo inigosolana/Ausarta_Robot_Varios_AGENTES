@@ -28,7 +28,7 @@ if os.getenv("ENVIRONMENT", "production") == "development":
     from dotenv import load_dotenv
     load_dotenv(ROOT / ".env")
 
-from config import settings  # noqa: E402
+from config import get_settings  # noqa: E402
 from services.supabase_service import supabase, sb_query  # noqa: E402
 
 INBOUND_AGENT_NAME = "Inbound Comercial - Ausarta"
@@ -97,7 +97,7 @@ async def create_inbound_agent(empresa_id: int) -> int:
         "use_case": "inbound_comercial",
         "company_context": "",
         "enthusiasm_level": "Normal",
-        "voice_id": settings.default_cartesia_voice,
+        "voice_id": get_settings().default_cartesia_voice,
         "speaking_speed": 1.0,
         "empresa_id": empresa_id,
         "tipo_resultados": "SOPORTE_CLIENTE",
@@ -116,12 +116,12 @@ async def create_inbound_agent(empresa_id: int) -> int:
     ai_config = {
         "agent_id": new_id,
         "llm_provider": "groq",
-        "llm_model": settings.default_llm_model,
+        "llm_model": get_settings().default_llm_model,
         "tts_provider": "cartesia",
-        "tts_model": settings.default_tts_model,
-        "tts_voice": settings.default_cartesia_voice,
+        "tts_model": get_settings().default_tts_model,
+        "tts_voice": get_settings().default_cartesia_voice,
         "stt_provider": "deepgram",
-        "stt_model": settings.default_stt_model,
+        "stt_model": get_settings().default_stt_model,
         "language": "es",
     }
     await sb_query(

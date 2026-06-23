@@ -9,7 +9,7 @@ from typing import Any
 
 import aiohttp
 
-from config import settings
+from config import get_settings
 
 logger = logging.getLogger("api-backend")
 
@@ -302,6 +302,6 @@ async def list_voices(language: str | None = None) -> dict[str, Any]:
     return {
         "voices": filtered or voices,
         "source": source,
-        "default_voice_id": settings.default_cartesia_voice,
+        "default_voice_id": get_settings().default_cartesia_voice,
         "count": len(filtered or voices),
     }

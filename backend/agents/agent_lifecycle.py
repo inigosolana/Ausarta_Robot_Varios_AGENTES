@@ -18,7 +18,7 @@ from agents.agent_common import (
     anonymize_text,
 )
 from agents.stt_tts_builder import _build_tts_plugin
-from config import settings
+from config import get_settings
 from prompts import _LANG_OVERRIDE_MSGS
 from agents.livekit_client import remove_room_participant
 from services.queue_service import (
@@ -83,7 +83,7 @@ class DynamicAgentLifecycleMixin:
             return
 
         logger.info(f"🎙️ Saludando en sala: {self.room_name} con: '{self.greeting}'")
-        greeting_delay = float(os.getenv("AGENT_GREETING_DELAY_SECONDS", str(settings.agent_greeting_delay)))
+        greeting_delay = float(os.getenv("AGENT_GREETING_DELAY_SECONDS", str(get_settings().agent_greeting_delay)))
         greeting_delay = max(0.1, min(greeting_delay, 3.0))
         await asyncio.sleep(greeting_delay)
         try:

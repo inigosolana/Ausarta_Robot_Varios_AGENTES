@@ -18,7 +18,7 @@ from agents.semantic_routes import (
     NEGATIVE_TRANSFER_CUES,
     TRANSFER_HUMAN_REGEXES,
 )
-from config import settings
+from config import get_settings
 
 logger = logging.getLogger("semantic-router")
 
@@ -96,15 +96,15 @@ class SemanticRouterService:
         tier0_only: bool | None = None,
     ) -> None:
         self._custom_phrases: tuple[str, ...] = tuple(custom_phrases or ())
-        self._model = model or settings.semantic_router_model
-        self._timeout_s = (timeout_ms or settings.semantic_router_timeout_ms) / 1000.0
+        self._model = model or get_settings().semantic_router_model
+        self._timeout_s = (timeout_ms or get_settings().semantic_router_timeout_ms) / 1000.0
         self._min_confidence = (
             min_confidence
             if min_confidence is not None
-            else settings.semantic_router_min_confidence
+            else get_settings().semantic_router_min_confidence
         )
         self._tier0_only = (
-            tier0_only if tier0_only is not None else settings.semantic_router_tier0_only
+            tier0_only if tier0_only is not None else get_settings().semantic_router_tier0_only
         )
         self._groq_api_key = os.getenv("GROQ_API_KEY", "").strip()
 

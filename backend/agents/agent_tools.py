@@ -17,7 +17,7 @@ from agents.agent_common import (
     normalize_goodbye_message,
     _normalize_message_text,
 )
-from config import settings
+from config import get_settings
 from services.queue_service import (
     enqueue_colgar_sala,
     enqueue_guardar_encuesta,
@@ -508,7 +508,7 @@ class AgentToolsMixin:
 
                 # Margen corto para evitar silencios largos tras despedida.
                 # Si se necesita ajustar, usar AGENT_HANGUP_DELAY_SECONDS en entorno.
-                wait_seconds = float(os.getenv("AGENT_HANGUP_DELAY_SECONDS", str(settings.agent_hangup_delay)))
+                wait_seconds = float(os.getenv("AGENT_HANGUP_DELAY_SECONDS", str(get_settings().agent_hangup_delay)))
                 wait_seconds = max(0.1, min(wait_seconds, 1.0))
                 logger.info(f"⏳ Esperando {wait_seconds:.1f}s antes de colgar.")
                 await asyncio.sleep(wait_seconds)

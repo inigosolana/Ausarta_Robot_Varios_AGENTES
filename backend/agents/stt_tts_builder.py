@@ -5,14 +5,14 @@ import logging
 import os
 from typing import Any
 
-from config import settings
+from config import get_settings
 from livekit.plugins import cartesia, deepgram, openai, silero
 
 from agents.agent_common import _is_uuid_like
 
 logger = logging.getLogger("agent-dynamic")
 
-DEFAULT_CARTESIA_VOICE = os.getenv("VOICE_ID_AUSARTA", settings.default_cartesia_voice)
+DEFAULT_CARTESIA_VOICE = os.getenv("VOICE_ID_AUSARTA", get_settings().default_cartesia_voice)
 
 _GLOBAL_VAD_MODEL = None
 _VAD_LOCK = asyncio.Lock()
@@ -60,14 +60,14 @@ def _build_cartesia_tts_plugin(
         )
         safe_voice = DEFAULT_CARTESIA_VOICE
 
-    safe_model = (tts_model or settings.default_tts_model).strip()
+    safe_model = (tts_model or get_settings().default_tts_model).strip()
     if safe_model in {"sonic-multilingual", "sonic-english", "sonic", "sonic-2-2025-03-07"}:
         logger.warning(
             "⚠️ Modelo TTS '%s' deprecado en Cartesia. Usando '%s'.",
             safe_model,
-            settings.default_tts_model,
+            get_settings().default_tts_model,
         )
-        safe_model = settings.default_tts_model
+        safe_model = get_settings().default_tts_model
 
     try:
         return cartesia.TTS(
@@ -132,12 +132,14 @@ async def build_resilient_tts_plugin(
     voice_id: str,
     language: str,
     speaking_speed: float,
-    tts_model: str = settings.default_tts_model,
+    tts_model: str | None = None,
 ):
     """
     TTS con Circuit Breaker (Cartesia) + FallbackAdapter (OpenAI tts-1).
     Si el circuito Cartesia está OPEN, usa solo OpenAI durante open_seconds.
     """
+    if tts_model is None:
+        tts_model = get_settings().default_tts_model
     from livekit.agents.tts.fallback_adapter import FallbackAdapter
 
     from services.provider_circuit_service import cartesia_tts_breaker
@@ -197,9 +199,16 @@ async def build_resilient_stt_plugin(
     return adapter, True
 
 
-def _build_tts_plugin(voice_id: str, language: str, speaking_speed: float, tts_model: str = settings.default_tts_model):
+def _build_tts_plugin(
+    voice_id: str,
+    language: str,
+    speaking_speed: float,
+    tts_model: str | None = None,
+):
     """
     Crea el plugin TTS Cartesia (sync, sin circuit breaker).
     Preferir build_resilient_tts_plugin() en el agente LiveKit.
     """
+    if tts_model is None:
+        tts_model = get_settings().default_tts_model
     return _build_cartesia_tts_plugin(voice_id, language, speaking_speed, tts_model)

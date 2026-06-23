@@ -4,13 +4,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from config import settings
+from config import get_settings
 from routers.campaign_access import load_external_db_allowed_queries
 from services.supabase_service import supabase
 from utils.kb_settings import load_empresa_kb_settings
 
 logger = logging.getLogger("api-backend")
-DEFAULT_AUSARTA_VOICE_ID = settings.default_cartesia_voice
+DEFAULT_AUSARTA_VOICE_ID = get_settings().default_cartesia_voice
 
 
 def _default_survey_agent_payload(empresa_id: int | None) -> dict[str, Any]:
@@ -78,11 +78,11 @@ def _build_agent_payload(
         "instructions": agent_data.get("instructions", "Eres un asistente"),
         "critical_rules": agent_data.get("critical_rules", ""),
         "voice_id": agent_data.get("voice_id") or ai_data.get("tts_voice") or DEFAULT_AUSARTA_VOICE_ID,
-        "tts_model": ai_data.get("tts_model") or settings.default_tts_model,
+        "tts_model": ai_data.get("tts_model") or get_settings().default_tts_model,
         "llm_model": ai_data.get("llm_model") or "llama-3.3-70b-versatile",
         "language": ai_data.get("language") or "es",
         "stt_provider": ai_data.get("stt_provider") or "deepgram",
-        "stt_model": ai_data.get("stt_model") or settings.default_stt_model,
+        "stt_model": ai_data.get("stt_model") or get_settings().default_stt_model,
         "extraction_schema": extraction_schema or [],
         "company_context": agent_data.get("company_context") or empresa_context or "",
         "kb_allow_internet_search": agent_data.get("kb_allow_internet_search"),

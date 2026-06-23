@@ -83,6 +83,3 @@ def get_settings() -> Settings:
 def clear_settings_cache() -> None:
     """Limpia la caché de settings (útil en tests para evitar fugas de estado)."""
     get_settings.cache_clear()
-
-
-settings = get_settings()

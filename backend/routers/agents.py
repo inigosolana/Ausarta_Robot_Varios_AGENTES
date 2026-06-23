@@ -10,7 +10,7 @@ from fastapi import Depends
 from datetime import datetime
 import logging
 import os
-from config import settings
+from config import get_settings
 
 logger = logging.getLogger("api-backend")
 
@@ -54,8 +54,8 @@ async def _invalidate_agent_cache(agent_id: str) -> int:
             f"⚠️ [agents] No se pudo invalidar caché Redis agente {agent_id}: {cache_err}"
         )
     return deleted
-DEFAULT_AUSARTA_VOICE_ID = settings.default_cartesia_voice
-DEFAULT_STT_MODEL = settings.default_stt_model
+DEFAULT_AUSARTA_VOICE_ID = get_settings().default_cartesia_voice
+DEFAULT_STT_MODEL = get_settings().default_stt_model
 
 
 def _n8n_classify_agent_url() -> str | None:
@@ -322,7 +322,7 @@ async def create_agent(config: dict, current_user: CurrentUser = Depends(require
             "llm_provider": config.get("llm_provider", "groq"),
             "llm_model": config.get("llm_model", "llama-3.3-70b-versatile"),
             "tts_provider": config.get("tts_provider", "cartesia"),
-            "tts_model": config.get("tts_model", settings.default_tts_model),
+            "tts_model": config.get("tts_model", get_settings().default_tts_model),
             "tts_voice": config.get("voice_id") or config.get("tts_voice", DEFAULT_AUSARTA_VOICE_ID),
             "stt_provider": config.get("stt_provider", "deepgram"),
             "stt_model": config.get("stt_model", DEFAULT_STT_MODEL),

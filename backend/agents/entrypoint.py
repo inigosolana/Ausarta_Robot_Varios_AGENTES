@@ -9,7 +9,7 @@ import os
 import time
 from typing import Any, Optional
 
-from config import settings
+from config import get_settings
 from livekit import rtc
 from livekit.agents import (
     AgentServer,
@@ -227,11 +227,11 @@ async def entrypoint(ctx: JobContext):
             agent_instance = DynamicAgent(room_name=room_name, agent_config=agent_config)
 
             llm_model = agent_config.get("llm_model", "llama-3.3-70b-versatile")
-            voice_id = agent_config.get("voice_id", os.getenv("VOICE_ID_AUSARTA", settings.default_cartesia_voice))
-            tts_model = agent_config.get("tts_model", settings.default_tts_model)
+            voice_id = agent_config.get("voice_id", os.getenv("VOICE_ID_AUSARTA", get_settings().default_cartesia_voice))
+            tts_model = agent_config.get("tts_model", get_settings().default_tts_model)
             language = agent_config.get("language", "es")
             stt_provider = agent_config.get("stt_provider", "deepgram")
-            stt_model = agent_config.get("stt_model", settings.default_stt_model)
+            stt_model = agent_config.get("stt_model", get_settings().default_stt_model)
             speaking_speed = agent_config.get("speaking_speed", 1.0)
             has_strict_extraction = bool(
                 agent_config.get("extraction_schema")

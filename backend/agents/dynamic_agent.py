@@ -8,7 +8,7 @@ import json
 import re
 import random
 from dotenv import load_dotenv
-from config import settings
+from config import get_settings
 
 # Solo cargar .env en desarrollo local; en producción Docker las vars vienen del entorno del contenedor.
 if os.getenv("ENVIRONMENT", "production") == "development":
@@ -173,7 +173,7 @@ class DynamicAgent(Agent, AgentToolsMixin, DynamicAgentLifecycleMixin):
         self.kb_allow_internet = resolve_kb_allow_internet(agent_config)
         self.enthusiasm_level = agent_config.get("enthusiasm_level", "Normal") or "Normal"
         self.voice_id = agent_config.get("voice_id", "") or ""
-        self.tts_model = agent_config.get("tts_model", settings.default_tts_model)
+        self.tts_model = agent_config.get("tts_model", get_settings().default_tts_model)
         self.speaking_speed = agent_config.get("speaking_speed", 1.0)
         self.hangup_started = False
         self._transfer_completed = asyncio.Event()

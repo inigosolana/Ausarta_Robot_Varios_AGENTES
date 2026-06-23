@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any, Final
 
-from config import settings
+from config import get_settings
 
 # Frases que anulan una posible solicitud de transferencia.
 NEGATIVE_TRANSFER_CUES: Final[tuple[str, ...]] = (
@@ -43,7 +43,7 @@ DEFAULT_TRANSFER_PHRASES: Final[tuple[str, ...]] = (
 
 def resolve_semantic_routing_config(agent_config: dict[str, Any]) -> tuple[bool, tuple[str, ...]]:
     """Lee flags y frases custom desde agent_config / datos_extra."""
-    enabled = settings.semantic_routing_enabled
+    enabled = get_settings().semantic_routing_enabled
 
     if agent_config.get("semantic_routing_enabled") is not None:
         enabled = bool(agent_config["semantic_routing_enabled"])

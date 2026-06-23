@@ -5,14 +5,14 @@ import os
 import re
 from typing import Any
 
-from config import settings
+from config import get_settings
 
 logger = logging.getLogger("agent-dynamic")
 
 
 def _require_bridge_server_url() -> str:
     """URL interna del backend (obligatoria en Docker/multi-contenedor)."""
-    url = settings.bridge_server_url_internal.strip().rstrip("/")
+    url = get_settings().bridge_server_url_internal.strip().rstrip("/")
     if not url:
         raise RuntimeError(
             "BRIDGE_SERVER_URL_INTERNAL no está configurada. "
@@ -24,8 +24,8 @@ def _require_bridge_server_url() -> str:
 
 # Precalculada al arranque del worker: falla rápido si falta la variable.
 BRIDGE_SERVER_URL_INTERNAL = _require_bridge_server_url()
-_AGENT_CONFIG_CACHE_TTL = settings.agent_config_cache_ttl
-_REDIS_URL = settings.redis_url
+_AGENT_CONFIG_CACHE_TTL = get_settings().agent_config_cache_ttl
+_REDIS_URL = get_settings().redis_url
 DISPATCH_AGENT_NAME = (os.getenv("AGENT_NAME_DISPATCH") or "default_agent").strip()
 
 

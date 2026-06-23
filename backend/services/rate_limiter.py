@@ -44,10 +44,6 @@ logger = logging.getLogger("api-backend")
 # ── Valores por defecto ────────────────────────────────────────────────────────
 _DEFAULT_RPM = int(os.getenv("RATE_LIMIT_DEFAULT_PER_MINUTE", "120"))
 
-# Caché en memoria local (empresa_id → "Nrpm/minute") para no golpear BD en cada request.
-# TTL gestionado externamente via Redis (ver get_empresa_rate_limit).
-_rate_limit_cache: dict[int, str] = {}
-
 
 async def _fetch_empresa_rpm(empresa_id: int) -> int:
     """
@@ -55,10 +51,11 @@ async def _fetch_empresa_rpm(empresa_id: int) -> int:
     Devuelve _DEFAULT_RPM si no hay config específica.
     """
     redis_key = f"rate_limit:empresa:{empresa_id}:rpm"
+    redis = None
 
-    # 1. Intentar desde Redis
     try:
         from services.redis_service import get_redis
+
         redis = await get_redis()
         cached = await redis.get(redis_key)
         if cached is not None:
@@ -66,7 +63,6 @@ async def _fetch_empresa_rpm(empresa_id: int) -> int:
     except Exception:
         pass
 
-    # 2. Intentar desde Supabase
     try:
         from services.supabase_service import supabase, sb_query
         if supabase:
@@ -79,13 +75,11 @@ async def _fetch_empresa_rpm(empresa_id: int) -> int:
             )
             if res and res.data:
                 rpm = int(res.data[0].get("rpm", _DEFAULT_RPM))
-                # Cachear en Redis con TTL de 60s
-                try:
-                    from services.redis_service import get_redis
-                    redis = await get_redis()
-                    await redis.set(redis_key, str(rpm), ex=60)
-                except Exception:
-                    pass
+                if redis is not None:
+                    try:
+                        await redis.set(redis_key, str(rpm), ex=60)
+                    except Exception:
+                        pass
                 return rpm
     except Exception as exc:
         logger.debug("rate_limiter: no se pudo leer empresa_limits para %s: %s", empresa_id, exc)
