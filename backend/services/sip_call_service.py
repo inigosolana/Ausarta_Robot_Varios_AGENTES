@@ -320,9 +320,9 @@ async def mark_call_failed(
         pass
 
     try:
-        from routers.telephony import _propagate_to_lead
+        from services.telephony_lead_propagation import propagate_to_lead
 
-        await _propagate_to_lead(encuesta_id, "failed", enc_curr)
+        await propagate_to_lead(encuesta_id, "failed", enc_curr)
     except Exception as exc:
         logger.warning("⚠️ [SIP] propagate lead falló encuesta %s: %s", encuesta_id, exc)
 

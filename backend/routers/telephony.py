@@ -16,10 +16,8 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request, HTTPExce
 from fastapi.responses import JSONResponse, Response
 from models.schemas import (
     CallEndRequest,
-    CallTransferRequest,
     EncuestaData,
     InboundCallRegisterRequest,
-    TelephonyTransferRequest,
     TestOutboundCallRequest,
     YeastarPSeriesConfigCreate,
     YeastarPSeriesConfigResponse,
@@ -60,6 +58,9 @@ from services.sip_call_service import (
     mark_call_failed,
     sip_retry_max_attempts,
 )
+from services.telephony_lead_propagation import propagate_to_lead
+from services.telephony_livekit_webhook_service import safe_start_recording
+from services.telephony_room_utils import extract_encuesta_id_from_room
 from services.telephony_yeastar_config_service import (
     get_yeastar_config_row as _get_yeastar_config,
     infer_yeastar_api_mode as _infer_yeastar_api_mode,
@@ -74,7 +75,6 @@ from services.crypto_service import encrypt_data, decrypt_data
 from services.rate_limiter import limiter
 from services.queue_service import get_arq_pool
 from livekit import api
-from livekit.api import WebhookReceiver
 import aiohttp
 import asyncio
 import json
@@ -82,10 +82,6 @@ import os
 from datetime import datetime, timedelta, timezone
 import random
 import logging
-
-# Credenciales LiveKit para validar firmas de webhooks entrantes
-_LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "")
-_LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
 
 logger = logging.getLogger("api-backend")
 
@@ -805,24 +801,11 @@ async def test_yeastar_connection(
     return {"ok": ok, "message": message}
 
 
-def _parse_datos_extra(raw: object) -> dict:
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str) and raw.strip():
-        try:
-            import json as _json
-            parsed = _json.loads(raw)
-            return parsed if isinstance(parsed, dict) else {}
-        except Exception:
-            return {}
-    return {}
-
-
 async def _resolve_survey_id(room_name: str, survey_id: int | None) -> int:
     """Obtiene survey_id del body o extrayéndolo del nombre de sala LiveKit."""
     if survey_id:
         return survey_id
-    extracted = _extract_encuesta_id_from_room(room_name.strip())
+    extracted = extract_encuesta_id_from_room(room_name.strip())
     if extracted:
         return extracted
     raise HTTPException(
@@ -1032,477 +1015,6 @@ async def _resolve_inbound_agent_id(empresa_id: int) -> int | None:
     )
     return int(preferred["id"]) if preferred.get("id") is not None else None
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Helpers de transferencia: validación y clasificación de destino
-# ──────────────────────────────────────────────────────────────────────────────
-
-import re as _re
-
-# Caracteres permitidos en un número de teléfono externo antes de normalizar
-_PHONE_ALLOWED = _re.compile(r"[^0-9+\-\s().]+")
-# Solo dígitos (y + inicial) tras la normalización
-_PHONE_DIGITS = _re.compile(r"^\+?[0-9]{6,20}$")
-
-
-def _normalize_external_number(target: str) -> str | None:
-    """
-    Normaliza un número de teléfono externo eliminando espacios, guiones y paréntesis.
-    Preserva el '+' inicial si existe (formato E.164).
-
-    Retorna el número normalizado, o None si el resultado no es válido
-    (menos de 6 dígitos o contiene caracteres ilegales).
-
-    Ejemplos:
-        "+34 612-34 56 78" → "+34612345678"
-        "912 34 56 78"    → "912345678"
-        "abc"             → None
-        "123"             → None  (demasiado corto)
-    """
-    # Conservar el '+' inicial si existe
-    stripped = target.strip()
-    has_plus = stripped.startswith("+")
-    # Quitar todo excepto dígitos
-    digits_only = _re.sub(r"[^0-9]", "", stripped)
-    normalized = ("+" if has_plus else "") + digits_only
-    if _PHONE_DIGITS.match(normalized):
-        return normalized
-    return None
-
-
-async def _is_internal_extension(empresa_id: int, target: str) -> bool:
-    """
-    Determina si `target` es una extensión interna configurada para la empresa.
-
-    Estrategia (en orden de coste):
-    1. Si target tiene más de 5 dígitos → casi seguro es un número externo.
-    2. Consulta tabla local `yeastar_extensions` (empresa_id + extension_number).
-    3. Si la tabla no tiene registros → fallback: si tiene ≤ 5 dígitos lo trata como interno.
-
-    Retorna True si es interna, False si es un número externo.
-    """
-    target_clean = target.strip()
-
-    # Heurística rápida: números con más de 5 dígitos puros son casi siempre externos
-    digits_only = _re.sub(r"[^0-9]", "", target_clean)
-    if len(digits_only) > 5:
-        return False
-
-    # Consulta Supabase tabla yeastar_extensions
-    if supabase:
-        try:
-            res = await sb_query(
-                lambda eid=empresa_id, t=target_clean: supabase.table("yeastar_extensions")
-                .select("id")
-                .eq("empresa_id", eid)
-                .eq("extension_number", t)
-                .limit(1)
-                .execute()
-            )
-            if res and res.data:
-                return True
-            # Si la tabla tiene algún registro pero no encontró este target → externo
-            count_res = await sb_query(
-                lambda eid=empresa_id: supabase.table("yeastar_extensions")
-                .select("id", count="exact")
-                .eq("empresa_id", eid)
-                .limit(1)
-                .execute()
-            )
-            if count_res and (count_res.count or 0) > 0:
-                return False
-        except Exception as exc:
-            logger.debug("[transfer] _is_internal_extension lookup error: %s", exc)
-
-    # Fallback sin BD: ≤ 5 dígitos sin '+' se trata como extensión interna
-    return not target_clean.startswith("+") and len(digits_only) <= 5
-
-
-def _resolve_target_extension(
-    datos_extra: dict,
-    explicit: str | None = None,
-) -> str:
-    """
-    Resuelve el destino de transferencia desde múltiples fuentes en orden de prioridad.
-    Acepta extensiones internas y números externos.
-    """
-    ext = (
-        (explicit or "").strip()
-        or (os.getenv("YEASTAR_HUMAN_TRANSFER_EXTENSION") or "").strip()
-        or str(datos_extra.get("target_extension") or "").strip()
-        or str(datos_extra.get("human_transfer_extension") or "").strip()
-    )
-    if not ext:
-        raise HTTPException(
-            status_code=400,
-            detail="Extensión/número de transferencia no configurado (YEASTAR_HUMAN_TRANSFER_EXTENSION).",
-        )
-    return ext
-
-
-async def _execute_yeastar_transfer(
-    *,
-    room_name: str,
-    survey_id: int,
-    motivo: str | None = None,
-    call_id: str | None = None,
-    target_extension: str | None = None,
-    yeastar_call_id: str | None = None,
-    outbound_prefix: str | None = None,
-) -> dict:
-    """Lógica compartida de transferencia multi-tenant vía Yeastar.
-
-    Soporta tanto extensiones internas como números de teléfono externos:
-    - Extensión interna: se comprueba su estado antes de transferir.
-    - Número externo: se salta el check de estado y se transfiere directamente
-      confiando en el dial plan / ruta saliente del Yeastar del cliente.
-    """
-    if not supabase:
-        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
-
-    room_name = room_name.strip()
-
-    enc_res = await sb_query(
-        lambda sid=survey_id: supabase.table("encuestas")
-        .select("id, empresa_id, telefono, datos_extra, status")
-        .eq("id", sid)
-        .limit(1)
-        .execute()
-    )
-    if not enc_res.data:
-        raise HTTPException(status_code=404, detail=f"Encuesta {survey_id} no encontrada")
-
-    enc = enc_res.data[0]
-    empresa_id = enc.get("empresa_id")
-    if not empresa_id:
-        logger.error(f"[transfer] Encuesta {survey_id} sin empresa_id (room={room_name})")
-        raise HTTPException(status_code=400, detail="Encuesta sin empresa asociada")
-
-    emp = await _load_yeastar_tenant_config(empresa_id)
-    datos_extra = _parse_datos_extra(enc.get("datos_extra"))
-
-    resolved_call_id = (
-        call_id
-        or yeastar_call_id
-        or datos_extra.get("yeastar_callid")
-        or datos_extra.get("yeastar_call_id")
-        or room_name
-    )
-    resolved_channel_id = str(datos_extra.get("yeastar_channel_id") or "").strip()
-    if not resolved_channel_id:
-        raise HTTPException(
-            status_code=409,
-            detail="Falta yeastar_channel_id del webhook 30011 para transferir la llamada.",
-        )
-    resolved_extension = _resolve_target_extension(datos_extra, target_extension)
-
-    # ── Clasificar destino: interno vs externo ─────────────────────────────
-    is_internal = await _is_internal_extension(empresa_id, resolved_extension)
-    transfer_type = "internal" if is_internal else "external"
-    logger.info(
-        "[transfer] empresa=%s survey=%s destino='%s' tipo=%s",
-        empresa_id, survey_id, resolved_extension, transfer_type,
-    )
-
-    if not is_internal:
-        # Validar número externo antes de enviarlo a Yeastar
-        normalized = _normalize_external_number(resolved_extension)
-        if normalized is None:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Número externo '{resolved_extension}' inválido. "
-                    "Usa formato nacional (ej. '612345678') o E.164 (ej. '+34612345678'). "
-                    "Mínimo 6 dígitos."
-                ),
-            )
-        resolved_extension = normalized
-
-    # Prefijo de ruta saliente: parámetro explícito > config de empresa > vacío
-    effective_prefix = outbound_prefix if outbound_prefix is not None else ""
-    if not is_internal and not effective_prefix:
-        # Intentar leer outbound_prefix de la config de Yeastar de la empresa
-        effective_prefix = str(emp.get("outbound_prefix") or "").strip()
-
-    try:
-        async with _yeastar_client_from_config(emp) as client:
-            if is_internal:
-                # Extensión interna: verificar estado antes de transferir
-                ext_status = await client.get_extension_status(resolved_extension)
-                if str(ext_status).strip().lower() not in {"idle", "available"}:
-                    logger.info(
-                        "[transfer] Extensión interna %s no disponible (status=%s) empresa=%s",
-                        resolved_extension, ext_status, empresa_id,
-                    )
-                    return JSONResponse(
-                        status_code=409,
-                        content={
-                            "message": f"Extensión ocupada ({ext_status})",
-                            "status": ext_status,
-                            "transfer_type": "internal",
-                        },
-                    )
-            await client.transfer_call(
-                resolved_channel_id,
-                resolved_extension,
-                outbound_prefix=effective_prefix,
-            )
-    except Exception as exc:
-        logger.error(
-            f"[transfer] Fallo Yeastar empresa={empresa_id} survey={survey_id} "
-            f"room={room_name} call_id={resolved_call_id}: {exc}"
-        )
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    motivo_text = (motivo or "Transferencia a agente humano").strip()
-    merged_extra = {
-        **datos_extra,
-        "transfer_room": room_name,
-        "transfer_extension": resolved_extension,
-        "transfer_type": transfer_type,
-        "yeastar_callid": str(resolved_call_id),
-    }
-    dest_label = f"ext {resolved_extension}" if is_internal else f"número externo {resolved_extension}"
-    await sb_query(
-        lambda sid=survey_id, extra=merged_extra, m=motivo_text, dl=dest_label: supabase.table("encuestas")
-        .update({
-            "status": "transferred",
-            "comentarios": f"Transferido a {dl}: {m}",
-            "datos_extra": extra,
-        })
-        .eq("id", sid)
-        .execute()
-    )
-
-    logger.info(
-        "✅ [transfer] empresa=%s survey=%s call_id=%s → %s (%s) room=%s",
-        empresa_id, survey_id, resolved_call_id, resolved_extension, transfer_type, room_name,
-    )
-    return {
-        "status": "ok",
-        "message": "Transferencia iniciada en la centralita",
-        "empresa_id": empresa_id,
-        "survey_id": survey_id,
-        "room_name": room_name,
-        "call_id": str(resolved_call_id),
-        "target_extension": resolved_extension,
-        "transfer_type": transfer_type,
-    }
-
-
-@router.post("/api/calls/transfer")
-async def transfer_call_to_human(payload: CallTransferRequest):
-    """
-    Transfiere una llamada a extensión interna o número externo vía Yeastar.
-
-    - Extensión interna (ej. '1001'): verifica que esté idle antes de transferir.
-      Si está ocupada devuelve 409.
-    - Número externo (ej. '612345678', '+34912345678'): salta el check de estado
-      y transfiere directamente confiando en el dial plan del Yeastar del cliente.
-
-    Body: room_name, empresa_id, call_id, extension, [survey_id], [motivo], [outbound_prefix].
-    """
-    if not supabase:
-        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
-
-    room_name = payload.room_name.strip()
-    if not room_name:
-        raise HTTPException(status_code=400, detail="room_name es obligatorio")
-
-    if not payload.empresa_id:
-        raise HTTPException(status_code=400, detail="empresa_id es obligatorio")
-
-    call_id = (payload.call_id or "").strip()
-    survey_id = payload.survey_id or _extract_encuesta_id_from_room(room_name)
-    datos_extra: dict = {}
-    if survey_id:
-        enc_res = await sb_query(
-            lambda sid=survey_id: supabase.table("encuestas")
-            .select("datos_extra")
-            .eq("id", sid)
-            .limit(1)
-            .execute()
-        )
-        datos_extra = _parse_datos_extra(
-            enc_res.data[0].get("datos_extra") if enc_res.data else {}
-        )
-        call_id = str(
-            datos_extra.get("yeastar_callid")
-            or datos_extra.get("yeastar_call_id")
-            or call_id
-        ).strip()
-
-    channel_id = str(datos_extra.get("yeastar_channel_id") or "").strip()
-    if not call_id:
-        raise HTTPException(status_code=400, detail="call_id es obligatorio")
-    if call_id == room_name:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "La llamada no tiene call_id de Yeastar. La llamada debe haber pasado "
-                "por Yeastar y haberse recibido el webhook 30011 para poder transferir."
-            ),
-        )
-    if not channel_id:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "La llamada no tiene channel_id de Yeastar. Comprueba que el webhook "
-                "30011 Call State Changed está activo antes de intentar transferir."
-            ),
-        )
-
-    target = (payload.extension or "1000").strip()
-    empresa_id = int(payload.empresa_id)
-    outbound_prefix = payload.outbound_prefix  # puede ser None
-
-    # ── Clasificar destino ─────────────────────────────────────────────────
-    is_internal = await _is_internal_extension(empresa_id, target)
-    transfer_type = "internal" if is_internal else "external"
-
-    if not is_internal:
-        # Validar número externo
-        normalized = _normalize_external_number(target)
-        if normalized is None:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Número externo '{target}' inválido. "
-                    "Usa formato nacional (ej. '612345678') o E.164 (ej. '+34612345678'). "
-                    "Mínimo 6 dígitos."
-                ),
-            )
-        target = normalized
-
-    logger.info(
-        "[transfer] empresa=%s room=%s destino='%s' tipo=%s",
-        empresa_id, room_name, target, transfer_type,
-    )
-
-    config = await _load_yeastar_tenant_config(empresa_id)
-
-    # Prefijo de ruta saliente para números externos
-    effective_prefix = outbound_prefix if outbound_prefix is not None else ""
-    if not is_internal and not effective_prefix:
-        effective_prefix = str(config.get("outbound_prefix") or "").strip()
-
-    ext_status: str = "N/A"
-    try:
-        async with _yeastar_client_from_config(config) as yeastar_client:
-            if is_internal:
-                ext_status = await yeastar_client.get_extension_status(target)
-                if str(ext_status).strip().lower() not in {"idle", "available"}:
-                    logger.info(
-                        "[transfer] Extensión interna %s no disponible (status=%s) empresa=%s room=%s",
-                        target, ext_status, empresa_id, room_name,
-                    )
-                    return JSONResponse(
-                        status_code=409,
-                        content={
-                            "message": f"Extensión ocupada ({ext_status})",
-                            "status": ext_status,
-                            "transfer_type": "internal",
-                        },
-                    )
-            await yeastar_client.transfer_call(
-                channel_id,
-                target,
-                outbound_prefix=effective_prefix,
-            )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(
-            "[transfer] Error Yeastar empresa=%s call_id=%s destino=%s (%s): %s",
-            empresa_id, call_id, target, transfer_type, exc,
-        )
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    if survey_id:
-        motivo_text = (payload.motivo or "Transferencia a agente humano").strip()
-        dest_label = f"ext {target}" if is_internal else f"número externo {target}"
-        try:
-            merged_extra = {
-                **datos_extra,
-                "transfer_room": room_name,
-                "transfer_extension": target,
-                "transfer_type": transfer_type,
-                "yeastar_callid": call_id,
-            }
-            await sb_query(
-                lambda sid=survey_id, extra=merged_extra, m=motivo_text, dl=dest_label: supabase.table("encuestas")
-                .update({
-                    "status": "transferred",
-                    "comentarios": f"Transferido a {dl}: {m}",
-                    "datos_extra": extra,
-                })
-                .eq("id", sid)
-                .execute()
-            )
-        except Exception as db_err:
-            logger.warning("[transfer] No se pudo actualizar encuesta %s: %s", survey_id, db_err)
-
-    logger.info(
-        "✅ [transfer] empresa=%s call_id=%s → %s (%s) room=%s",
-        empresa_id, call_id, target, transfer_type, room_name,
-    )
-    return {
-        "status": "ok",
-        "message": "Transferencia iniciada en la centralita",
-        "empresa_id": empresa_id,
-        "room_name": room_name,
-        "call_id": call_id,
-        "target_extension": target,
-        "transfer_type": transfer_type,
-        "extension_status": ext_status if is_internal else "skipped_external",
-    }
-
-
-@router.get("/api/calls/{encuesta_id}/briefing")
-async def get_call_transfer_briefing(
-    encuesta_id: int,
-    current_user: CurrentUser = Depends(get_current_user),
-):
-    """Devuelve el transfer_briefing asociado a una encuesta."""
-    if not supabase:
-        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
-
-    res = await sb_query(
-        lambda sid=encuesta_id: supabase.table("encuestas")
-        .select("id, empresa_id, transfer_briefing, datos_extra")
-        .eq("id", sid)
-        .limit(1)
-        .execute()
-    )
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Encuesta no encontrada")
-
-    row = res.data[0]
-    empresa_id = int(row.get("empresa_id") or 0)
-    if not has_global_access(current_user) and int(current_user.empresa_id or 0) != empresa_id:
-        raise HTTPException(status_code=403, detail="Acceso denegado")
-
-    datos_extra = _parse_datos_extra(row.get("datos_extra") or {})
-    briefing = row.get("transfer_briefing") or datos_extra.get("transfer_briefing") or ""
-    return {"encuesta_id": encuesta_id, "transfer_briefing": briefing}
-
-
-@router.post("/api/telephony/transfer")
-async def transfer_call_to_human_legacy(payload: TelephonyTransferRequest):
-    """
-    Alias legacy de transferencia; prefiere call_id de Yeastar si está en BD.
-    Acepta extensiones internas y números de teléfono externos.
-    """
-    return await _execute_yeastar_transfer(
-        room_name=payload.room_name.strip(),
-        survey_id=payload.survey_id,
-        motivo=payload.motivo,
-        call_id=None,
-        target_extension=payload.target_extension,
-        yeastar_call_id=payload.yeastar_call_id,
-        outbound_prefix=payload.outbound_prefix,
-    )
-
 # Hardening: IP Whitelist for Yeastar Webhooks (example placeholder)
 YEASTAR_IP_WHITELIST = os.getenv("YEASTAR_IP_WHITELIST", "").split(",")
 
@@ -1697,9 +1209,6 @@ _STATUS_MAP = {
 # Estados que deben disparar la propagación a campaign_leads
 _PROPAGABLE_STATUSES = {"completed", "rejected_opt_out", "incomplete", "failed", "unreached"}
 
-# Estados terminales que no deben ser sobrescritos por el webhook de LiveKit
-_TERMINAL_STATUSES = {"completed", "failed", "unreached", "incomplete", "rejected_opt_out"}
-
 
 async def _resolve_or_create_inbound_encuesta_id(datos: EncuestaData) -> int:
     """Crea fila en encuestas para llamadas entrantes cuando aún no hay id numérico."""
@@ -1851,7 +1360,7 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
     # --- Propagar estado a campaign_leads ---
     if normalized_status in _PROPAGABLE_STATUSES:
         background_tasks.add_task(
-            _propagate_to_lead, datos.id_encuesta, normalized_status, curr_data
+            propagate_to_lead, datos.id_encuesta, normalized_status, curr_data
         )
 
     # --- Notificar a n8n si el estado es terminal relevante ---
@@ -1876,96 +1385,6 @@ async def guardar_encuesta(datos: EncuestaData, background_tasks: BackgroundTask
         )
 
     return {"status": "ok", "updated": update_data}
-
-
-async def _propagate_to_lead(encuesta_id: int, final_status: str, enc_curr_data: dict):
-    """
-    Actualiza el campaign_lead asociado a esta encuesta.
-    Calcula reintentos según la configuración de la campaña.
-    """
-    if encuesta_id <= 0:
-        logger.info("⏭️ Skip propagate lead: encuesta_id inválido (%s)", encuesta_id)
-        return
-
-    extra = enc_curr_data.get("datos_extra") or {}
-    if isinstance(extra, dict) and str(extra.get("call_direction") or "").lower() == "inbound":
-        logger.info("⏭️ Skip propagate lead: llamada inbound encuesta %s", encuesta_id)
-        return
-
-    try:
-        enc_row = await sb_query(
-            lambda eid=encuesta_id: supabase.table("encuestas")
-            .select("campaign_id")
-            .eq("id", eid)
-            .limit(1)
-            .execute()
-        )
-        if not enc_row.data or not enc_row.data[0].get("campaign_id"):
-            logger.info("⏭️ Skip propagate lead: encuesta %s sin campaña", encuesta_id)
-            return
-    except Exception as e:
-        logger.warning("No se pudo verificar campaña de encuesta %s: %s", encuesta_id, e)
-        return
-
-    lead_update: dict = {"status": final_status}
-
-    if final_status == "rejected_opt_out":
-        lead_update["no_reintentar"] = True
-
-    elif final_status in ("incomplete", "failed", "unreached"):
-        retry_seconds = 3600
-        max_retries = 3
-        current_retries = 0
-        try:
-            lead_res = await sb_query(
-                lambda: supabase.table("campaign_leads").select("campaign_id, retries_attempted").eq("call_id", encuesta_id).limit(1).execute()
-            )
-            if lead_res.data:
-                current_retries = lead_res.data[0].get("retries_attempted", 0) or 0
-                camp_id = lead_res.data[0]["campaign_id"]
-                camp_res = await sb_query(
-                    lambda: supabase.table("campaigns").select("retry_interval, retries_count").eq("id", camp_id).limit(1).execute()
-                )
-                if camp_res.data:
-                    ri = camp_res.data[0].get("retry_interval")
-                    max_retries = camp_res.data[0].get("retries_count", 3) or 3
-                    if ri and ri > 0:
-                        retry_seconds = ri
-        except Exception as e:
-            logger.error(f"Error leyendo config de reintentos para encuesta {encuesta_id}: {e}")
-
-        new_retries = current_retries + 1
-        lead_update["retries_attempted"] = new_retries
-
-        if new_retries < max_retries:
-            lead_update["status"] = "pending"
-            next_retry = (datetime.utcnow() + timedelta(seconds=retry_seconds)).isoformat()
-            lead_update["next_retry_at"] = next_retry
-            logger.info(f"🔄 Reintento {new_retries}/{max_retries} programado para encuesta {encuesta_id} → {next_retry}")
-        else:
-            logger.info(f"🚫 Máx. reintentos alcanzado ({new_retries}/{max_retries}) para encuesta {encuesta_id}")
-
-    try:
-        result = await sb_query(
-            lambda: supabase.table("campaign_leads").update(lead_update).eq("call_id", encuesta_id).execute()
-        )
-        rows = len(result.data) if result.data else 0
-        logger.info(f"📊 Lead actualizado (call_id={encuesta_id}): {rows} filas | {lead_update}")
-
-        # Fallback: buscar por campaign_id + teléfono si no se encontró por call_id
-        if rows == 0 and enc_curr_data.get("telefono"):
-            logger.warning(f"⚠️ Fallback por teléfono para encuesta {encuesta_id}")
-            enc_full = await sb_query(
-                lambda: supabase.table("encuestas").select("campaign_id, telefono").eq("id", encuesta_id).execute()
-            )
-            if enc_full.data and enc_full.data[0].get("campaign_id"):
-                camp_id = enc_full.data[0]["campaign_id"]
-                tel = enc_full.data[0].get("telefono", "")
-                await sb_query(
-                    lambda: supabase.table("campaign_leads").update({**lead_update, "call_id": encuesta_id}).eq("campaign_id", camp_id).eq("phone_number", tel).execute()
-                )
-    except Exception as e:
-        logger.error(f"❌ Error propagando lead para encuesta {encuesta_id}: {e}")
 
 
 async def _notify_n8n_post_call(encuesta_id: int, status: str, result_data: dict, empresa_id: int, telefono: str):
@@ -2441,7 +1860,7 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
         asyncio.create_task(clear_lock(room_name, room_lock_token))
 
         # Grabación de audio (solo si ENABLE_RECORDING=true y credenciales configuradas)
-        asyncio.create_task(_safe_start_recording(room_name, encuesta_id))
+        asyncio.create_task(safe_start_recording(room_name, encuesta_id))
 
         return {"status": "ok", "roomName": room_name, "callId": encuesta_id}
 
@@ -2463,213 +1882,6 @@ async def make_outbound_call(request: dict, _auth: str = Depends(require_outboun
                 pass
         logger.error(f"❌ Error fatal en outbound call: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
-
-
-# ──────────────────────────────────────────────
-# Webhook de LiveKit — sustituye al polling
-# ──────────────────────────────────────────────
-
-@limiter.exempt
-@router.post("/api/livekit/webhook")
-async def livekit_webhook(request: Request):
-    """
-    Recibe eventos de LiveKit y actualiza los estados de leads y encuestas.
-
-    Eventos relevantes:
-      - room_finished: la sala se cerró (todos los participantes se fueron).
-      - participant_left: un participante salió (para detectar cliente que cuelga).
-
-    Seguridad: Valida la firma HMAC del webhook usando WebhookReceiver antes
-    de procesar cualquier dato. Requests sin firma válida reciben un 401.
-    """
-    body_bytes = await request.body()
-    auth_token = request.headers.get("Authorization", "")
-
-    # Validar firma criptográfica antes de procesar el payload
-    try:
-        receiver = WebhookReceiver(_LIVEKIT_API_KEY, _LIVEKIT_API_SECRET)
-        webhook_event = receiver.receive(body_bytes.decode("utf-8"), auth_token)
-    except Exception as e:
-        logger.warning(f"🛡️ [LK Webhook] Firma inválida o payload malformado: {e}")
-        return JSONResponse(status_code=401, content={"error": "Invalid signature"})
-
-    # Extraer campos del proto validado
-    event = webhook_event.event
-    room_name = webhook_event.room.name if webhook_event.HasField("room") else ""
-    room_metadata_raw = webhook_event.room.metadata if webhook_event.HasField("room") else ""
-
-    logger.info(f"🔔 [LK Webhook] Evento: {event} | Sala: {room_name}")
-
-    if not room_name:
-        return {"status": "ignored", "reason": "No room name"}
-
-    # Parsear metadata de sala (JSON string embebido en el proto)
-    room_metadata = {}
-    if isinstance(room_metadata_raw, str) and room_metadata_raw.strip():
-        try:
-            import json
-            room_metadata = json.loads(room_metadata_raw)
-        except Exception:
-            logger.warning(f"[LK Webhook] metadata no parseable en sala {room_name}: {room_metadata_raw}")
-
-    encuesta_id = _extract_encuesta_id_from_room(room_name)
-    if not encuesta_id:
-        try:
-            encuesta_id = int(room_metadata.get("survey_id") or 0)
-        except Exception:
-            encuesta_id = 0
-
-    if not encuesta_id:
-        logger.info(f"[LK Webhook] No se pudo extraer encuesta_id de sala {room_name} ni metadata")
-        return {"status": "ignored", "reason": "No encuesta_id in room name/metadata"}
-
-    if event == "room_finished":
-        await _handle_room_finished(encuesta_id, room_name, room_metadata)
-
-    elif event == "participant_left":
-        participant_identity = webhook_event.participant.identity if webhook_event.HasField("participant") else ""
-        # Solo nos interesa cuando el cliente (no el agente) se va
-        if not participant_identity.startswith("agent-"):
-            await _handle_participant_left(encuesta_id, room_name, participant_identity, room_metadata)
-
-    return {"status": "ok", "event": event}
-
-
-def _extract_encuesta_id_from_room(room_name: str) -> int | None:
-    """
-    Extrae el encuesta_id del nombre de sala. Soporta dos formatos:
-      - Nuevo:   llamada_ausarta_empresa_{id}_campana_{id}_contacto_{id}_encuesta_{encuesta_id}
-      - Intermedio: empresa_{id}_camp_{id}_call_{encuesta_id}
-      - Legacy:  {prefix}_encuesta_{encuesta_id}  o  encuesta_{encuesta_id}
-    Retorna None si no se puede extraer.
-    """
-    try:
-        # Formato nuevo estricto: ..._encuesta_{id}
-        if "encuesta_" in room_name:
-            after_enc = room_name.split("encuesta_")[-1]
-            candidate = after_enc.split("_")[0]
-            if candidate.isdigit():
-                return int(candidate)
-
-        # Formato intermedio: empresa_N_camp_N_call_N
-        if "call_" in room_name:
-            after_call = room_name.split("call_")[-1]
-            candidate = after_call.split("_")[0]
-            if candidate.isdigit():
-                return int(candidate)
-
-        # Fallback: el último segmento numérico
-        parts = room_name.split("_")
-        for segment in reversed(parts):
-            if segment.isdigit():
-                return int(segment)
-
-        return None
-    except Exception:
-        return None
-
-
-
-async def _safe_start_recording(room_name: str, encuesta_id: int) -> None:
-    """Inicia la grabación de audio sin bloquear el flujo principal."""
-    try:
-        from services.recording_service import start_recording
-        await start_recording(room_name, encuesta_id)
-    except Exception as exc:
-        logger.debug(f"[Recording] start_recording ignorado: {exc}")
-
-
-async def _safe_stop_recording(encuesta_id: int) -> None:
-    """Para la grabación y guarda la URL en la encuesta si existe."""
-    try:
-        from services.recording_service import stop_recording
-        recording_url = await stop_recording(encuesta_id)
-        if recording_url and supabase:
-            await asyncio.to_thread(
-                supabase.table("encuestas")
-                    .update({"recording_url": recording_url})
-                    .eq("id", encuesta_id)
-                    .execute
-            )
-            logger.info(f"🎵 [Recording] URL guardada para encuesta {encuesta_id}: {recording_url}")
-    except Exception as exc:
-        logger.debug(f"[Recording] stop_recording ignorado: {exc}")
-
-
-async def _handle_room_finished(encuesta_id: int, room_name: str, room_metadata: dict | None = None):
-    """
-    La sala se cerró. Si el estado en BD todavía no es terminal,
-    significa que la llamada no se completó normalmente → marcamos 'failed'.
-
-    Si la encuesta tiene transcripción, encola el análisis con LLM vía ARQ
-    (process_transcription_ai) en lugar de llamar a n8n.
-    """
-    if not supabase:
-        return
-
-    # Parar grabación (si estaba activa) antes de cualquier otra cosa
-    asyncio.create_task(_safe_stop_recording(encuesta_id))
-
-    try:
-        res = await asyncio.to_thread(
-            supabase.table("encuestas")
-                .select("status, empresa_id, telefono, transcription")
-                .eq("id", encuesta_id)
-                .limit(1)
-                .execute
-        )
-        if not res.data:
-            return
-
-        enc = res.data[0]
-        current_status = enc.get("status") or ""
-
-        if current_status not in _TERMINAL_STATUSES:
-            # La sala cerró pero el agente no guardó un status final → fallida reintentable
-            logger.warning(f"📵 [LK Webhook] Sala {room_name} cerrada sin status terminal. Forzando 'failed'. metadata={room_metadata or {}}")
-            await asyncio.to_thread(
-                supabase.table("encuestas").update({"status": "failed"}).eq("id", encuesta_id).execute
-            )
-            # Propagar a campaign_leads
-            await _propagate_to_lead(encuesta_id, "failed", enc)
-        else:
-            logger.info(f"[LK Webhook] Sala {room_name} cerrada con status terminal: {current_status}. Sin acción.")
-
-        # Encolar análisis de transcripción vía ARQ (reemplaza llamada HTTP a n8n)
-        transcription = enc.get("transcription") or ""
-        empresa_id = enc.get("empresa_id")
-        if transcription.strip() and empresa_id:
-            try:
-                from services.queue_service import get_arq_pool
-                arq_pool = await get_arq_pool()
-                job = await arq_pool.enqueue_job(
-                    "process_transcription_ai",
-                    encuesta_id,
-                    transcription,
-                    empresa_id,
-                )
-                logger.info(
-                    f"📬 [LK Webhook] Tarea process_transcription_ai encolada para "
-                    f"encuesta {encuesta_id} (job_id={getattr(job, 'job_id', 'n/a')})."
-                )
-            except Exception as eq:
-                # No bloquear el flujo principal si la cola falla
-                logger.warning(f"⚠️ [LK Webhook] No se pudo encolar transcripción para encuesta {encuesta_id}: {eq}")
-        else:
-            logger.info(f"[LK Webhook] Encuesta {encuesta_id} sin transcripción o empresa_id. Skipping análisis AI.")
-
-    except Exception as e:
-        logger.error(f"❌ [LK Webhook] Error en room_finished para encuesta {encuesta_id}: {e}")
-
-
-async def _handle_participant_left(encuesta_id: int, room_name: str, identity: str, room_metadata: dict | None = None):
-    """
-    Un participante (cliente) salió de la sala.
-    No hacemos nada terminante aquí: esperamos el evento room_finished.
-    Solo registramos el evento para auditoría.
-    """
-    logger.info(f"👤 [LK Webhook] Participante '{identity}' salió de sala {room_name} (encuesta {encuesta_id}, metadata={room_metadata or {}}). Esperando room_finished.")
-
 
 
 # ─────────────────────────────────────────────────────────────────────────────
