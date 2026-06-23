@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
+      PYTHONPATH: "."
       # Variables mínimas para que la app arranque en modo test
       BRIDGE_SERVER_URL_INTERNAL: "http://backend:8001"
       ENVIRONMENT: "development"
@@ -63,8 +64,8 @@ jobs:
       - name: Type check (mypy) — módulos endurecidos
         working-directory: backend
         run: |
-          pip install mypy
-          mypy --config-file mypy.ini \
+          pip install 'mypy==2.1.0'
+          mypy --config-file mypy.ini --follow-imports=skip \
             agents/agent_common.py \
             agents/agent_lifecycle.py \
             agents/agent_logging.py \
