@@ -5,41 +5,20 @@ import {
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/apiFetch';
 import { useAuth } from '../contexts/AuthContext';
-import type { Empresa } from '../types';
+import { useAdminEmpresasOptions } from '../api/apiKeys';
+import {
+  useTelephonyPlatformInfo,
+  useYeastarCapabilities,
+  useYeastarConfig,
+  useYeastarHealth,
+  useInvalidateTelephony,
+  type YeastarConfig,
+} from '../api/telephony';
 import './telephony.css';
 
-interface YeastarConfig {
-  empresa_id?: number;
-  yeastar_pbx_url: string;
-  yeastar_api_mode: 'pseries' | 'cloud_pbx';
-  yeastar_client_id: string;
-  yeastar_client_secret?: string;
-  enabled_capabilities?: string[];
-  ddi?: string;
-}
+interface YeastarConfigForm extends YeastarConfig {}
 
-interface YeastarCapability {
-  id: string;
-  group: string;
-  label: string;
-  description: string;
-  permission: string;
-  endpoints: string[];
-  status: 'implemented' | 'available' | 'planned' | string;
-}
-
-interface YeastarHealthStatus {
-  empresa_id?: number;
-  configured?: boolean;
-  health_status?: 'ok' | 'down' | 'unknown' | string;
-  last_health_check_at?: string | null;
-  consecutive_failures?: number;
-  failure_threshold?: number;
-  campaigns_paused_count?: number;
-  campaigns_paused_by_health?: Array<{ id: number; name?: string; paused_reason?: string }>;
-}
-
-const EMPTY_FORM: YeastarConfig = {
+const EMPTY_FORM: YeastarConfigForm = {
   yeastar_pbx_url: '',
   yeastar_api_mode: 'pseries',
   yeastar_client_id: '',
@@ -89,24 +68,19 @@ const formatApiError = (detail: unknown, fallback: string) => {
 const TelephonyView: React.FC = () => {
   const { t } = useTranslation();
   const { profile, isPlatformOwner } = useAuth();
+  const { invalidateConfig, invalidateHealth } = useInvalidateTelephony();
 
-  const [form, setForm] = useState<YeastarConfig>(EMPTY_FORM);
+  const [form, setForm] = useState<YeastarConfigForm>(EMPTY_FORM);
   const [savedConfig, setSavedConfig] = useState<YeastarConfig | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-  const [loadingConfig, setLoadingConfig] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [autoConfigResult, setAutoConfigResult] = useState<{ sip_trunk?: unknown; inbound_route?: unknown; event_push?: unknown; errors?: string[] } | null>(null);
-  const [capabilities, setCapabilities] = useState<YeastarCapability[]>([]);
-  const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
-  const [healthStatus, setHealthStatus] = useState<YeastarHealthStatus | null>(null);
-  const [healthLoading, setHealthLoading] = useState(false);
   const [healthRefreshing, setHealthRefreshing] = useState(false);
 
-  const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [selectedEmpresaId, setSelectedEmpresaId] = useState<number | null>(null);
   const [ausartaPublicIp, setAusartaPublicIp] = useState(
     () => (import.meta.env.VITE_AUSARTA_PUBLIC_IP as string | undefined)?.trim() || '',
@@ -114,6 +88,20 @@ const TelephonyView: React.FC = () => {
   const [yeastarWebhookUrl, setYeastarWebhookUrl] = useState('');
   const [webhookCopied, setWebhookCopied] = useState(false);
   const [ipCopied, setIpCopied] = useState(false);
+
+  const { data: platformInfo } = useTelephonyPlatformInfo();
+  const { data: capabilities = [], isLoading: capabilitiesLoading } = useYeastarCapabilities();
+  const { data: empresasOptions = [] } = useAdminEmpresasOptions(isPlatformOwner);
+  const {
+    data: configData,
+    isLoading: loadingConfig,
+    isFetching: fetchingConfig,
+  } = useYeastarConfig(selectedEmpresaId, Boolean(selectedEmpresaId));
+  const {
+    data: healthStatus = null,
+    isLoading: healthLoading,
+    isFetching: healthFetching,
+  } = useYeastarHealth(selectedEmpresaId, Boolean(selectedEmpresaId));
 
   const isCloudMode = form.yeastar_api_mode === 'cloud_pbx';
   const currentModeLabel = isCloudMode ? 'Cloud PBX' : 'P-Series';
@@ -123,41 +111,62 @@ const TelephonyView: React.FC = () => {
 
   const selectedEmpresaName = useMemo(() => {
     if (!selectedEmpresaId) return null;
-    return empresas.find(e => Number(e.id) === selectedEmpresaId)?.nombre
+    return empresasOptions.find(e => Number(e.id) === selectedEmpresaId)?.nombre
       ?? (profile?.empresa_id === selectedEmpresaId ? profile?.empresas?.nombre : null);
-  }, [selectedEmpresaId, empresas, profile]);
+  }, [selectedEmpresaId, empresasOptions, profile]);
 
   useEffect(() => {
-    apiFetch('/api/telephony/platform-info')
-      .then(async (res) => {
-        if (!res.ok) return;
-        const data = await res.json();
-        const ip = String(data?.ausarta_public_ip || '').trim();
-        if (ip) setAusartaPublicIp(ip);
-        const webhook = String(data?.yeastar_webhook_url || '').trim();
-        if (webhook) setYeastarWebhookUrl(webhook);
-        else if (typeof window !== 'undefined') {
-          setYeastarWebhookUrl(`${window.location.origin}/webhooks/yeastar`);
-        }
-      })
-      .catch(() => {
-        if (typeof window !== 'undefined') {
-          setYeastarWebhookUrl(`${window.location.origin}/webhooks/yeastar`);
-        }
+    const ip = String(platformInfo?.ausarta_public_ip || '').trim();
+    if (ip) setAusartaPublicIp(ip);
+    const webhook = String(platformInfo?.yeastar_webhook_url || '').trim();
+    if (webhook) {
+      setYeastarWebhookUrl(webhook);
+    } else if (typeof window !== 'undefined') {
+      setYeastarWebhookUrl(`${window.location.origin}/webhooks/yeastar`);
+    }
+  }, [platformInfo]);
+
+  useEffect(() => {
+    if (isPlatformOwner) {
+      if (!empresasOptions.length) return;
+      setSelectedEmpresaId(prev => {
+        if (prev != null) return prev;
+        const ausarta = empresasOptions.find(emp => emp.nombre?.toLowerCase() === 'ausarta');
+        return ausarta?.id ?? empresasOptions[0]?.id ?? null;
       });
-  }, []);
+      return;
+    }
+    if (profile?.empresa_id) {
+      setSelectedEmpresaId(profile.empresa_id);
+    }
+  }, [profile, isPlatformOwner, empresasOptions]);
 
   useEffect(() => {
-    setCapabilitiesLoading(true);
-    apiFetch('/api/telephony/yeastar/capabilities')
-      .then(async (res) => {
-        if (!res.ok) return;
-        const data = await res.json();
-        setCapabilities(data.capabilities || []);
-      })
-      .catch(() => setCapabilities([]))
-      .finally(() => setCapabilitiesLoading(false));
-  }, []);
+    if (!selectedEmpresaId) {
+      setForm(EMPTY_FORM);
+      setSavedConfig(null);
+      setTestResult(null);
+      setSaveSuccess(false);
+      return;
+    }
+    if (fetchingConfig) return;
+    setTestResult(null);
+    setSaveSuccess(false);
+    if (!configData) {
+      setSavedConfig(null);
+      setForm(EMPTY_FORM);
+      return;
+    }
+    setSavedConfig(configData);
+    setForm({
+      yeastar_pbx_url: configData.yeastar_pbx_url || '',
+      yeastar_api_mode: configData.yeastar_api_mode || 'pseries',
+      yeastar_client_id: configData.yeastar_client_id || '',
+      yeastar_client_secret: '',
+      enabled_capabilities: configData.enabled_capabilities || [],
+      ddi: configData.ddi || '',
+    });
+  }, [selectedEmpresaId, configData, fetchingConfig]);
 
   const copyText = async (text: string, setter: (v: boolean) => void) => {
     if (!text) return;
@@ -168,45 +177,6 @@ const TelephonyView: React.FC = () => {
     } catch { /* ignore */ }
   };
 
-  useEffect(() => {
-    if (isPlatformOwner) {
-      loadEmpresas();
-      return;
-    }
-    if (profile?.empresa_id) {
-      setSelectedEmpresaId(profile.empresa_id);
-      return;
-    }
-    setLoadingConfig(false);
-  }, [profile, isPlatformOwner]);
-
-  useEffect(() => {
-    if (selectedEmpresaId) {
-      loadConfig(selectedEmpresaId);
-      loadHealth(selectedEmpresaId);
-    } else {
-      setForm(EMPTY_FORM);
-      setSavedConfig(null);
-      setHealthStatus(null);
-    }
-  }, [selectedEmpresaId]);
-
-  const loadHealth = async (empId: number) => {
-    setHealthLoading(true);
-    try {
-      const res = await apiFetch(`/api/empresas/${empId}/yeastar/health`);
-      if (res.ok) {
-        setHealthStatus(await res.json());
-      } else {
-        setHealthStatus(null);
-      }
-    } catch {
-      setHealthStatus(null);
-    } finally {
-      setHealthLoading(false);
-    }
-  };
-
   const forceHealthCheck = async () => {
     if (!selectedEmpresaId) return;
     setHealthRefreshing(true);
@@ -215,59 +185,12 @@ const TelephonyView: React.FC = () => {
         method: 'POST',
       });
       if (res.ok) {
-        await loadHealth(selectedEmpresaId);
+        await invalidateHealth(selectedEmpresaId);
       }
     } catch {
       /* ignore */
     } finally {
       setHealthRefreshing(false);
-    }
-  };
-
-  const loadEmpresas = async () => {
-    try {
-      const res = await apiFetch('/api/admin/empresas');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: Empresa[] = await res.json();
-      setEmpresas(data || []);
-      if (data?.length) {
-        const ausarta = data.find(emp => emp.nombre?.toLowerCase() === 'ausarta');
-        setSelectedEmpresaId(prev => prev ?? (ausarta?.id ?? data[0].id ?? null));
-      }
-    } catch (err) {
-      console.error('[Telephony] Error loading empresas:', err);
-      setEmpresas([]);
-      setLoadingConfig(false);
-    }
-  };
-
-  const loadConfig = async (empId: number) => {
-    setLoadingConfig(true);
-    setTestResult(null);
-    setSaveSuccess(false);
-    try {
-      const res = await apiFetch(`/api/telephony/yeastar?empresa_id=${empId}`);
-      if (res.status === 204 || res.status === 404) {
-        setSavedConfig(null);
-        setForm(EMPTY_FORM);
-        return;
-      }
-      if (res.ok) {
-        const data: YeastarConfig = await res.json();
-        setSavedConfig(data);
-        setForm({
-          yeastar_pbx_url: data.yeastar_pbx_url || '',
-          yeastar_api_mode: data.yeastar_api_mode || 'pseries',
-          yeastar_client_id: data.yeastar_client_id || '',
-          yeastar_client_secret: '',
-          enabled_capabilities: data.enabled_capabilities || [],
-          ddi: data.ddi || '',
-        });
-      }
-    } catch (err) {
-      console.error('[Yeastar] Error loading config:', err);
-    } finally {
-      setLoadingConfig(false);
     }
   };
 
@@ -353,6 +276,9 @@ const TelephonyView: React.FC = () => {
         ddi: saved.ddi || prev.ddi || '',
       }));
       setSaveSuccess(true);
+      if (selectedEmpresaId) {
+        await invalidateConfig(selectedEmpresaId);
+      }
       setTimeout(() => { setSaveSuccess(false); setAutoConfigResult(null); }, 8000);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : t('Save error', 'Error al guardar la configuracion'));
@@ -361,7 +287,7 @@ const TelephonyView: React.FC = () => {
     }
   };
 
-  const statusLabel = loadingConfig
+  const statusLabel = (loadingConfig || fetchingConfig)
     ? 'SINCRONIZANDO'
     : isConfigured
       ? 'ENLACE ACTIVO'
@@ -410,7 +336,7 @@ const TelephonyView: React.FC = () => {
               className="tel-field min-w-[220px] px-3 py-2.5 font-medium"
             >
               <option value="">{t('Select a company', 'Selecciona una empresa')}</option>
-              {empresas.map(emp => (
+              {empresasOptions.map(emp => (
                 <option key={emp.id} value={emp.id}>{emp.nombre}</option>
               ))}
             </select>
@@ -421,7 +347,7 @@ const TelephonyView: React.FC = () => {
         <header className="flex flex-col gap-4 border-b border-gray-200 pb-6 dark:border-white/10 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <div className="mb-2 flex items-center gap-2">
-              {isConfigured && !loadingConfig ? (
+              {isConfigured && !(loadingConfig || fetchingConfig) ? (
                 <span className="relative flex h-2.5 w-2.5">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                   <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
@@ -463,7 +389,7 @@ const TelephonyView: React.FC = () => {
                       ? 'text-red-700 dark:text-red-400'
                       : 'text-gray-500'
                 }>
-                  {healthLoading ? t('Checking...', 'Comprobando...') : healthLabel}
+                  {healthLoading || healthFetching || healthRefreshing ? t('Checking...', 'Comprobando...') : healthLabel}
                 </span>
               </span>
             )}
@@ -539,7 +465,7 @@ const TelephonyView: React.FC = () => {
                   </h2>
                 </div>
 
-                {loadingConfig ? (
+                {(loadingConfig || fetchingConfig) ? (
                   <div className="flex items-center justify-center gap-3 py-16 text-gray-400">
                     <Loader2 size={22} className="animate-spin" />
                     <span className="text-sm">{t('Loading configuration...', 'Cargando configuración...')}</span>

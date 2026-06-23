@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
     Users, Plus, Shield, ShieldCheck, User, Trash2, Loader2,
     ToggleLeft, ToggleRight, X, Settings, ChevronDown, ChevronUp,
@@ -6,12 +6,20 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { apiFetch } from '../lib/apiFetch';
 import { passwordResetRedirectUrl, requestPasswordReset } from '../lib/passwordReset';
 import { useAuth } from '../contexts/AuthContext';
-import type { UserProfile, UserPermission, UserRole, Empresa } from '../types';
+import type { UserProfile, UserRole } from '../types';
 import { ALL_MODULES } from '../types';
+import {
+    useAdminEmpresasForUsers,
+    useAdminUsersList,
+    useInvalidateAdminUsers,
+    userAdminKeys,
+    type AdminUser,
+} from '../api/users';
 
 const SkeletonRow = () => (
     <div className="flex items-center gap-4 p-4 border-b border-gray-100 animate-pulse">
@@ -29,12 +37,25 @@ const SkeletonRow = () => (
 const UserManagementView: React.FC = () => {
     const { profile: currentProfile, isRole, isPlatformOwner, canCreateAusartaAdmins } = useAuth();
     const { t } = useTranslation();
+    const queryClient = useQueryClient();
+    const invalidateUsers = useInvalidateAdminUsers();
 
-    const [users, setUsers] = useState<(UserProfile & { permissions: UserPermission[], empresas?: Empresa | null })[]>([]);
-    const [loading, setLoading] = useState(true);
+    const scopeEmpresaId = isPlatformOwner ? undefined : currentProfile?.empresa_id ?? undefined;
+    const usersEnabled = Boolean(currentProfile);
+
+    const { data: empresas = [], isLoading: empresasLoading } = useAdminEmpresasForUsers(
+        scopeEmpresaId,
+        usersEnabled,
+    );
+    const { data: users = [], isLoading: usersLoading } = useAdminUsersList(scopeEmpresaId, usersEnabled);
+    const loading = usersLoading || empresasLoading;
+
+    const updateUsersCache = (updater: (prev: AdminUser[]) => AdminUser[]) => {
+        queryClient.setQueryData(userAdminKeys.list(scopeEmpresaId), updater);
+    };
+
     const [showCreate, setShowCreate] = useState(false);
     const [expandedUser, setExpandedUser] = useState<string | null>(null);
-    const [empresas, setEmpresas] = useState<Empresa[]>([]);
 
     // Create user form
     const [newEmail, setNewEmail] = useState('');
@@ -45,72 +66,6 @@ const UserManagementView: React.FC = () => {
     const [showNewPassword, setShowNewPassword] = useState(false);
     const [creating, setCreating] = useState(false);
     const [inviteSuccess, setInviteSuccess] = useState(false);
-
-    useEffect(() => {
-        if (!currentProfile) return;
-        loadUsersAndEmpresas();
-    }, [currentProfile?.id, currentProfile?.empresa_id, isPlatformOwner]);
-
-    const loadUsersAndEmpresas = async () => {
-        setLoading(true);
-        // Safety: never stay in skeleton more than 10 seconds
-        const safetyTimer = setTimeout(() => setLoading(false), 10_000);
-
-        try {
-            // 1. Load empresas
-            const empRes = await apiFetch('/api/admin/empresas');
-            if (empRes.ok) {
-                const empData = await empRes.json();
-                if (Array.isArray(empData)) {
-                    let filteredEmp = empData;
-                    if (!isPlatformOwner && currentProfile?.empresa_id) {
-                        filteredEmp = empData.filter((e: any) => e.id === currentProfile.empresa_id);
-                    }
-                    setEmpresas(filteredEmp);
-                }
-            }
-
-            // 2. Load user profiles
-            const userRes = await apiFetch('/api/admin/users');
-            if (!userRes.ok) {
-                console.error('[Users] GET /api/admin/users returned', userRes.status);
-                return;
-            }
-            const usersData = await userRes.json();
-
-            if (Array.isArray(usersData)) {
-                let filteredUsers = usersData;
-                if (!isPlatformOwner && currentProfile?.empresa_id) {
-                    filteredUsers = usersData.filter((u: any) => u.empresa_id === currentProfile.empresa_id);
-                }
-
-                // Enrich each user with their permissions in parallel (batch)
-                const userIds = filteredUsers.map((u: any) => u.id);
-                const { data: allPerms } = await supabase
-                    .from('user_permissions')
-                    .select('*')
-                    .in('user_id', userIds);
-
-                const permsMap: Record<string, UserPermission[]> = {};
-                for (const p of (allPerms || [])) {
-                    if (!permsMap[p.user_id]) permsMap[p.user_id] = [];
-                    permsMap[p.user_id].push(p as UserPermission);
-                }
-
-                const usersWithPerms = filteredUsers.map((u: any) => ({
-                    ...u,
-                    permissions: permsMap[u.id] || [],
-                }));
-
-                setUsers(usersWithPerms);
-            }
-        } catch (err) {
-            console.error('Error loading users:', err);
-        } finally {
-            clearTimeout(safetyTimer);
-            setLoading(false);
-        }
-    };
 
     const handleCreateUser = async () => {
         if (!newEmail || !newName) {
@@ -190,7 +145,7 @@ const UserManagementView: React.FC = () => {
             const newUserId = responseData.user_id || 'unknown';
             const invited: boolean = responseData.invited ?? true;
 
-            const newUser: UserProfile & { permissions: UserPermission[], empresas?: Empresa | null } = {
+            const newUser: AdminUser = {
                 id: newUserId,
                 email: newEmail,
                 full_name: newName,
@@ -204,7 +159,7 @@ const UserManagementView: React.FC = () => {
                 empresas: empresas.find(e => e.id === Number(finalEmpresaId)) || null
             };
 
-            setUsers(prev => [newUser, ...prev]);
+            updateUsersCache(prev => [newUser, ...prev]);
             setInviteSuccess(true);
 
             toast.success(invited
@@ -217,7 +172,7 @@ const UserManagementView: React.FC = () => {
                 setNewName('');
                 setNewPassword('');
                 setInviteSuccess(false);
-                loadUsersAndEmpresas();
+                invalidateUsers();
             }, 1000);
 
         } catch (err: any) {
@@ -268,7 +223,7 @@ const UserManagementView: React.FC = () => {
             }
 
             // Optimistic update
-            setUsers(prev => prev.map(u => {
+            updateUsersCache(prev => prev.map(u => {
                 if (u.id !== userId) return u;
                 const existingPerm = u.permissions.find(p => p.module === module);
                 if (existingPerm) {
@@ -294,7 +249,7 @@ const UserManagementView: React.FC = () => {
             }));
         } catch (err) {
             toast.error(t('Error changing permission', 'Error al cambiar permiso'));
-            loadUsersAndEmpresas();
+            invalidateUsers();
         }
     };
 
@@ -304,7 +259,7 @@ const UserManagementView: React.FC = () => {
                 .update({ is_active: !currentActive })
                 .eq('id', userId);
 
-            setUsers(prev => prev.map(u =>
+            updateUsersCache(prev => prev.map(u =>
                 u.id === userId ? { ...u, is_active: !currentActive } : u
             ));
         } catch (err) {
@@ -332,7 +287,7 @@ const UserManagementView: React.FC = () => {
                 const data = await res.json().catch(() => ({}));
                 throw new Error(data.message || data.error || `Error ${res.status}`);
             }
-            setUsers(prev => prev.filter(u => u.id !== userId));
+            updateUsersCache(prev => prev.filter(u => u.id !== userId));
             toast.success(t('User deleted', 'Usuario eliminado'));
         } catch (err: any) {
             console.error('[DeleteUser]', err);
@@ -359,13 +314,13 @@ const UserManagementView: React.FC = () => {
                 const data = await res.json().catch(() => ({}));
                 throw new Error(data.message || data.error || `Error ${res.status}`);
             }
-            setUsers(prev => prev.map(u => u.id === editingUser.id
+            updateUsersCache(prev => prev.map(u => u.id === editingUser.id
                 ? { ...u, full_name: editName, role: editRole, empresa_id: editEmpresaId || null }
                 : u
             ));
             toast.success(t('User updated', 'Usuario actualizado'));
             setEditingUser(null);
-            loadUsersAndEmpresas();
+            invalidateUsers();
         } catch (err: any) {
             toast.error('Error: ' + err.message);
         } finally {
