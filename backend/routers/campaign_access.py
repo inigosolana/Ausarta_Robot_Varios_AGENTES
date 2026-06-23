@@ -22,6 +22,17 @@ def raise_not_found_if_cross_tenant(user: CurrentUser, empresa_id: int | None) -
         raise HTTPException(status_code=404, detail="Not found")
 
 
+def load_campaign_or_404(campaign_id: int, user: CurrentUser) -> dict:
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Sin conexión con la base de datos")
+    res = supabase.table("campaigns").select("*").eq("id", campaign_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    campaign = res.data[0]
+    raise_not_found_if_cross_tenant(user, campaign.get("empresa_id"))
+    return campaign
+
+
 def load_external_db_allowed_queries(empresa_id: int | None) -> list[str]:
     """Lista blanca de queries CRM/ERP permitidos para consultar_cliente."""
     if not empresa_id or not supabase:

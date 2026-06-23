@@ -90,3 +90,60 @@ def validate_ab_campaign_payload(payload: dict[str, Any]) -> str | None:
     if not 0.0 <= ratio_f <= 1.0:
         return "ab_split_ratio debe estar entre 0 y 1"
     return None
+
+
+_COMPLETED_STATUSES = {"completed", "transferred"}
+
+
+def compute_campaign_ab_stats(campaign: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    stats: dict[str, dict[str, Any]] = {
+        "A": {
+            "calls": 0,
+            "completed": 0,
+            "completion_rate": 0.0,
+            "avg_score": None,
+            "agent_id": campaign.get("agent_id"),
+        },
+        "B": {
+            "calls": 0,
+            "completed": 0,
+            "completion_rate": 0.0,
+            "avg_score": None,
+            "agent_id": campaign.get("agent_id_b"),
+        },
+    }
+    score_sums: dict[str, float] = {"A": 0.0, "B": 0.0}
+    score_counts: dict[str, int] = {"A": 0, "B": 0}
+
+    for row in rows:
+        variant = (row.get("ab_variant") or "A").upper()
+        if variant not in stats:
+            variant = "A"
+        stats[variant]["calls"] += 1
+        status = (row.get("status") or "").lower()
+        if status in _COMPLETED_STATUSES:
+            stats[variant]["completed"] += 1
+
+        score = row.get("puntuacion_comercial")
+        if score is None and isinstance(row.get("agent_results"), dict):
+            scores = row["agent_results"].get("scores") or {}
+            score = scores.get("comercial")
+        if isinstance(score, (int, float)):
+            score_sums[variant] += float(score)
+            score_counts[variant] += 1
+
+    for variant, data in stats.items():
+        calls = data["calls"]
+        if calls:
+            data["completion_rate"] = round(data["completed"] / calls, 4)
+        if score_counts[variant]:
+            data["avg_score"] = round(score_sums[variant] / score_counts[variant], 2)
+
+    return {
+        "campaign_id": campaign.get("id"),
+        "ab_test_enabled": bool(campaign.get("ab_test_enabled")),
+        "ab_split_ratio": campaign.get("ab_split_ratio"),
+        "variants": stats,
+        "total_calls": len(rows),
+    }
+
